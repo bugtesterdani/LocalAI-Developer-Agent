@@ -135,6 +135,69 @@ public sealed partial record ProposalOutcome(
     [property: JsonPropertyName("isFinal")] bool IsFinal,
     [property: JsonPropertyName("result"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ToolResult? Result = null);
 
+[JsonConverter(typeof(JsonStringEnumConverter<FolderRight>))]
+public enum FolderRight
+{
+    List,
+    Read,
+    Create,
+    Modify,
+    Delete,
+    Execute,
+}
+
+/// <summary>Ausdrücklich freigegebener Hostordner mit konkreten Rechten. Keine Vererbung auf andere Ordner.</summary>
+public sealed partial record FolderGrant(
+    [property: JsonPropertyName("grantId")] string GrantId,
+    [property: JsonPropertyName("root")] string Root,
+    [property: JsonPropertyName("rights")] IReadOnlyList<FolderRight> Rights,
+    [property: JsonPropertyName("recursive")] bool Recursive,
+    [property: JsonPropertyName("exclude"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Exclude = null);
+
+public sealed partial record ProjectConfig(
+    [property: JsonPropertyName("schemaVersion")] long SchemaVersion,
+    [property: JsonPropertyName("projectId")] string ProjectId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("grants")] IReadOnlyList<FolderGrant> Grants);
+
+public sealed partial record SnapshotFile(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("size")] long Size,
+    [property: JsonPropertyName("sha256")] string Sha256);
+
+/// <summary>Unveränderlicher Stand eines Ordners. snapshotId = SHA-256 über das kanonische JSON von {grantId, files}.</summary>
+public sealed partial record SnapshotManifest(
+    [property: JsonPropertyName("schemaVersion")] long SchemaVersion,
+    [property: JsonPropertyName("snapshotId")] string SnapshotId,
+    [property: JsonPropertyName("grantId")] string GrantId,
+    [property: JsonPropertyName("createdAt")] string CreatedAt,
+    [property: JsonPropertyName("files")] IReadOnlyList<SnapshotFile> Files,
+    [property: JsonPropertyName("skipped"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Skipped = null);
+
+/// <summary>Signierter Auftrag an den Worker in der Sandbox.</summary>
+public sealed partial record SandboxJob(
+    [property: JsonPropertyName("schemaVersion")] long SchemaVersion,
+    [property: JsonPropertyName("jobId")] string JobId,
+    [property: JsonPropertyName("sequence")] long Sequence,
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("invocationId")] string InvocationId,
+    [property: JsonPropertyName("proposal")] ToolProposal Proposal,
+    [property: JsonPropertyName("proposalSha256")] string ProposalSha256,
+    [property: JsonPropertyName("issuedAt")] string IssuedAt,
+    [property: JsonPropertyName("expiresAt")] string ExpiresAt,
+    [property: JsonPropertyName("payloadSha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PayloadSha256 = null,
+    [property: JsonPropertyName("snapshot"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotManifest? Snapshot = null);
+
+public sealed partial record JobEnvelope(
+    [property: JsonPropertyName("job")] SandboxJob Job,
+    [property: JsonPropertyName("mac")] string Mac);
+
+/// <summary>Antwort des Workers. Immer untrusted; der Host prüft Größe, Zuordnung und Ziele.</summary>
+public sealed partial record ResultEnvelope(
+    [property: JsonPropertyName("jobId")] string JobId,
+    [property: JsonPropertyName("sequence")] long Sequence,
+    [property: JsonPropertyName("result")] ToolResult Result);
+
 public sealed partial record BrokerEvent(
     [property: JsonPropertyName("seq")] long Seq,
     [property: JsonPropertyName("at")] string At,

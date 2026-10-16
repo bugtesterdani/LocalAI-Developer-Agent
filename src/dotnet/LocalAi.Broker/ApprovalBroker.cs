@@ -57,6 +57,7 @@ public sealed class ApprovalBroker : IAsyncDisposable
     private long _eventSeq;
     private bool _stopped;
     private bool _started;
+    private int _disposed;
     private Task? _dispatcherLoop;
     private Task? _sweeperLoop;
 
@@ -710,6 +711,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
         await _shutdown.CancelAsync().ConfigureAwait(false);
         _dispatchQueue.Writer.TryComplete();
         foreach (var task in new[] { _dispatcherLoop, _sweeperLoop })

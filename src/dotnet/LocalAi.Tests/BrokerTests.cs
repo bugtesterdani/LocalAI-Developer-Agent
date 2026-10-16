@@ -18,7 +18,7 @@ public sealed class BrokerTests : IAsyncDisposable
         _broker = NewBroker();
     }
 
-    private string JournalPath => Path.Combine(_dir, "audit.jsonl");
+    private string JournalPath => Path.Combine(_dir, "audit.db");
 
     private ApprovalBroker NewBroker(bool start = true)
     {
@@ -190,22 +190,38 @@ public sealed class BrokerTests : IAsyncDisposable
         await _broker.DisposeAsync();
         Assert.True(AuditJournal.Verify(JournalPath) >= 2, "Journal hat Einträge");
 
-        var lines = File.ReadAllLines(JournalPath);
-        lines[1] = lines[1].Replace("\"Test\"", "\"Manipuliert\"");
-        File.WriteAllLines(JournalPath, lines);
+        Tamper(JournalPath, "UPDATE journal SET data = replace(data, '\"Test\"', '\"Manipuliert\"') WHERE seq = 2");
         Assert.Throws<AuditTamperException>(() => AuditJournal.Verify(JournalPath));
         _broker = NewBroker(start: false);
         Assert.Throws<AuditTamperException>(() => _broker.Start(runBackgroundLoops: false));
     }
 
     [Fact]
-    public async Task Unvollstaendige_letzte_Journalzeile_wird_toleriert()
+    public async Task Geloeschter_Journaleintrag_wird_erkannt()
     {
         _broker.Submit(Request());
+        _broker.Submit(Request());
         await _broker.DisposeAsync();
-        File.AppendAllText(JournalPath, "{\"seq\":99,\"halbe Zeile");
-        _broker = NewBroker();
-        Assert.True(AuditJournal.Verify(JournalPath) >= 3, "Journal nach Wiederanlauf gültig");
+        Tamper(JournalPath, "DELETE FROM journal WHERE seq = 2");
+        Assert.Throws<AuditTamperException>(() => AuditJournal.Verify(JournalPath));
+    }
+
+    [Fact]
+    public void Journal_laesst_sich_im_laufenden_Betrieb_pruefen()
+    {
+        _broker.Submit(Request());
+        Assert.True(AuditJournal.Verify(JournalPath) >= 2, "Prüfung während der Broker schreibt");
+        _broker.Submit(Request());
+        Assert.True(AuditJournal.Verify(JournalPath) >= 3, "neue Einträge sichtbar");
+    }
+
+    private static void Tamper(string path, string sql)
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
     }
 
     public async ValueTask DisposeAsync()

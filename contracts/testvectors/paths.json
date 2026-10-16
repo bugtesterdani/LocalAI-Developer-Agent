@@ -1,0 +1,55 @@
+{
+  "description": "Gemeinsame Testvektoren für PathRules (C#) und localai.pathrules (Python).",
+  "valid": [
+    {
+      "input": "src\\Csv\\Parser.cs",
+      "normalized": "src/Csv/Parser.cs"
+    },
+    {
+      "input": "docs/Übernahme.md",
+      "normalized": "docs/Übernahme.md"
+    },
+    {
+      "input": "README.md",
+      "normalized": "README.md"
+    },
+    {
+      "input": "a/b/c.d.e",
+      "normalized": "a/b/c.d.e"
+    }
+  ],
+  "validRootOnly": [
+    {
+      "input": ".",
+      "normalized": "."
+    }
+  ],
+  "invalid": [
+    "..\\secret.txt",
+    "a/../b",
+    "/etc/passwd",
+    "\\\\server\\share\\x",
+    "\\\\?\\C:\\x",
+    "C:\\Windows",
+    "datei.txt:stream",
+    "CON",
+    "src/nul.txt",
+    "a//b",
+    "a/./b",
+    "ordner./x",
+    "x\u0001",
+    "",
+    " a",
+    "a ",
+    "LPT1.log",
+    "com9",
+    "a*b",
+    "a?b",
+    "a\"b",
+    "a<b",
+    "a>b",
+    "a|b",
+    ".",
+    "con.txt.bak/ok"
+  ]
+}

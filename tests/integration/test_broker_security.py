@@ -196,8 +196,9 @@ def test_manipuliertes_journal_verhindert_start(broker_factory, tmp_path):
     first = broker_factory(data_dir=data)
     first.orchestrator().submit(make_request(purpose="Original"))
     first.stop()
-    journal = data / "audit.jsonl"
-    journal.write_text(journal.read_text(encoding="utf-8").replace("Original", "Gefälscht"), encoding="utf-8")
+    import sqlite3
+    with sqlite3.connect(data / "audit.db") as db:  # Eintrag nachträglich verfälschen
+        db.execute("UPDATE journal SET data = replace(data, 'Original', 'Gefälscht')")
     from conftest import DEFAULT_DLL
     result = subprocess.run(["dotnet", str(DEFAULT_DLL), "--data", str(data)], input="", capture_output=True,
                             text=True, encoding="utf-8", errors="replace", timeout=30)

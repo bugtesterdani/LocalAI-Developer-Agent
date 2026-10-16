@@ -152,6 +152,78 @@ class ProposalOutcome(Contract):
     result: ToolResult | None = Field(default=None, alias="result")
 
 
+class FolderRight(str, Enum):
+    List = "List"
+    Read = "Read"
+    Create = "Create"
+    Modify = "Modify"
+    Delete = "Delete"
+    Execute = "Execute"
+
+
+class FolderGrant(Contract):
+    """Ausdrücklich freigegebener Hostordner mit konkreten Rechten. Keine Vererbung auf andere Ordner."""
+
+    grant_id: str = Field(alias="grantId")
+    root: str = Field(alias="root")
+    rights: list[FolderRight] = Field(alias="rights")
+    recursive: StrictBool = Field(alias="recursive")
+    exclude: list[str] | None = Field(default=None, alias="exclude")
+
+
+class ProjectConfig(Contract):
+    schema_version: StrictInt = Field(alias="schemaVersion")
+    project_id: str = Field(alias="projectId")
+    name: str = Field(alias="name")
+    grants: list[FolderGrant] = Field(alias="grants")
+
+
+class SnapshotFile(Contract):
+    path: str = Field(alias="path")
+    size: StrictInt = Field(alias="size")
+    sha256: str = Field(alias="sha256")
+
+
+class SnapshotManifest(Contract):
+    """Unveränderlicher Stand eines Ordners. snapshotId = SHA-256 über das kanonische JSON von {grantId, files}."""
+
+    schema_version: StrictInt = Field(alias="schemaVersion")
+    snapshot_id: str = Field(alias="snapshotId")
+    grant_id: str = Field(alias="grantId")
+    created_at: str = Field(alias="createdAt")
+    files: list[SnapshotFile] = Field(alias="files")
+    skipped: list[str] | None = Field(default=None, alias="skipped")
+
+
+class SandboxJob(Contract):
+    """Signierter Auftrag an den Worker in der Sandbox."""
+
+    schema_version: StrictInt = Field(alias="schemaVersion")
+    job_id: str = Field(alias="jobId")
+    sequence: StrictInt = Field(alias="sequence")
+    session_id: str = Field(alias="sessionId")
+    invocation_id: str = Field(alias="invocationId")
+    proposal: ToolProposal = Field(alias="proposal")
+    proposal_sha256: str = Field(alias="proposalSha256")
+    issued_at: str = Field(alias="issuedAt")
+    expires_at: str = Field(alias="expiresAt")
+    payload_sha256: str | None = Field(default=None, alias="payloadSha256")
+    snapshot: SnapshotManifest | None = Field(default=None, alias="snapshot")
+
+
+class JobEnvelope(Contract):
+    job: SandboxJob = Field(alias="job")
+    mac: str = Field(alias="mac")
+
+
+class ResultEnvelope(Contract):
+    """Antwort des Workers. Immer untrusted; der Host prüft Größe, Zuordnung und Ziele."""
+
+    job_id: str = Field(alias="jobId")
+    sequence: StrictInt = Field(alias="sequence")
+    result: ToolResult = Field(alias="result")
+
+
 class BrokerEvent(Contract):
     seq: StrictInt = Field(alias="seq")
     at: str = Field(alias="at")

@@ -1,7 +1,7 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LocalAi.Contracts;
+using Microsoft.Data.Sqlite;
 
 namespace LocalAi.Broker;
 
@@ -9,10 +9,11 @@ namespace LocalAi.Broker;
 public sealed record JournalEntry(long Seq, string At, string Type, JsonObject Data, string PrevHash, string Hash);
 
 /// <summary>
-/// Append-only-Journal mit Hashverkettung (JSON Lines, kanonisch).
+/// Append-only-Journal in SQLite mit Hashverkettung (Spezifikation §10).
 /// Hash = SHA-256(kanonisch {seq, at, type, data, prevHash}).
+/// Jeder Eintrag wird in einer eigenen Transaktion mit synchronous=FULL geschrieben.
 /// Erkennt nachträgliche Änderungen; Schutz gegen einen vollständig kompromittierten Host
-/// bietet erst ein getrennt geschützter Checkpoint (Spezifikation §10).
+/// bietet erst ein getrennt geschützter Checkpoint.
 /// </summary>
 public sealed class AuditJournal : IDisposable
 {
@@ -21,7 +22,7 @@ public sealed class AuditJournal : IDisposable
     private readonly string _path;
     private readonly IClock _clock;
     private readonly Lock _gate = new();
-    private FileStream? _stream;
+    private SqliteConnection? _connection;
     private long _seq;
     private string _lastHash = GenesisHash;
 
@@ -33,10 +34,7 @@ public sealed class AuditJournal : IDisposable
 
     public string FilePath => _path;
 
-    /// <summary>
-    /// Liest und prüft das bestehende Journal. Eine unvollständige letzte Zeile (Absturz beim Schreiben)
-    /// wird ignoriert und abgeschnitten; jede andere Abweichung ist ein Manipulationsverdacht.
-    /// </summary>
+    /// <summary>Öffnet das Journal, prüft die gesamte Hashkette und liefert alle Einträge.</summary>
     public IReadOnlyList<JournalEntry> OpenAndReplay()
     {
         lock (_gate)
@@ -46,31 +44,20 @@ public sealed class AuditJournal : IDisposable
             {
                 Directory.CreateDirectory(directory);
             }
-
-            var entries = new List<JournalEntry>();
-            long validLength = 0;
-            if (File.Exists(_path))
-            {
-                var bytes = File.ReadAllBytes(_path);
-                var offset = 0;
-                while (offset < bytes.Length)
-                {
-                    var newline = Array.IndexOf(bytes, (byte)'\n', offset);
-                    if (newline < 0)
-                    {
-                        break; // unvollständige letzte Zeile
-                    }
-                    var line = Encoding.UTF8.GetString(bytes, offset, newline - offset);
-                    var entry = ParseAndVerify(line, entries.Count == 0 ? GenesisHash : entries[^1].Hash, entries.Count + 1);
-                    entries.Add(entry);
-                    offset = newline + 1;
-                    validLength = offset;
-                }
-            }
-
-            _stream = new FileStream(_path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-            _stream.SetLength(validLength);
-            _stream.Seek(validLength, SeekOrigin.Begin);
+            _connection = Open(_path, readOnly: false);
+            Execute(_connection, """
+                PRAGMA journal_mode=WAL;
+                PRAGMA synchronous=FULL;
+                CREATE TABLE IF NOT EXISTS journal (
+                    seq       INTEGER PRIMARY KEY,
+                    at        TEXT NOT NULL,
+                    type      TEXT NOT NULL,
+                    data      TEXT NOT NULL,
+                    prev_hash TEXT NOT NULL,
+                    hash      TEXT NOT NULL
+                );
+                """);
+            var entries = ReadAndVerify(_connection);
             _seq = entries.Count;
             _lastHash = entries.Count == 0 ? GenesisHash : entries[^1].Hash;
             return entries;
@@ -81,93 +68,112 @@ public sealed class AuditJournal : IDisposable
     {
         lock (_gate)
         {
-            if (_stream is null)
-            {
-                throw new InvalidOperationException("Journal ist nicht geöffnet");
-            }
+            var connection = _connection ?? throw new InvalidOperationException("Journal ist nicht geöffnet");
             var seq = _seq + 1;
             var at = ContractTime.ToContract(_clock.UtcNow);
-            var body = new JsonObject
+            var dataCopy = (JsonObject)data.DeepClone();
+            var hash = ComputeHash(seq, at, type, dataCopy, _lastHash);
+            using var transaction = connection.BeginTransaction();
+            using (var insert = connection.CreateCommand())
             {
-                ["seq"] = seq,
-                ["at"] = at,
-                ["type"] = type,
-                ["data"] = data.DeepClone(),
-                ["prevHash"] = _lastHash,
-            };
-            var hash = CanonicalJson.Sha256Hex(CanonicalJson.Canonicalize(ToElement(body)));
-            body["hash"] = hash;
-            var line = CanonicalJson.Canonicalize(ToElement(body)) + "\n";
-            var bytes = Encoding.UTF8.GetBytes(line);
-            _stream.Write(bytes);
-            _stream.Flush(flushToDisk: true);
+                insert.Transaction = transaction;
+                insert.CommandText = "INSERT INTO journal (seq, at, type, data, prev_hash, hash) VALUES ($seq, $at, $type, $data, $prev, $hash)";
+                insert.Parameters.AddWithValue("$seq", seq);
+                insert.Parameters.AddWithValue("$at", at);
+                insert.Parameters.AddWithValue("$type", type);
+                insert.Parameters.AddWithValue("$data", CanonicalJson.Canonicalize(JsonSerializer.SerializeToElement(dataCopy)));
+                insert.Parameters.AddWithValue("$prev", _lastHash);
+                insert.Parameters.AddWithValue("$hash", hash);
+                insert.ExecuteNonQuery();
+            }
+            transaction.Commit();
+            var entry = new JournalEntry(seq, at, type, dataCopy, _lastHash, hash);
             _seq = seq;
             _lastHash = hash;
-            return new JournalEntry(seq, at, type, (JsonObject)data.DeepClone(), body["prevHash"]!.GetValue<string>(), hash);
+            return entry;
         }
     }
 
-    /// <summary>
-    /// Prüft eine Journaldatei vollständig (z. B. für Diagnose und Tests).
-    /// Darf auch laufen, während der Broker das Journal zum Schreiben geöffnet hat:
-    /// unter Windows muss der Lesezugriff dafür Schreiben durch andere zulassen.
-    /// </summary>
+    /// <summary>Prüft ein Journal vollständig (auch während der Broker läuft). Gibt die Anzahl der Einträge zurück.</summary>
     public static int Verify(string path)
     {
-        string text;
-        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-        using (var reader = new StreamReader(stream, Encoding.UTF8))
-        {
-            text = reader.ReadToEnd();
-        }
-        var lines = text.Split('\n');
-        var prev = GenesisHash;
-        var count = 0;
-        foreach (var line in lines)
-        {
-            if (line.Length == 0)
-            {
-                continue;
-            }
-            var entry = ParseAndVerify(line, prev, count + 1);
-            prev = entry.Hash;
-            count++;
-        }
-        return count;
+        using var connection = Open(path, readOnly: true);
+        return ReadAndVerify(connection).Count;
     }
 
-    private static JournalEntry ParseAndVerify(string line, string expectedPrev, long expectedSeq)
+    private static List<JournalEntry> ReadAndVerify(SqliteConnection connection)
     {
-        JsonObject node;
-        try
+        var entries = new List<JournalEntry>();
+        using var select = connection.CreateCommand();
+        select.CommandText = "SELECT seq, at, type, data, prev_hash, hash FROM journal ORDER BY seq";
+        using var reader = select.ExecuteReader();
+        var prev = GenesisHash;
+        while (reader.Read())
         {
-            node = JsonNode.Parse(line)?.AsObject() ?? throw new JsonException("leer");
+            var expectedSeq = entries.Count + 1;
+            var seq = reader.GetInt64(0);
+            var at = reader.GetString(1);
+            var type = reader.GetString(2);
+            JsonObject data;
+            try
+            {
+                data = JsonNode.Parse(reader.GetString(3))?.AsObject() ?? throw new JsonException("leer");
+            }
+            catch (JsonException ex)
+            {
+                throw new AuditTamperException($"Journaleintrag {expectedSeq}: Daten sind kein gültiges JSON: {ex.Message}");
+            }
+            var prevHash = reader.GetString(4);
+            var hash = reader.GetString(5);
+            if (seq != expectedSeq || prevHash != prev || ComputeHash(seq, at, type, data, prevHash) != hash)
+            {
+                throw new AuditTamperException($"Hashkette in Journaleintrag {expectedSeq} verletzt");
+            }
+            entries.Add(new JournalEntry(seq, at, type, data, prevHash, hash));
+            prev = hash;
         }
-        catch (JsonException ex)
-        {
-            throw new AuditTamperException($"Journalzeile {expectedSeq} ist kein gültiges JSON: {ex.Message}");
-        }
-        var hash = node["hash"]?.GetValue<string>() ?? throw new AuditTamperException($"Journalzeile {expectedSeq} ohne Hash");
-        node.Remove("hash");
-        var computed = CanonicalJson.Sha256Hex(CanonicalJson.Canonicalize(ToElement(node)));
-        var seq = node["seq"]?.GetValue<long>() ?? -1;
-        var prev = node["prevHash"]?.GetValue<string>();
-        if (computed != hash || seq != expectedSeq || prev != expectedPrev)
-        {
-            throw new AuditTamperException($"Hashkette in Journalzeile {expectedSeq} verletzt");
-        }
-        return new JournalEntry(seq, node["at"]!.GetValue<string>(), node["type"]!.GetValue<string>(),
-            node["data"]!.AsObject(), prev!, hash);
+        return entries;
     }
 
-    private static JsonElement ToElement(JsonNode node) => JsonSerializer.SerializeToElement(node);
+    private static string ComputeHash(long seq, string at, string type, JsonObject data, string prevHash)
+    {
+        var body = new JsonObject
+        {
+            ["seq"] = seq,
+            ["at"] = at,
+            ["type"] = type,
+            ["data"] = data.DeepClone(),
+            ["prevHash"] = prevHash,
+        };
+        return CanonicalJson.Sha256Hex(CanonicalJson.Canonicalize(JsonSerializer.SerializeToElement(body)));
+    }
+
+    private static SqliteConnection Open(string path, bool readOnly)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
+            Pooling = false,
+        };
+        var connection = new SqliteConnection(builder.ToString());
+        connection.Open();
+        return connection;
+    }
+
+    private static void Execute(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
 
     public void Dispose()
     {
         lock (_gate)
         {
-            _stream?.Dispose();
-            _stream = null;
+            _connection?.Dispose();
+            _connection = null;
         }
     }
 }

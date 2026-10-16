@@ -16,7 +16,7 @@ var options = HostOptions.Parse(args);
 Directory.CreateDirectory(options.DataDirectory);
 
 var adapter = new CountingTestAdapter { Delay = options.TestAdapterDelay };
-var journal = new AuditJournal(Path.Combine(options.DataDirectory, "audit.jsonl"), SystemClock.Instance);
+var journal = new AuditJournal(Path.Combine(options.DataDirectory, "audit.db"), SystemClock.Instance);
 var brokerOptions = new BrokerOptions { ProposalTtl = options.ProposalTtl };
 var broker = new ApprovalBroker(brokerOptions, adapter, journal);
 

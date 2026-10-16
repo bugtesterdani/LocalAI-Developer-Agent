@@ -7,153 +7,613 @@
   "$defs": {
     "AgentRole": {
       "type": "string",
-      "enum": ["Planner", "Coder", "Tester", "Debugger", "Reviewer"]
+      "enum": [
+        "Planner",
+        "Coder",
+        "Tester",
+        "Debugger",
+        "Reviewer"
+      ]
     },
     "ProposalState": {
       "type": "string",
-      "enum": ["AwaitingApproval", "Approved", "Running", "Succeeded", "Failed", "Cancelled", "OutcomeUnknown", "Denied", "Expired", "Invalidated", "Superseded", "Rejected"]
+      "enum": [
+        "AwaitingApproval",
+        "Approved",
+        "Running",
+        "Succeeded",
+        "Failed",
+        "Cancelled",
+        "OutcomeUnknown",
+        "Denied",
+        "Expired",
+        "Invalidated",
+        "Superseded",
+        "Rejected"
+      ]
     },
     "DecisionKind": {
       "type": "string",
-      "enum": ["Approve", "Deny"]
+      "enum": [
+        "Approve",
+        "Deny"
+      ]
     },
     "ResultStatus": {
       "type": "string",
-      "enum": ["Succeeded", "Failed", "Cancelled", "OutcomeUnknown", "SkippedByUser"]
+      "enum": [
+        "Succeeded",
+        "Failed",
+        "Cancelled",
+        "OutcomeUnknown",
+        "SkippedByUser"
+      ]
     },
     "ToolTarget": {
       "type": "object",
       "description": "Ein einzeln abwählbares Ziel eines Tool-Aufrufs (Datei, Dateibereich, Patch-Datei).",
       "properties": {
-        "targetId": { "type": "string" },
-        "path": { "type": "string" },
-        "expectedSha256": { "type": "string" },
-        "lineStart": { "type": "integer" },
-        "lineEnd": { "type": "integer" }
+        "targetId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "expectedSha256": {
+          "type": "string"
+        },
+        "lineStart": {
+          "type": "integer"
+        },
+        "lineEnd": {
+          "type": "integer"
+        }
       },
-      "required": ["targetId", "path"]
+      "required": [
+        "targetId",
+        "path"
+      ]
     },
     "ProposalRequest": {
       "type": "object",
       "description": "Vom Orchestrator eingereichter Vorschlag. Serverfelder (ID, Zeiten, Policyrevision) setzt ausschließlich der Broker.",
       "properties": {
-        "schemaVersion": { "type": "integer" },
-        "runId": { "type": "string" },
-        "taskId": { "type": "string" },
-        "agent": { "$ref": "#/$defs/AgentRole" },
-        "tool": { "type": "string" },
-        "toolVersion": { "type": "string" },
-        "purpose": { "type": "string" },
-        "arguments": { "type": "object" },
-        "targets": { "type": "array", "items": { "$ref": "#/$defs/ToolTarget" } },
-        "snapshotId": { "type": "string" },
-        "idempotencyKey": { "type": "string" }
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "toolVersion": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolTarget"
+          }
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "idempotencyKey": {
+          "type": "string"
+        }
       },
-      "required": ["schemaVersion", "runId", "taskId", "agent", "tool", "toolVersion", "purpose", "arguments", "targets", "snapshotId", "idempotencyKey"]
+      "required": [
+        "schemaVersion",
+        "runId",
+        "taskId",
+        "agent",
+        "tool",
+        "toolVersion",
+        "purpose",
+        "arguments",
+        "targets",
+        "snapshotId",
+        "idempotencyKey"
+      ]
     },
     "ToolProposal": {
       "type": "object",
       "description": "Unveränderlicher Vorschlag. Sein SHA-256 über das kanonische JSON ist die Grundlage jeder Entscheidung.",
       "properties": {
-        "schemaVersion": { "type": "integer" },
-        "proposalId": { "type": "string" },
-        "parentProposalId": { "type": "string" },
-        "runId": { "type": "string" },
-        "taskId": { "type": "string" },
-        "agent": { "$ref": "#/$defs/AgentRole" },
-        "tool": { "type": "string" },
-        "toolVersion": { "type": "string" },
-        "purpose": { "type": "string" },
-        "arguments": { "type": "object" },
-        "targets": { "type": "array", "items": { "$ref": "#/$defs/ToolTarget" } },
-        "snapshotId": { "type": "string" },
-        "policyRevision": { "type": "integer" },
-        "sandboxId": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "expiresAt": { "type": "string", "format": "date-time" }
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "proposalId": {
+          "type": "string"
+        },
+        "parentProposalId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentRole"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "toolVersion": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolTarget"
+          }
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "policyRevision": {
+          "type": "integer"
+        },
+        "sandboxId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
-      "required": ["schemaVersion", "proposalId", "runId", "taskId", "agent", "tool", "toolVersion", "purpose", "arguments", "targets", "snapshotId", "policyRevision", "sandboxId", "createdAt", "expiresAt"]
+      "required": [
+        "schemaVersion",
+        "proposalId",
+        "runId",
+        "taskId",
+        "agent",
+        "tool",
+        "toolVersion",
+        "purpose",
+        "arguments",
+        "targets",
+        "snapshotId",
+        "policyRevision",
+        "sandboxId",
+        "createdAt",
+        "expiresAt"
+      ]
     },
     "ProposalView": {
       "type": "object",
       "properties": {
-        "proposal": { "$ref": "#/$defs/ToolProposal" },
-        "proposalSha256": { "type": "string" },
-        "state": { "$ref": "#/$defs/ProposalState" }
+        "proposal": {
+          "$ref": "#/$defs/ToolProposal"
+        },
+        "proposalSha256": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProposalState"
+        }
       },
-      "required": ["proposal", "proposalSha256", "state"]
+      "required": [
+        "proposal",
+        "proposalSha256",
+        "state"
+      ]
     },
     "UserDecision": {
       "type": "object",
       "properties": {
-        "proposalId": { "type": "string" },
-        "proposalSha256": { "type": "string" },
-        "decision": { "$ref": "#/$defs/DecisionKind" }
+        "proposalId": {
+          "type": "string"
+        },
+        "proposalSha256": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/DecisionKind"
+        }
       },
-      "required": ["proposalId", "proposalSha256", "decision"]
+      "required": [
+        "proposalId",
+        "proposalSha256",
+        "decision"
+      ]
     },
     "NarrowRequest": {
       "type": "object",
       "description": "Sammelfreigabe: behält nur die genannten Ziele. Erzeugt einen neuen Vorschlag mit neuem Hash.",
       "properties": {
-        "proposalId": { "type": "string" },
-        "proposalSha256": { "type": "string" },
-        "keepTargetIds": { "type": "array", "items": { "type": "string" } }
+        "proposalId": {
+          "type": "string"
+        },
+        "proposalSha256": {
+          "type": "string"
+        },
+        "keepTargetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
-      "required": ["proposalId", "proposalSha256", "keepTargetIds"]
+      "required": [
+        "proposalId",
+        "proposalSha256",
+        "keepTargetIds"
+      ]
     },
     "TargetResult": {
       "type": "object",
       "properties": {
-        "targetId": { "type": "string" },
-        "status": { "$ref": "#/$defs/ResultStatus" },
-        "contentSha256": { "type": "string" },
-        "text": { "type": "string" },
-        "message": { "type": "string" }
+        "targetId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ResultStatus"
+        },
+        "contentSha256": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
       },
-      "required": ["targetId", "status"]
+      "required": [
+        "targetId",
+        "status"
+      ]
     },
     "ToolResult": {
       "type": "object",
       "description": "Ergebnis einer Ausführung. Inhalte sind immer untrusted.",
       "properties": {
-        "invocationId": { "type": "string" },
-        "proposalId": { "type": "string" },
-        "status": { "$ref": "#/$defs/ResultStatus" },
-        "exitCode": { "type": "integer" },
-        "snapshotId": { "type": "string" },
-        "targetResults": { "type": "array", "items": { "$ref": "#/$defs/TargetResult" } },
-        "skippedTargetIds": { "type": "array", "items": { "type": "string" } },
-        "outputSha256": { "type": "string" },
-        "truncated": { "type": "boolean" },
-        "untrusted": { "type": "boolean" }
+        "invocationId": {
+          "type": "string"
+        },
+        "proposalId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ResultStatus"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "targetResults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetResult"
+          }
+        },
+        "skippedTargetIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "outputSha256": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "untrusted": {
+          "type": "boolean"
+        }
       },
-      "required": ["invocationId", "proposalId", "status", "snapshotId", "targetResults", "outputSha256", "truncated", "untrusted"]
+      "required": [
+        "invocationId",
+        "proposalId",
+        "status",
+        "snapshotId",
+        "targetResults",
+        "outputSha256",
+        "truncated",
+        "untrusted"
+      ]
     },
     "ProposalOutcome": {
       "type": "object",
       "description": "Endstand eines Vorschlags; folgt der Kette, falls der Nutzer per Abwahl einen neuen Vorschlag erzeugt hat.",
       "properties": {
-        "requestedProposalId": { "type": "string" },
-        "finalProposalId": { "type": "string" },
-        "state": { "$ref": "#/$defs/ProposalState" },
-        "isFinal": { "type": "boolean" },
-        "result": { "$ref": "#/$defs/ToolResult" }
+        "requestedProposalId": {
+          "type": "string"
+        },
+        "finalProposalId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProposalState"
+        },
+        "isFinal": {
+          "type": "boolean"
+        },
+        "result": {
+          "$ref": "#/$defs/ToolResult"
+        }
       },
-      "required": ["requestedProposalId", "finalProposalId", "state", "isFinal"]
+      "required": [
+        "requestedProposalId",
+        "finalProposalId",
+        "state",
+        "isFinal"
+      ]
+    },
+    "FolderRight": {
+      "type": "string",
+      "enum": [
+        "List",
+        "Read",
+        "Create",
+        "Modify",
+        "Delete",
+        "Execute"
+      ]
+    },
+    "FolderGrant": {
+      "type": "object",
+      "description": "Ausdrücklich freigegebener Hostordner mit konkreten Rechten. Keine Vererbung auf andere Ordner.",
+      "properties": {
+        "grantId": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "rights": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FolderRight"
+          }
+        },
+        "recursive": {
+          "type": "boolean"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "grantId",
+        "root",
+        "rights",
+        "recursive"
+      ]
+    },
+    "ProjectConfig": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FolderGrant"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "projectId",
+        "name",
+        "grants"
+      ]
+    },
+    "SnapshotFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "sha256"
+      ]
+    },
+    "SnapshotManifest": {
+      "type": "object",
+      "description": "Unveränderlicher Stand eines Ordners. snapshotId = SHA-256 über das kanonische JSON von {grantId, files}.",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "grantId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnapshotFile"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "snapshotId",
+        "grantId",
+        "createdAt",
+        "files"
+      ]
+    },
+    "SandboxJob": {
+      "type": "object",
+      "description": "Signierter Auftrag an den Worker in der Sandbox.",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "invocationId": {
+          "type": "string"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ToolProposal"
+        },
+        "proposalSha256": {
+          "type": "string"
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payloadSha256": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SnapshotManifest"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "jobId",
+        "sequence",
+        "sessionId",
+        "invocationId",
+        "proposal",
+        "proposalSha256",
+        "issuedAt",
+        "expiresAt"
+      ]
+    },
+    "JobEnvelope": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "#/$defs/SandboxJob"
+        },
+        "mac": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "job",
+        "mac"
+      ]
+    },
+    "ResultEnvelope": {
+      "type": "object",
+      "description": "Antwort des Workers. Immer untrusted; der Host prüft Größe, Zuordnung und Ziele.",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "result": {
+          "$ref": "#/$defs/ToolResult"
+        }
+      },
+      "required": [
+        "jobId",
+        "sequence",
+        "result"
+      ]
     },
     "BrokerEvent": {
       "type": "object",
       "properties": {
-        "seq": { "type": "integer" },
-        "at": { "type": "string", "format": "date-time" },
-        "type": { "type": "string" },
-        "proposalId": { "type": "string" },
-        "runId": { "type": "string" },
-        "state": { "$ref": "#/$defs/ProposalState" },
-        "message": { "type": "string" }
+        "seq": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string"
+        },
+        "proposalId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProposalState"
+        },
+        "message": {
+          "type": "string"
+        }
       },
-      "required": ["seq", "at", "type"]
+      "required": [
+        "seq",
+        "at",
+        "type"
+      ]
     }
   }
 }
