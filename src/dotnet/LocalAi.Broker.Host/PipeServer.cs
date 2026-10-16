@@ -191,8 +191,14 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
     private JsonObject StartFakeAgent()
     {
         var command = options.FakeAgent
-                      ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Kein Fake-Agent in config/localai.json konfiguriert");
-        var start = new ProcessStartInfo(command.Command)
+                      ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Kein Fake-Agent in config/localai.json konfiguriert (Datei nicht gefunden?)");
+        var logPath = Path.Combine(options.DataDirectory, "fake-agent.log");
+        var resolved = ResolveExecutable(command.Command);
+        AppendLog(logPath, $"[Broker] Starte: {command.Command} {string.Join(' ', command.Arguments)}");
+        AppendLog(logPath, $"[Broker] Arbeitsverzeichnis: {command.WorkingDirectory}");
+        AppendLog(logPath, $"[Broker] Programm: {resolved ?? "NICHT im PATH gefunden"}");
+
+        var start = new ProcessStartInfo(resolved ?? command.Command)
         {
             WorkingDirectory = command.WorkingDirectory,
             UseShellExecute = false,
@@ -213,11 +219,70 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         start.Environment["PYTHONUTF8"] = "1";
         start.Environment["PYTHONIOENCODING"] = "utf-8";
 
-        var logPath = Path.Combine(options.DataDirectory, "fake-agent.log");
-        var process = Process.Start(start) ?? throw new BrokerException(BrokerErrorCodes.Internal, "Fake-Agent konnte nicht gestartet werden");
-        _ = PumpAsync(process.StandardOutput, logPath);
-        _ = PumpAsync(process.StandardError, logPath);
+        Process process;
+        try
+        {
+            process = Process.Start(start) ?? throw new InvalidOperationException("Process.Start lieferte keinen Prozess");
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            AppendLog(logPath, $"[Broker] Start fehlgeschlagen: {ex.Message}");
+            throw new BrokerException(BrokerErrorCodes.Unprocessable,
+                $"Fake-Agent konnte nicht gestartet werden ('{command.Command}' in {command.WorkingDirectory}): {ex.Message}");
+        }
+        AppendLog(logPath, $"[Broker] Prozess gestartet, PID {process.Id}");
+        var stdout = PumpAsync(process.StandardOutput, logPath);
+        var stderr = PumpAsync(process.StandardError, logPath);
+        _ = Task.Run(async () =>
+        {
+            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            AppendLog(logPath, $"[Broker] Prozess beendet, Exitcode {process.ExitCode}");
+            process.Dispose();
+        });
         return new JsonObject { ["pid"] = process.Id, ["log"] = logPath };
+    }
+
+    /// <summary>Sucht ein Programm im PATH (unter Windows mit PATHEXT, z. B. uv.exe oder uv.cmd).</summary>
+    private static string? ResolveExecutable(string command)
+    {
+        if (Path.IsPathRooted(command))
+        {
+            return File.Exists(command) ? command : null;
+        }
+        var extensions = OperatingSystem.IsWindows()
+            ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT").Split(';', StringSplitOptions.RemoveEmptyEntries)
+            : [string.Empty];
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var extension in Path.HasExtension(command) ? [string.Empty] : extensions)
+            {
+                var candidate = Path.Combine(dir.Trim('"'), command + extension);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void AppendLog(string logPath, string line)
+    {
+        LogGate.Wait();
+        try
+        {
+            using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
+            writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {line}");
+        }
+        catch (IOException)
+        {
+        }
+        finally
+        {
+            LogGate.Release();
+        }
     }
 
     private static readonly SemaphoreSlim LogGate = new(1, 1);

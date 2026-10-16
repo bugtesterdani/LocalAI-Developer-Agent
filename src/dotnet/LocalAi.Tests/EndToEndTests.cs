@@ -38,6 +38,12 @@ public sealed class EndToEndTests(ITestOutputHelper output)
             Step("Oberflächenlogik verbunden, Fake-Agent wird gestartet (uv run)");
 
             main.StartFakeRunCommand.Execute(null);
+            await WaitAsync(() => main.InfoText is not null || main.ErrorText is not null, TimeSpan.FromSeconds(15), "Rückmeldung zum Start des Fake-Agenten");
+            lock (_ui)
+            {
+                Assert.True(main.ErrorText is null, "Start des Fake-Agenten fehlgeschlagen: " + main.ErrorText + "\n" + ReadShared(_agentLog!));
+                Step(main.InfoText!);
+            }
             await WaitAsync(() => main.Approvals.Count == 2, TimeSpan.FromSeconds(90), "zwei Vorschläge vom Fake-Agenten");
             Step("Zwei Vorschläge sind da");
             await WaitAsync(() => main.EventLog.Any(e => e.Text.Contains("abgewiesen", StringComparison.Ordinal)), TimeSpan.FromSeconds(10),
