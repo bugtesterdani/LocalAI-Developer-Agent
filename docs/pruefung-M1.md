@@ -25,7 +25,7 @@ Erwartet:
 |---|---|
 | 1/4 Verträge | `aktuell` |
 | 2/4 Build | ohne Fehler, **inklusive LocalAi.Desktop (WPF)** – das ist der erste WPF-Build überhaupt |
-| 3/4 C#-Tests | `26 von 26 Tests bestanden` |
+| 3/4 C#-Tests | `Passed! - Failed: 0, Passed: 26` (xUnit) |
 | 4/4 Python-Tests | `42 passed` (beim ersten Lauf lädt uv Python-Pakete) |
 
 Falls der WPF-Build scheitert: die komplette Fehlermeldung an Claude schicken.

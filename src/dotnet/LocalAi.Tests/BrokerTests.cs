@@ -46,11 +46,11 @@ public sealed class BrokerTests : IAsyncDisposable
     private ProposalView Approve(ProposalView view) =>
         _broker.Decide(new UserDecision(view.Proposal.ProposalId, view.ProposalSha256, DecisionKind.Approve));
 
-    [Test("SEC-01")]
+    [Fact, Trait("Pruefung", "SEC-01")]
     public async Task Ohne_Entscheidung_keine_Ausfuehrung()
     {
         var view = _broker.Submit(Request());
-        Assert.Equal(false, await _broker.DispatchAsync(view.Proposal.ProposalId), "Dispatch ohne Freigabe");
+        Assert.False(await _broker.DispatchAsync(view.Proposal.ProposalId));
         _clock.Advance(TimeSpan.FromMinutes(6));
         _broker.ExpireDue();
         Assert.Equal(ProposalState.Expired, _broker.Get(view.Proposal.ProposalId).State);
@@ -59,7 +59,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal(0, _adapter.Invocations);
     }
 
-    [Test("SEC-01")]
+    [Fact, Trait("Pruefung", "SEC-01")]
     public void Ablehnung_fuehrt_nichts_aus()
     {
         var view = _broker.Submit(Request());
@@ -68,7 +68,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal(0, _adapter.Invocations);
     }
 
-    [Test("SEC-02")]
+    [Fact, Trait("Pruefung", "SEC-02")]
     public void Falscher_Hash_wird_abgelehnt()
     {
         var a = _broker.Submit(Request());
@@ -79,7 +79,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal(ProposalState.AwaitingApproval, _broker.Get(a.Proposal.ProposalId).State);
     }
 
-    [Test("SEC-02")]
+    [Fact, Trait("Pruefung", "SEC-02")]
     public void Idempotenzschluessel_kann_keine_Parameter_aendern()
     {
         _broker.Submit(Request(key: "k1"));
@@ -88,20 +88,20 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal(BrokerErrorCodes.Conflict, ex.Code);
     }
 
-    [Test("SEC-03")]
+    [Fact, Trait("Pruefung", "SEC-03")]
     public async Task Parallele_Dispatches_fuehren_genau_einmal_aus()
     {
         var view = Approve(_broker.Submit(Request()));
         var id = view.Proposal.ProposalId;
         var results = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() => _broker.DispatchAsync(id))));
-        Assert.Equal(1, results.Count(r => r), "erfolgreiche Dispatches");
+        Assert.Equal(1, results.Count(r => r));
         Assert.Equal(1, _adapter.Invocations);
         Assert.Equal(ProposalState.Succeeded, _broker.Get(id).State);
-        Assert.Equal(false, await _broker.DispatchAsync(id), "erneuter Dispatch");
+        Assert.False(await _broker.DispatchAsync(id));
         Assert.Equal(1, _adapter.Invocations);
     }
 
-    [Test("SEC-03")]
+    [Fact, Trait("Pruefung", "SEC-03")]
     public void Zweite_Entscheidung_wird_abgelehnt()
     {
         var view = _broker.Submit(Request());
@@ -110,7 +110,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal(BrokerErrorCodes.Conflict, ex.Code);
     }
 
-    [Test("SEC-12")]
+    [Fact, Trait("Pruefung", "SEC-12")]
     public async Task Neustart_invalidiert_alte_Freigaben_ohne_Wiederholung()
     {
         var pending = _broker.Submit(Request());
@@ -120,13 +120,13 @@ public sealed class BrokerTests : IAsyncDisposable
         _broker = NewBroker();
         Assert.Equal(ProposalState.Invalidated, _broker.Get(pending.Proposal.ProposalId).State);
         Assert.Equal(ProposalState.Invalidated, _broker.Get(approved.Proposal.ProposalId).State);
-        Assert.Equal(false, await _broker.DispatchAsync(approved.Proposal.ProposalId));
+        Assert.False(await _broker.DispatchAsync(approved.Proposal.ProposalId));
         var ex = Assert.Throws<BrokerException>(() => Approve(pending));
         Assert.Equal(BrokerErrorCodes.Conflict, ex.Code);
         Assert.Equal(0, _adapter.Invocations);
     }
 
-    [Test("SEC-23")]
+    [Fact, Trait("Pruefung", "SEC-23")]
     public async Task Sammelfreigabe_Abwahl_fuehrt_nur_ausgewaehlte_Ziele_aus()
     {
         var original = _broker.Submit(Request("File.ReadMany", 5));
@@ -148,7 +148,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal("t2,t4", string.Join(',', outcome.Result!.SkippedTargetIds!));
     }
 
-    [Test("SEC-23")]
+    [Fact, Trait("Pruefung", "SEC-23")]
     public void Sammelfreigabe_kann_nicht_erweitert_werden()
     {
         var original = _broker.Submit(Request("File.ReadMany", 3));
@@ -161,7 +161,7 @@ public sealed class BrokerTests : IAsyncDisposable
             _broker.Narrow(new NarrowRequest(original.Proposal.ProposalId, original.ProposalSha256, ["t1", "t2", "t3"]))).Code);
     }
 
-    [Test]
+    [Fact]
     public void Einzel_Read_unterstuetzt_keine_Abwahl_und_nur_ein_Ziel()
     {
         Assert.Equal(BrokerErrorCodes.Unprocessable, Assert.Throws<BrokerException>(() => _broker.Submit(Request("File.Read", 2))).Code);
@@ -169,21 +169,21 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Equal(BrokerErrorCodes.Forbidden, Assert.Throws<BrokerException>(() => _broker.Submit(Request("Shell.Execute"))).Code);
     }
 
-    [Test("SEC-15")]
+    [Fact, Trait("Pruefung", "SEC-15")]
     public async Task NotAus_invalidiert_und_blockiert()
     {
         var pending = _broker.Submit(Request());
         var approved = Approve(_broker.Submit(Request()));
         _broker.EmergencyStop();
         Assert.Equal(ProposalState.Invalidated, _broker.Get(pending.Proposal.ProposalId).State);
-        Assert.Equal(false, await _broker.DispatchAsync(approved.Proposal.ProposalId));
+        Assert.False(await _broker.DispatchAsync(approved.Proposal.ProposalId));
         Assert.Equal(BrokerErrorCodes.Conflict, Assert.Throws<BrokerException>(() => _broker.Submit(Request())).Code);
         _broker.ReleaseEmergencyStop();
         _broker.Submit(Request());
         Assert.Equal(0, _adapter.Invocations);
     }
 
-    [Test]
+    [Fact]
     public async Task Journal_Manipulation_wird_erkannt()
     {
         _broker.Submit(Request());
@@ -198,7 +198,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Assert.Throws<AuditTamperException>(() => _broker.Start(runBackgroundLoops: false));
     }
 
-    [Test]
+    [Fact]
     public async Task Unvollstaendige_letzte_Journalzeile_wird_toleriert()
     {
         _broker.Submit(Request());

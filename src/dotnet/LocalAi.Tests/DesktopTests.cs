@@ -25,7 +25,7 @@ public sealed partial class DesktopTests
     [GeneratedRegex(@"\{Binding\s+(?<path>[A-Za-z][A-Za-z0-9_.]*)(?=\s*[,}])")]
     private static partial Regex BindingRegex();
 
-    [Test("AC16")]
+    [Fact, Trait("Pruefung", "AC16")]
     public void Xaml_ist_wohlgeformt_und_alle_Textschluessel_existieren()
     {
         var text = File.ReadAllText(XamlPath());
@@ -36,7 +36,7 @@ public sealed partial class DesktopTests
         Assert.True(missing.Count == 0, "Fehlende Texte: " + string.Join(", ", missing));
     }
 
-    [Test]
+    [Fact]
     public void Alle_Bindings_verweisen_auf_vorhandene_Eigenschaften()
     {
         var text = File.ReadAllText(XamlPath());
@@ -52,7 +52,7 @@ public sealed partial class DesktopTests
         Assert.True(missing.Count == 0, "Unbekannte Bindings: " + string.Join(", ", missing));
     }
 
-    [Test("AC16")]
+    [Fact, Trait("Pruefung", "AC16")]
     public void Zustandstexte_sind_vollstaendig_deutsch()
     {
         foreach (var state in Enum.GetValues<ProposalState>())
@@ -62,7 +62,7 @@ public sealed partial class DesktopTests
         Assert.Equal("Ablehnen", UiText.Get("Deny"));
     }
 
-    [Test("SEC-23")]
+    [Fact, Trait("Pruefung", "SEC-23")]
     public void Sammelfreigabe_Karte_sperrt_Erlauben_bis_Auswahl_uebernommen()
     {
         var api = new FakeApi();
@@ -81,7 +81,7 @@ public sealed partial class DesktopTests
         Assert.Equal("t1,t3", string.Join(',', card.BuildNarrowRequest().KeepTargetIds));
 
         card.FilterText = "Datei3";
-        Assert.Equal(1, card.VisibleTargets.Count);
+        Assert.Single(card.VisibleTargets);
         card.DeselectAllVisibleCommand.Execute(null);
         Assert.Equal("1 von 4 ausgewählt", card.CountText);
         card.FilterText = "";
@@ -89,7 +89,7 @@ public sealed partial class DesktopTests
         Assert.True(card.CanApprove, "alle wieder ausgewählt");
     }
 
-    [Test]
+    [Fact]
     public void Einzelaufruf_hat_keine_Abwahl()
     {
         var api = new FakeApi();
@@ -100,7 +100,7 @@ public sealed partial class DesktopTests
         Assert.True(!card.SelectAllVisibleCommand.CanExecute(null), "keine Sammelauswahl");
     }
 
-    [Test]
+    [Fact]
     public void Kartenabgleich_behaelt_Auswahl_bestehender_Karten()
     {
         var api = new FakeApi();
@@ -113,11 +113,11 @@ public sealed partial class DesktopTests
         Assert.Equal(2, main.Approvals.Count);
         Assert.True(!main.Approvals[0].Targets[0].IsSelected, "Auswahl bleibt erhalten");
         main.SyncApprovals([b]);
-        Assert.Equal(1, main.Approvals.Count);
+        Assert.Single(main.Approvals);
         Assert.Equal(b.Proposal.ProposalId, main.SelectedApproval!.ProposalId);
     }
 
-    [Test("SEC-15")]
+    [Fact, Trait("Pruefung", "SEC-15")]
     public void NotAus_sperrt_Erlauben_in_allen_Karten()
     {
         var api = new FakeApi();
@@ -126,7 +126,7 @@ public sealed partial class DesktopTests
         main.ApplyEvents([new BrokerEvent(1, ContractTime.ToContract(DateTimeOffset.UtcNow), "emergency.stop")]);
         Assert.True(main.IsStopped, "Not-Aus aktiv");
         Assert.True(!main.Approvals[0].CanApprove, "Erlauben gesperrt");
-        Assert.Equal(1, main.EventLog.Count);
+        Assert.Single(main.EventLog);
     }
 
     private static ProposalView View(string tool, int targets)

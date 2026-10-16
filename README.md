@@ -33,7 +33,7 @@ src/dotnet/           LocalAi.slnx
   LocalAi.Broker.Host   Broker-Prozess (Named-Pipe-Server)
   LocalAi.Desktop.Core  ViewModels, Broker-Client, deutsche Texte (UiText.resx)
   LocalAi.Desktop       WPF-Oberfläche
-  LocalAi.Tests         Tests (eigener Runner, siehe unten)
+  LocalAi.Tests         xUnit-Tests (Filter z. B. `dotnet test --filter Pruefung=SEC-23`)
 src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge), Tests
 tests/integration/    pytest gegen den echten Broker-Prozess
 tools/codegen/        Generatoren für Verträge, Testvektoren, Oberflächentexte
@@ -62,6 +62,5 @@ Oberflächentexte stehen in `tools/codegen/make_uitext.py` und werden nach `UiTe
 
 ## Bekannte Übergangslösungen
 
-- **Tests ohne xUnit:** In der Build-Umgebung war NuGet nicht erreichbar. `LocalAi.Tests` nutzt deshalb einen kleinen eigenen Runner (`dotnet run --project src/dotnet/LocalAi.Tests`). Umstieg auf xUnit, sobald NuGet verfügbar ist.
-- **Audit-Journal statt SQLite:** Das Journal ist eine hashverkettete JSON-Lines-Datei. SQLite (Spezifikation §10) folgt zusammen mit NuGet.
+- **Audit-Journal statt SQLite:** Das Journal ist eine hashverkettete JSON-Lines-Datei. SQLite (Spezifikation §10) folgt in M2.
 - **Rollen über Tokens:** Orchestrator und UI unterscheiden sich in M1 über zufällige Tokens pro Broker-Start; die Pipe ist auf den aktuellen Windows-Benutzer beschränkt. Getrennte Windows-Identitäten für den Orchestrator folgen mit M3.

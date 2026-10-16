@@ -1,6 +1,6 @@
 # Anforderungen → Tests (Stand M1)
 
-Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. C#-Tests laufen im selben Prozess mit einstellbarer Uhr, Python-Integrationstests gegen den echten Broker-Prozess über die Named Pipe.
+Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. C#-Tests (xUnit, Trait `Pruefung`) laufen im selben Prozess mit einstellbarer Uhr, Python-Integrationstests gegen den echten Broker-Prozess über die Named Pipe.
 
 | Anforderung / Prüffall | Inhalt | C#-Test (`LocalAi.Tests`) | Python (`tests/integration`) |
 |---|---|---|---|

@@ -15,7 +15,7 @@ Step "2/4 C# bauen (inkl. WPF-Oberfläche)"
 dotnet build src/dotnet/LocalAi.slnx -c Debug; Check "Build"
 
 Step "3/4 C#-Tests"
-dotnet run --project src/dotnet/LocalAi.Tests --no-build; Check "C#-Tests"
+dotnet test src/dotnet/LocalAi.Tests --no-build; Check "C#-Tests"
 
 Step "4/4 Python-Tests (inkl. Integrationstests gegen den Broker)"
 Push-Location src/python

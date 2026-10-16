@@ -11,14 +11,10 @@ public sealed class EndToEndTests
 {
     private readonly Lock _ui = new();
 
-    [Test("M1-E2E")]
+    [Fact, Trait("Pruefung", "M1-E2E")]
     public async Task Fake_Agent_Freigaben_mit_Abwahl_ueber_die_Oberflaechenlogik()
     {
-        if (!CommandExists("uv"))
-        {
-            Console.WriteLine("    (übersprungen: uv nicht gefunden)");
-            return;
-        }
+        Assert.SkipUnless(CommandExists("uv"), "uv nicht gefunden – Ende-zu-Ende-Test übersprungen");
 
         var data = Path.Combine(Path.GetTempPath(), "localai-e2e-" + Guid.NewGuid().ToString("N"));
         await using var broker = await BrokerProcess.StartAsync(CancellationToken.None, ["--data", data]);
@@ -82,7 +78,7 @@ public sealed class EndToEndTests
             }
             if (DateTime.UtcNow > deadline)
             {
-                throw new AssertionException($"Zeitüberschreitung: {what}");
+                Assert.Fail($"Zeitüberschreitung: {what}");
             }
             await Task.Delay(100);
         }
