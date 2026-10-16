@@ -1,0 +1,24 @@
+[project]
+name = "localai"
+version = "0.1.0"
+description = "Local AI Developer Agent – Python-Teil (Orchestrator, Agenten, Tools)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.9,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["localai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "../../tests/integration"]
+markers = ["integration: Tests gegen den echten C#-Broker-Prozess"]

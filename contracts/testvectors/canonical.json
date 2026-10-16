@@ -1,0 +1,126 @@
+{
+  "valid": [
+    {
+      "name": "leeres Objekt",
+      "input": "{}",
+      "canonical": "{}",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "leeres Array",
+      "input": "[]",
+      "canonical": "[]",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "Literale",
+      "input": "[true,false,null]",
+      "canonical": "[true,false,null]",
+      "sha256": "4d0f18de2133118249c26acc481838d4f6bb6bc1de882d99abbd19ae9397e8df"
+    },
+    {
+      "name": "Sortierung",
+      "input": "{\"b\":1,\"a\":2,\"c\":{\"z\":1,\"y\":[3,2,1]}}",
+      "canonical": "{\"a\":2,\"b\":1,\"c\":{\"y\":[3,2,1],\"z\":1}}",
+      "sha256": "cd3cfe8daa448c994a797ec91cc19f51f5ef90c852f8eb365487bb340e750cac"
+    },
+    {
+      "name": "Leerzeichen entfernen",
+      "input": "{ \"a\" : [ 1 , 2 ] ,\n \"b\" : \"x\" }",
+      "canonical": "{\"a\":[1,2],\"b\":\"x\"}",
+      "sha256": "d0f56dda38d34376527524ddd98f7ec117d5cbfb240f86e11bfb9d2d01a717d9"
+    },
+    {
+      "name": "Ganzzahlen",
+      "input": "[0,-1,42,-0,9007199254740991,-9007199254740991]",
+      "canonical": "[0,-1,42,0,9007199254740991,-9007199254740991]",
+      "sha256": "e6de15380304580567f1d48f684a9a617a49da1ec33e3edf84ea5d2ad97dfe1f"
+    },
+    {
+      "name": "Escapes",
+      "input": "\"Zitat \\\" Backslash \\\\ Tab \\t NL \\n CR \\r BS \\b FF \\f\"",
+      "canonical": "\"Zitat \\\" Backslash \\\\ Tab \\t NL \\n CR \\r BS \\b FF \\f\"",
+      "sha256": "d5bb84005403c51465947954ae8e65ae5c1776552900b9db9b9e2da1acc85990"
+    },
+    {
+      "name": "Steuerzeichen",
+      "input": "\"\\u0001\\u001f\\u0000\"",
+      "canonical": "\"\\u0001\\u001f\\u0000\"",
+      "sha256": "fbef906a44a30f258b52aaff5a2ba1dcc97b42c9f06013fb28c654cd1640fbb3"
+    },
+    {
+      "name": "Slash nicht escapen",
+      "input": "\"a\\/b\"",
+      "canonical": "\"a/b\"",
+      "sha256": "f5effa31772a3689cb116700c569f4b72d765290968f099016a899ab6c1e4ee3"
+    },
+    {
+      "name": "Umlaute roh",
+      "input": "\"Größe Übernahme ß\"",
+      "canonical": "\"Größe Übernahme ß\"",
+      "sha256": "2e68a3bfe2068a9e3ff2447bddda5cdef49ccdf71b13c11c71a08ab46fe2a045"
+    },
+    {
+      "name": "Unicode-Escape zu roh",
+      "input": "\"\\u00e4\\u20ac\"",
+      "canonical": "\"ä€\"",
+      "sha256": "bbff85673954cd26b2ff017d374a2570614d3e1261048093adb55c711880e943"
+    },
+    {
+      "name": "Emoji Surrogatpaar",
+      "input": "\"\\ud83d\\ude00\"",
+      "canonical": "\"😀\"",
+      "sha256": "7a0c50b92434b015545fe93ab723db2d4b2cdd14a441405624a9ce8be29f1d5a"
+    },
+    {
+      "name": "DEL und U+2028 roh",
+      "input": "\"\\u007f\\u2028\"",
+      "canonical": "\" \"",
+      "sha256": "4f1d8efe6f6d24e372f25234017a5502c0fcc0f739ba754697212eecebf3c542"
+    },
+    {
+      "name": "Sortierung UTF-16",
+      "input": "{\"\\ufb01\":1,\"\\ud83d\\ude00\":2,\"a\":3,\"\\u00e4\":4,\"B\":5}",
+      "canonical": "{\"B\":5,\"a\":3,\"ä\":4,\"😀\":2,\"ﬁ\":1}",
+      "sha256": "3de6ab2dbe891866962010ae1b910a2a0807fd0204c6456c7e43269abe9ccf71"
+    },
+    {
+      "name": "Windows-Pfad",
+      "input": "{\"path\":\"C:\\\\Work\\\\repo\\\\src\\\\Datei.cs\"}",
+      "canonical": "{\"path\":\"C:\\\\Work\\\\repo\\\\src\\\\Datei.cs\"}",
+      "sha256": "26de0e3670a4088d26226e27c26dba364760d6c280d3d48a9d4f5d05dcc9d276"
+    },
+    {
+      "name": "Vorschlag",
+      "input": "{\"schemaVersion\": 1, \"proposalId\": \"7b0f2a8e-0000-4000-8000-000000000001\", \"runId\": \"run-1\", \"taskId\": \"task-1\", \"agent\": \"Coder\", \"tool\": \"File.ReadMany\", \"toolVersion\": \"1\", \"purpose\": \"Schnittstelle prüfen\", \"arguments\": {\"maxBytes\": 262144}, \"targets\": [{\"targetId\": \"t1\", \"path\": \"src/Importer.cs\", \"expectedSha256\": \"abababababababababababababababababababababababababababababababab\", \"lineStart\": 1, \"lineEnd\": 160}, {\"targetId\": \"t2\", \"path\": \"src/Parser.cs\"}], \"snapshotId\": \"snap-a81f\", \"policyRevision\": 3, \"sandboxId\": \"sbx-1\", \"createdAt\": \"2026-10-16T17:00:00.000Z\", \"expiresAt\": \"2026-10-16T17:05:00.000Z\"}",
+      "canonical": "{\"agent\":\"Coder\",\"arguments\":{\"maxBytes\":262144},\"createdAt\":\"2026-10-16T17:00:00.000Z\",\"expiresAt\":\"2026-10-16T17:05:00.000Z\",\"policyRevision\":3,\"proposalId\":\"7b0f2a8e-0000-4000-8000-000000000001\",\"purpose\":\"Schnittstelle prüfen\",\"runId\":\"run-1\",\"sandboxId\":\"sbx-1\",\"schemaVersion\":1,\"snapshotId\":\"snap-a81f\",\"targets\":[{\"expectedSha256\":\"abababababababababababababababababababababababababababababababab\",\"lineEnd\":160,\"lineStart\":1,\"path\":\"src/Importer.cs\",\"targetId\":\"t1\"},{\"path\":\"src/Parser.cs\",\"targetId\":\"t2\"}],\"taskId\":\"task-1\",\"tool\":\"File.ReadMany\",\"toolVersion\":\"1\"}",
+      "sha256": "0e55ff9dfa70500f71f339ca0458444c34a2b971675752d52536f8d81015481c"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "Gleitkommazahl",
+      "input": "1.5"
+    },
+    {
+      "name": "Exponent",
+      "input": "1e3"
+    },
+    {
+      "name": "Ganzzahl zu groß",
+      "input": "9007199254740992"
+    },
+    {
+      "name": "Doppelter Schlüssel",
+      "input": "{\"a\":1,\"a\":2}"
+    },
+    {
+      "name": "Einzelnes Surrogat",
+      "input": "\"\\ud800\""
+    },
+    {
+      "name": "NaN",
+      "input": "NaN"
+    }
+  ]
+}

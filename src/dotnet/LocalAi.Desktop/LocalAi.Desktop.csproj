@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>LocalAi.Desktop</AssemblyName>
+    <RootNamespace>LocalAi.Desktop</RootNamespace>
+    <!-- Wird nur unter Windows gebaut und ausgeführt; Warnungen dort nicht zu Fehlern machen. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Desktop.Core\LocalAi.Desktop.Core.csproj" />
+    <!-- Broker-Prozess wird neben die Anwendung kopiert und von ihr gestartet. -->
+    <ProjectReference Include="..\LocalAi.Broker.Host\LocalAi.Broker.Host.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="LocalAi.Broker.Host/LocalAi.Broker.Host.csproj" />
+  <Project Path="LocalAi.Broker/LocalAi.Broker.csproj" />
+  <Project Path="LocalAi.Contracts/LocalAi.Contracts.csproj" />
+  <Project Path="LocalAi.Desktop.Core/LocalAi.Desktop.Core.csproj" />
+  <Project Path="LocalAi.Desktop/LocalAi.Desktop.csproj" />
+  <Project Path="LocalAi.Tests/LocalAi.Tests.csproj" />
+</Solution>

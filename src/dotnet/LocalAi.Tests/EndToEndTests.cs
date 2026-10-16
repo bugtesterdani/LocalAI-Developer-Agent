@@ -1,0 +1,95 @@
+using LocalAi.Contracts;
+using LocalAi.Desktop.Core;
+
+namespace LocalAi.Tests;
+
+/// <summary>
+/// Ende-zu-Ende ohne Fenster: echter Broker-Prozess + Python-Fake-Agent + Oberflächenlogik.
+/// Wird übersprungen, wenn uv nicht installiert ist.
+/// </summary>
+public sealed class EndToEndTests
+{
+    private readonly Lock _ui = new();
+
+    [Test("M1-E2E")]
+    public async Task Fake_Agent_Freigaben_mit_Abwahl_ueber_die_Oberflaechenlogik()
+    {
+        if (!CommandExists("uv"))
+        {
+            Console.WriteLine("    (übersprungen: uv nicht gefunden)");
+            return;
+        }
+
+        var data = Path.Combine(Path.GetTempPath(), "localai-e2e-" + Guid.NewGuid().ToString("N"));
+        await using var broker = await BrokerProcess.StartAsync(CancellationToken.None, ["--data", data]);
+        var hs = broker.Handshake;
+        await using var requests = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
+        await using var events = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
+        await using var main = new MainViewModel(requests, events, a => { lock (_ui) { a(); } }, hs.SessionId);
+        await main.InitializeAsync();
+
+        main.StartFakeRunCommand.Execute(null);
+        await WaitAsync(() => main.Approvals.Count == 2, TimeSpan.FromSeconds(90), "zwei Vorschläge vom Fake-Agenten");
+        await WaitAsync(() => main.EventLog.Any(e => e.Text.Contains("abgewiesen", StringComparison.Ordinal)), TimeSpan.FromSeconds(10),
+            "unzulässiger Pfad abgewiesen");
+
+        ApprovalCardViewModel batch, single;
+        lock (_ui)
+        {
+            batch = main.Approvals.Single(c => c.IsBatch);
+            single = main.Approvals.Single(c => !c.IsBatch);
+            batch.Targets[0].IsSelected = false; // src/Parser.cs abwählen
+            batch.Targets[5].IsSelected = false; // README.md abwählen
+            Assert.True(!batch.CanApprove, "Erlauben gesperrt nach Abwahl");
+        }
+
+        batch.ApplySelectionCommand.Execute(null);
+        await WaitAsync(() => main.Approvals.Any(c => c.Proposal.ParentProposalId == batch.ProposalId), TimeSpan.FromSeconds(10), "neuer Vorschlag nach Abwahl");
+        ApprovalCardViewModel narrowed;
+        lock (_ui)
+        {
+            narrowed = main.Approvals.Single(c => c.Proposal.ParentProposalId == batch.ProposalId);
+            Assert.Equal(5, narrowed.TotalCount);
+            Assert.True(narrowed.CanApprove, "neuer Vorschlag kann erlaubt werden");
+            Assert.True(!main.Approvals.Contains(batch), "alter Vorschlag verschwindet");
+        }
+
+        narrowed.ApproveCommand.Execute(null);
+        single.DenyCommand.Execute(null);
+        await WaitAsync(() => main.Approvals.Count == 0, TimeSpan.FromSeconds(10), "Queue leer");
+        await WaitAsync(() => main.EventLog.Any(e => e.Text.Contains(UiText.State(ProposalState.Succeeded), StringComparison.Ordinal)),
+            TimeSpan.FromSeconds(10), "Ausführung erfolgreich");
+
+        var log = Path.Combine(hs.DataDirectory, "fake-agent.log");
+        await WaitAsync(() => File.Exists(log) && File.ReadAllText(log).Contains("fertig", StringComparison.Ordinal), TimeSpan.FromSeconds(20), "Fake-Agent fertig");
+        var text = File.ReadAllText(log);
+        Assert.True(text.Contains("Unzulässiger Pfad korrekt abgewiesen", StringComparison.Ordinal), "Pfadabweisung im Agentenprotokoll");
+        Assert.True(text.Contains("vom Nutzer abgewählt: ['t1', 't6']", StringComparison.Ordinal), "Agent erfährt die Abwahl: " + text);
+        Assert.True(text.Contains("Denied", StringComparison.Ordinal), "Agent erfährt die Ablehnung");
+    }
+
+    private async Task WaitAsync(Func<bool> condition, TimeSpan timeout, string what)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (true)
+        {
+            lock (_ui)
+            {
+                if (condition())
+                {
+                    return;
+                }
+            }
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new AssertionException($"Zeitüberschreitung: {what}");
+            }
+            await Task.Delay(100);
+        }
+    }
+
+    private static bool CommandExists(string name) =>
+        (Environment.GetEnvironmentVariable("PATH") ?? "")
+            .Split(Path.PathSeparator)
+            .Any(dir => File.Exists(Path.Combine(dir, name)) || File.Exists(Path.Combine(dir, name + ".exe")));
+}

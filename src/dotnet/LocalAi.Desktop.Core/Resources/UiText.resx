@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="AppTitle" xml:space="preserve">
+    <value>Local AI Developer</value>
+  </data>
+  <data name="Project" xml:space="preserve">
+    <value>Projekt</value>
+  </data>
+  <data name="ProjectNone" xml:space="preserve">
+    <value>kein Projekt (M1-Testlauf)</value>
+  </data>
+  <data name="SandboxNone" xml:space="preserve">
+    <value>SANDBOX: noch nicht vorhanden (folgt in M2)</value>
+  </data>
+  <data name="Agents" xml:space="preserve">
+    <value>AGENTEN</value>
+  </data>
+  <data name="AgentReady" xml:space="preserve">
+    <value>bereit</value>
+  </data>
+  <data name="ChatAndPlan" xml:space="preserve">
+    <value>CHAT UND PLAN</value>
+  </data>
+  <data name="ChatPlaceholder" xml:space="preserve">
+    <value>Chat und Planung folgen in M3. Bis dahin reicht ein Fake-Agent Toolvorschläge ein, damit die Freigaben geprüft werden können.</value>
+  </data>
+  <data name="Events" xml:space="preserve">
+    <value>EREIGNISSE</value>
+  </data>
+  <data name="Approvals" xml:space="preserve">
+    <value>FREIGABEN</value>
+  </data>
+  <data name="NoApprovals" xml:space="preserve">
+    <value>Keine offenen Freigaben.</value>
+  </data>
+  <data name="StartFakeRun" xml:space="preserve">
+    <value>Testlauf starten (Fake-Agent)</value>
+  </data>
+  <data name="EmergencyStop" xml:space="preserve">
+    <value>NOT-AUS</value>
+  </data>
+  <data name="ReleaseStop" xml:space="preserve">
+    <value>Not-Aus aufheben</value>
+  </data>
+  <data name="StoppedBanner" xml:space="preserve">
+    <value>NOT-AUS AKTIV – es wird nichts ausgeführt und keine Vorschläge angenommen.</value>
+  </data>
+  <data name="LabelRole" xml:space="preserve">
+    <value>Rolle</value>
+  </data>
+  <data name="LabelTool" xml:space="preserve">
+    <value>Tool</value>
+  </data>
+  <data name="LabelPurpose" xml:space="preserve">
+    <value>Zweck</value>
+  </data>
+  <data name="LabelSnapshot" xml:space="preserve">
+    <value>Snapshot</value>
+  </data>
+  <data name="LabelSandbox" xml:space="preserve">
+    <value>Sandbox</value>
+  </data>
+  <data name="LabelValidUntil" xml:space="preserve">
+    <value>Gültig bis</value>
+  </data>
+  <data name="LabelHash" xml:space="preserve">
+    <value>Vorschlags-Hash (SHA-256)</value>
+  </data>
+  <data name="LabelArguments" xml:space="preserve">
+    <value>Parameter</value>
+  </data>
+  <data name="LabelTargets" xml:space="preserve">
+    <value>Ziele</value>
+  </data>
+  <data name="LabelSideEffects" xml:space="preserve">
+    <value>Erwartete Nebenwirkungen</value>
+  </data>
+  <data name="LabelParent" xml:space="preserve">
+    <value>Ersetzt Vorschlag</value>
+  </data>
+  <data name="SideEffectsRead" xml:space="preserve">
+    <value>Nur Lesen. In M1 führt ein Testadapter nichts tatsächlich aus.</value>
+  </data>
+  <data name="UntrustedHint" xml:space="preserve">
+    <value>Inhalte aus Dateien, Webseiten und Agentenantworten sind nicht vertrauenswürdig und werden nur als Text angezeigt.</value>
+  </data>
+  <data name="Filter" xml:space="preserve">
+    <value>Filter (Pfad oder Endung)</value>
+  </data>
+  <data name="SelectAllVisible" xml:space="preserve">
+    <value>Alle sichtbaren auswählen</value>
+  </data>
+  <data name="DeselectAllVisible" xml:space="preserve">
+    <value>Alle sichtbaren abwählen</value>
+  </data>
+  <data name="SelectionCount" xml:space="preserve">
+    <value>{0} von {1} ausgewählt</value>
+  </data>
+  <data name="ApplySelection" xml:space="preserve">
+    <value>Auswahl übernehmen (erzeugt neuen Vorschlag)</value>
+  </data>
+  <data name="SelectionChangedHint" xml:space="preserve">
+    <value>Auswahl geändert. Bitte zuerst übernehmen – danach wird der neue Vorschlag angezeigt und kann erlaubt werden.</value>
+  </data>
+  <data name="ApproveOnce" xml:space="preserve">
+    <value>Diesen Aufruf einmal erlauben</value>
+  </data>
+  <data name="ApproveSelectionOnce" xml:space="preserve">
+    <value>Auswahl einmal erlauben</value>
+  </data>
+  <data name="Deny" xml:space="preserve">
+    <value>Ablehnen</value>
+  </data>
+  <data name="Lines" xml:space="preserve">
+    <value>Zeilen {0}–{1}</value>
+  </data>
+  <data name="LinesAll" xml:space="preserve">
+    <value>ganze Datei</value>
+  </data>
+  <data name="NoExpectedHash" xml:space="preserve">
+    <value>kein erwarteter Hash</value>
+  </data>
+  <data name="Starting" xml:space="preserve">
+    <value>Broker wird gestartet …</value>
+  </data>
+  <data name="Connected" xml:space="preserve">
+    <value>Verbunden mit Broker (Sitzung {0})</value>
+  </data>
+  <data name="ConnectFailed" xml:space="preserve">
+    <value>Verbindung zum Broker fehlgeschlagen: {0}</value>
+  </data>
+  <data name="ErrorFormat" xml:space="preserve">
+    <value>Fehler {0}: {1}</value>
+  </data>
+  <data name="FakeAgentStarted" xml:space="preserve">
+    <value>Fake-Agent gestartet (PID {0}). Protokoll: {1}</value>
+  </data>
+  <data name="ApprovedInfo" xml:space="preserve">
+    <value>Einmal erlaubt: {0}</value>
+  </data>
+  <data name="DeniedInfo" xml:space="preserve">
+    <value>Abgelehnt: {0}</value>
+  </data>
+  <data name="NarrowedInfo" xml:space="preserve">
+    <value>Neuer Vorschlag mit {0} von {1} Zielen erzeugt – bitte prüfen.</value>
+  </data>
+  <data name="State_AwaitingApproval" xml:space="preserve">
+    <value>wartet auf Freigabe</value>
+  </data>
+  <data name="State_Approved" xml:space="preserve">
+    <value>freigegeben</value>
+  </data>
+  <data name="State_Running" xml:space="preserve">
+    <value>läuft</value>
+  </data>
+  <data name="State_Succeeded" xml:space="preserve">
+    <value>erfolgreich</value>
+  </data>
+  <data name="State_Failed" xml:space="preserve">
+    <value>fehlgeschlagen</value>
+  </data>
+  <data name="State_Cancelled" xml:space="preserve">
+    <value>abgebrochen</value>
+  </data>
+  <data name="State_OutcomeUnknown" xml:space="preserve">
+    <value>Ergebnis unklar</value>
+  </data>
+  <data name="State_Denied" xml:space="preserve">
+    <value>abgelehnt</value>
+  </data>
+  <data name="State_Expired" xml:space="preserve">
+    <value>abgelaufen</value>
+  </data>
+  <data name="State_Invalidated" xml:space="preserve">
+    <value>ungültig</value>
+  </data>
+  <data name="State_Superseded" xml:space="preserve">
+    <value>durch Abwahl ersetzt</value>
+  </data>
+  <data name="State_Rejected" xml:space="preserve">
+    <value>abgewiesen</value>
+  </data>
+  <data name="Event_proposal.created" xml:space="preserve">
+    <value>Neuer Vorschlag</value>
+  </data>
+  <data name="Event_proposal.state" xml:space="preserve">
+    <value>Status</value>
+  </data>
+  <data name="Event_proposal.rejected" xml:space="preserve">
+    <value>Vorschlag abgewiesen</value>
+  </data>
+  <data name="Event_emergency.stop" xml:space="preserve">
+    <value>Not-Aus</value>
+  </data>
+  <data name="Event_emergency.release" xml:space="preserve">
+    <value>Not-Aus aufgehoben</value>
+  </data>
+  <data name="Event_broker.started" xml:space="preserve">
+    <value>Broker gestartet</value>
+  </data>
+</root>
