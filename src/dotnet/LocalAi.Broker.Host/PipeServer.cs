@@ -198,6 +198,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = new System.Text.UTF8Encoding(false),
+            StandardErrorEncoding = new System.Text.UTF8Encoding(false),
             CreateNoWindow = true,
         };
         foreach (var argument in command.Arguments)

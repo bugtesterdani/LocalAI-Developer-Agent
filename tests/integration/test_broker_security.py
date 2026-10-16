@@ -200,6 +200,6 @@ def test_manipuliertes_journal_verhindert_start(broker_factory, tmp_path):
     journal.write_text(journal.read_text(encoding="utf-8").replace("Original", "Gefälscht"), encoding="utf-8")
     from conftest import DEFAULT_DLL
     result = subprocess.run(["dotnet", str(DEFAULT_DLL), "--data", str(data)], input="", capture_output=True,
-                            text=True, timeout=30)
+                            text=True, encoding="utf-8", errors="replace", timeout=30)
     assert result.returncode == 3
     assert "manipuliert" in result.stderr

@@ -55,6 +55,8 @@ public sealed class BrokerProcess : IAsyncDisposable
         start.RedirectStandardInput = true;
         start.RedirectStandardOutput = true;
         start.RedirectStandardError = true;
+        start.StandardOutputEncoding = new System.Text.UTF8Encoding(false);
+        start.StandardErrorEncoding = new System.Text.UTF8Encoding(false);
         start.CreateNoWindow = true;
 
         var process = Process.Start(start) ?? throw new InvalidOperationException("Broker konnte nicht gestartet werden");

@@ -6,6 +6,12 @@ using LocalAi.Broker.Host;
 // Gibt beim Start genau eine JSON-Zeile auf stdout aus (Pipe-Name und Rollen-Tokens) und läuft,
 // bis stdin geschlossen wird (Elternprozess beendet) oder Strg+C gedrückt wird.
 
+// Ausgaben immer als UTF-8 (ohne BOM), unabhängig von der Konsolen-Codepage (z. B. 850 unter deutschem Windows).
+// Aufrufer (Oberfläche, Tests) lesen stdout/stderr als UTF-8.
+var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true });
+Console.SetError(new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true });
+
 var options = HostOptions.Parse(args);
 Directory.CreateDirectory(options.DataDirectory);
 

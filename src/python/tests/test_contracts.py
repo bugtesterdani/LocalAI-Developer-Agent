@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -41,5 +42,6 @@ def test_unbekannte_felder_und_fehlende_pflichtfelder_werden_abgelehnt():
 
 def test_generierte_dateien_sind_aktuell():
     result = subprocess.run([sys.executable, str(ROOT / "tools" / "codegen" / "generate.py"), "--check"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace",
+                            env={**os.environ, "PYTHONUTF8": "1"})
     assert result.returncode == 0, result.stdout + result.stderr

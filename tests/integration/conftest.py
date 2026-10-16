@@ -52,7 +52,8 @@ def start_broker(data_dir: pathlib.Path, *extra: str) -> RunningBroker:
         pytest.skip(f"Broker nicht gebaut: {dll}")
     process = subprocess.Popen(
         ["dotnet", str(dll), "--data", str(data_dir), *extra],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace",
     )
     assert process.stdout is not None
     line = process.stdout.readline()
