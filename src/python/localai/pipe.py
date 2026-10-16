@@ -56,6 +56,9 @@ def _open_windows_pipe(path: str, timeout: float):
     invalid_handle = wintypes.HANDLE(-1).value
 
     deadline = time.monotonic() + timeout
+    # Existiert die Pipe gar nicht, nur kurz wiederholen (zwischen zwei Serverinstanzen kann sie
+    # für Millisekunden fehlen) – nicht bis zum Gesamt-Timeout warten.
+    not_found_deadline = time.monotonic() + min(timeout, 2.0)
     while True:
         handle = create_file(path, generic_read | generic_write, 0, None, open_existing, 0, None)
         if handle is not None and handle != invalid_handle:
@@ -71,7 +74,9 @@ def _open_windows_pipe(path: str, timeout: float):
                     error_sem_timeout, error_pipe_busy, error_file_not_found):
                 raise ctypes.WinError(ctypes.get_last_error())
         elif error == error_file_not_found:
-            time.sleep(0.02)  # Server legt gerade die nächste Instanz an
+            if time.monotonic() > not_found_deadline:
+                raise FileNotFoundError(f"Named Pipe {path} existiert nicht – läuft der Broker?")
+            time.sleep(0.02)
         else:
             raise ctypes.WinError(error)
 
