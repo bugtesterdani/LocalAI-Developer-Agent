@@ -30,9 +30,10 @@ var clock = SystemClock.Instance;
 CountingTestAdapter? testAdapter;
 IToolAdapter adapter;
 IPolicyContext policy;
+HyperVSandbox? vm;
 try
 {
-    (adapter, policy, testAdapter) = CreateSandbox(options, children, Guid.NewGuid().ToString("D"));
+    (adapter, policy, testAdapter, vm) = CreateSandbox(options, children, Guid.NewGuid().ToString("D"));
 }
 catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or ChildProcessException or NotSupportedException)
 {
@@ -66,7 +67,25 @@ Console.CancelKeyPress += (_, e) =>
     shutdown.Cancel();
 };
 
-var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, options);
+var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, options)
+{
+    SandboxStatus = () => vm?.Status.Text,
+};
+if (vm is not null)
+{
+    // Aufbau im Hintergrund; Fortschritt als Ereignis an die Oberfläche und ins Journal.
+    vm.StatusChanged += s =>
+    {
+        try
+        {
+            broker.PublishInfo("sandbox.status", s.Text);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    };
+    vm.Start();
+}
 var serverTask = server.RunAsync(shutdown.Token);
 
 var handshake = new
@@ -111,11 +130,15 @@ catch (OperationCanceledException)
 finally
 {
     children.StopAll();
+    if (vm is not null)
+    {
+        await vm.DisposeAsync();
+    }
     await broker.DisposeAsync();
 }
 return 0;
 
-static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test) CreateSandbox(
+static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, HyperVSandbox? Vm) CreateSandbox(
     HostOptions options, ChildProcesses children, string sessionId)
 {
     switch (options.Mode)
@@ -123,12 +146,12 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test) 
         case SandboxMode.Test:
         {
             var test = new CountingTestAdapter { Delay = options.TestAdapterDelay };
-            return (test, new TestPolicyContext(), test);
+            return (test, new TestPolicyContext(), test, null);
         }
         case SandboxMode.None:
         {
             var project = LoadProject(options);
-            return (new NoSandboxAdapter(), new ProjectPolicyContext(project, new SnapshotRegistry()), null);
+            return (new NoSandboxAdapter(), new ProjectPolicyContext(project, new SnapshotRegistry()), null, null);
         }
         case SandboxMode.DevLocalUnsafe:
         {
@@ -150,10 +173,24 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test) 
                 ["--inbox", transport.Inbox, "--outbox", transport.Outbox, "--work", Path.Combine(dir, "work"), "--key-file", keyFile],
                 new Dictionary<string, string>(), Path.Combine(options.DataDirectory, "worker.log"));
             var adapter = new SandboxToolAdapter(session, transport, context, registry, Path.Combine(dir, "scratch"), SystemClock.Instance);
-            return (adapter, context, null);
+            return (adapter, context, null, null);
+        }
+        case SandboxMode.HyperV:
+        {
+            var project = LoadProject(options);
+            var registry = new SnapshotRegistry();
+            var context = new ProjectPolicyContext(project, registry);
+            var session = new SandboxSession(sessionId);
+            var settings = options.HyperV ?? throw new InvalidDataException("sandbox.hyperv fehlt in config/localai.json");
+            var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
+                Path.Combine(options.DataDirectory, "hyperv.log"));
+            var vm = new HyperVSandbox(settings, host, guestDir => Task.Run(() =>
+                GuestPayloadBuilder.Build(guestDir, GuestPayloadSources.FromRepository(options.RepoRoot), session.Key, settings.TransferDiskBytes)));
+            var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance);
+            return (adapter, context, null, vm);
         }
         default:
-            throw new NotSupportedException("Hyper-V-Sandbox folgt in M2b – bis dahin 'dev-local-unsafe' oder 'none' verwenden");
+            throw new NotSupportedException($"Betriebsart {options.Mode} wird nicht unterstützt");
     }
 }
 

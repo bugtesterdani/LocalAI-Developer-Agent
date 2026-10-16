@@ -18,7 +18,7 @@ from localai.contracts import (
     proposal_sha256,
 )
 from localai.pathrules import PathRuleError, normalize_relative
-from localai.worker.__main__ import process_one
+from localai.worker.__main__ import DirectorySink, process_one
 from localai.worker.jobs import JobRejected, WorkerState, compute_mac, verify_job
 from localai.worker.snapshot import SnapshotError, SnapshotStore, snapshot_id
 from localai.worker.tools import ToolRunner
@@ -248,13 +248,13 @@ def test_process_one_schreibt_ergebnis_oder_ablehnung(env):
     j = job(proposal("File.Read", [ToolTarget(target_id="t1", path="README.md")], env["snap"]), env["state"].last_sequence + 1)
     good = inbox / f"{j.sequence}-{j.job_id}.job.json"
     good.write_bytes(envelope(j))
-    process_one(good, outbox, KEY, env["state"], env["runner"])
+    process_one(good, DirectorySink(outbox), KEY, env["state"], env["runner"])
     result = ResultEnvelope.model_validate_json((outbox / f"{j.job_id}.result.json").read_text(encoding="utf-8"))
     assert result.result.target_results[0].text.startswith("# Demo") and not good.exists()
 
     bad = inbox / "99-x.job.json"
     bad.write_bytes(envelope(j, key=b"y" * 32))
-    process_one(bad, outbox, KEY, env["state"], env["runner"])
+    process_one(bad, DirectorySink(outbox), KEY, env["state"], env["runner"])
     assert "Signatur" in (outbox / "99-x.job.json.rejected.txt").read_text(encoding="utf-8")
 
 

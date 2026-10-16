@@ -95,7 +95,8 @@ public sealed class BrokerProcess : IAsyncDisposable
         try
         {
             _process.StandardInput.Close();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            // Mit VM braucht das Herunterfahren länger: der Broker löscht die Sandbox-VM.
+            using var timeout = new CancellationTokenSource(Handshake.Mode == "hyperv" ? TimeSpan.FromMinutes(3) : TimeSpan.FromSeconds(5));
             await _process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException)
@@ -186,6 +187,8 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
     public Task ReleaseAsync(CancellationToken ct) => CallAsync(M.Release, null, ct);
 
     public Task<JsonElement> StartFakeAgentAsync(CancellationToken ct) => CallAsync(M.StartFakeAgent, null, ct);
+
+    public Task<JsonElement> StatusAsync(CancellationToken ct) => CallAsync(M.Status, null, ct);
 
     public async Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct) =>
         ContractJson.Deserialize<List<FolderGrant>>(await CallAsync(M.ProjectGrants, null, ct).ConfigureAwait(false));

@@ -6,6 +6,19 @@
       "command": "uv",
       "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.worker"],
       "workingDirectory": "."
+    },
+    "hyperv": {
+      "imagePath": "D:\\Agent\\WindowsImage\\windows11.iso",
+      "imageName": "Windows 11 Pro",
+      "vmName": "LocalAi-Sandbox",
+      "vmDirectory": null,
+      "memoryMB": 8192,
+      "processors": 4,
+      "osDiskGB": 128,
+      "transferDiskMB": 64,
+      "buildTimeoutMinutes": 90,
+      "productKey": null,
+      "keepVmOnExit": false
     }
   },
   "fakeAgent": {

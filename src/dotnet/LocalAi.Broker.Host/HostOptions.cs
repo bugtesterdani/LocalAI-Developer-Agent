@@ -66,6 +66,7 @@ public sealed record HostOptions
     public string RepoRoot { get; init; } = AppContext.BaseDirectory;
     public ProcessCommand? FakeAgent { get; init; }
     public ProcessCommand? DevWorker { get; init; }
+    public LocalAi.Sandbox.HyperVSettings? HyperV { get; init; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -169,8 +170,38 @@ public sealed record HostOptions
             {
                 options = options with { DevWorker = ReadCommand(worker, repoRoot) };
             }
+            if (sandbox.TryGetProperty("hyperv", out var hyperv) && hyperv.ValueKind == JsonValueKind.Object)
+            {
+                options = options with { HyperV = ReadHyperV(hyperv, repoRoot, options.DataDirectory) };
+            }
         }
         return options;
+    }
+
+    private static LocalAi.Sandbox.HyperVSettings ReadHyperV(JsonElement e, string repoRoot, string dataDirectory)
+    {
+        string? Str(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Length > 0 ? v.GetString() : null;
+        int? Int(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
+        var image = Str("imagePath") ?? throw new JsonException("sandbox.hyperv.imagePath fehlt (Pfad zur Windows-ISO)");
+        var vmDirectory = Str("vmDirectory") is { } dir
+            ? Path.GetFullPath(Path.Combine(repoRoot, dir))
+            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataDirectory))!, "vm");
+        var defaults = new LocalAi.Sandbox.HyperVSettings { ImagePath = "-", VmDirectory = "-" };
+        return new LocalAi.Sandbox.HyperVSettings
+        {
+            ImagePath = Path.GetFullPath(Path.Combine(repoRoot, image)),
+            ImageName = Str("imageName"),
+            ImageIndex = Int("imageIndex"),
+            VmName = Str("vmName") ?? defaults.VmName,
+            VmDirectory = vmDirectory,
+            MemoryMB = Int("memoryMB") ?? defaults.MemoryMB,
+            Processors = Int("processors") ?? defaults.Processors,
+            OsDiskGB = Int("osDiskGB") ?? defaults.OsDiskGB,
+            TransferDiskMB = Int("transferDiskMB") ?? defaults.TransferDiskMB,
+            BuildTimeout = TimeSpan.FromMinutes(Int("buildTimeoutMinutes") ?? (int)defaults.BuildTimeout.TotalMinutes),
+            ProductKey = Str("productKey"),
+            KeepVmOnExit = e.TryGetProperty("keepVmOnExit", out var keep) && keep.ValueKind == JsonValueKind.True,
+        };
     }
 
     private static ProcessCommand ReadCommand(JsonElement element, string repoRoot)

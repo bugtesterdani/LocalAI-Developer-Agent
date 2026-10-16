@@ -225,4 +225,7 @@
   <data name="Event_broker.started" xml:space="preserve">
     <value>Broker gestartet</value>
   </data>
+  <data name="Event_sandbox.status" xml:space="preserve">
+    <value>Sandbox</value>
+  </data>
 </root>

@@ -82,6 +82,7 @@ TEXTS = {
     "Event_emergency.stop": "Not-Aus",
     "Event_emergency.release": "Not-Aus aufgehoben",
     "Event_broker.started": "Broker gestartet",
+    "Event_sandbox.status": "Sandbox",
 }
 
 HEADER = """<?xml version="1.0" encoding="utf-8"?>

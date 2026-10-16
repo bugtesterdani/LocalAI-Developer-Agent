@@ -5,10 +5,10 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 
 - Spezifikation: [docs/Local-AI-Developer-Agent-Projektspezifikation.md](docs/Local-AI-Developer-Agent-Projektspezifikation.md)
 - Umsetzungsplan: [docs/Umsetzungsplan.md](docs/Umsetzungsplan.md)
-- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M2a.md](docs/pruefung-M2a.md) (vorher: [M1](docs/pruefung-M1.md))
+- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M2b.md](docs/pruefung-M2b.md) (vorher: [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
 - Anforderungen → Tests: [docs/sicherheit/anforderungen-tests.md](docs/sicherheit/anforderungen-tests.md)
 
-## Stand: Meilenstein M2a – echte Dateizugriffe über Snapshot und Worker
+## Stand: Meilenstein M2b – Offline-VM mit Hyper-V
 
 | Teil | Sprache | Status |
 |---|---|---|
@@ -19,7 +19,7 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 | Projektordner mit Rechten, Snapshot (ohne Verknüpfungen), signierte Jobs | C# | fertig |
 | Sandbox-Worker: Snapshot-Import, File.List/Read/ReadMany/Search | Python | fertig |
 | Modus `dev-local-unsafe` (Worker ohne VM, rot markiert) | – | fertig, **nur zum Entwickeln** |
-| Offline-Hyper-V-VM, Copy-VMFile / Transfer-VHDX | PowerShell / C# | M2b |
+| Offline-Hyper-V-VM: Neuaufbau je Sitzung (DISM, unattend, ohne NIC), Selbsttest, Copy-VMFile hin, Transfer-VHDX zurück (ohne Einbinden gelesen) | PowerShell / C# / Python | fertig, **auf PC 123 zu prüfen** |
 | Toolchains in der VM | – | M2c |
 | Modelle, fünf Agenten, Chat | – | M3 |
 
@@ -30,7 +30,7 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 | `test` | Testadapter zählt nur, nichts wird gelesen |
 | `none` | keine Sandbox – jede Ausführung wird abgelehnt |
 | `dev-local-unsafe` | Worker läuft **ohne VM** als normaler Prozess auf diesem PC; nur zum Entwickeln, in der Oberfläche rot |
-| `hyperv` | Offline-VM (ab M2b) |
+| `hyperv` | Offline-VM; einmalig `scripts\sandbox\Enable-LocalAiHyperV.ps1` als Administrator, ISO in `sandbox.hyperv.imagePath` |
 
 ## Struktur
 
@@ -40,10 +40,11 @@ config/               localai.json (Modus, Worker, Fake-Agent), demo-project.jso
 samples/demo-csv/     kleines Demo-Projekt für den Testlauf
 docs/                 Spezifikation, Plan, Prüfanleitungen
 scripts/              test.ps1 / start.ps1 (Windows), test.sh (Linux)
+  sandbox/              Hyper-V: Aufbau, Copy-VMFile, Laufwerkswechsel, KVP-Signal, Gast-Provisionierung
 src/dotnet/           LocalAi.slnx
   LocalAi.Contracts     generierte Records, kanonisches JSON, Pipe-Protokoll
   LocalAi.Broker        Approval Broker, Policy, Audit-Journal, Testadapter
-  LocalAi.Sandbox       Snapshot, Job-Signatur, Transport, Ergebnisprüfung
+  LocalAi.Sandbox       Snapshot, Job-Signatur, Transport, Ergebnisprüfung, VM-Steuerung, VHDX-Leser
   LocalAi.Broker.Host   Broker-Prozess (Named-Pipe-Server)
   LocalAi.Desktop.Core  ViewModels, Broker-Client, deutsche Texte (UiText.resx)
   LocalAi.Desktop       WPF-Oberfläche
@@ -76,6 +77,7 @@ Oberflächentexte stehen in `tools/codegen/make_uitext.py` und werden nach `UiTe
 
 ## Bekannte Übergangslösungen
 
-- **dev-local-unsafe:** Der Worker prüft Signaturen und liest nur aus der Snapshot-Kopie, läuft aber ohne VM-Isolation. Echte Isolation ab M2b (`hyperv`).
+- **dev-local-unsafe:** Der Worker prüft Signaturen und liest nur aus der Snapshot-Kopie, läuft aber ohne VM-Isolation. Für echte Isolation `hyperv` verwenden.
+- **Ein Job zur Zeit in der VM:** Es gibt ein Transfer-Laufwerk; parallele Sandbox-Jobs (Spezifikation: bis zu zwei) folgen bei Bedarf mit einem zweiten.
 - **Ordnerrechte:** In M2a nur `List` und `Read`; `Create`/`Modify`/`Delete`/`Execute` folgen mit Patches (M4) und Builds.
 - **Rollen über Tokens:** Orchestrator und UI unterscheiden sich in M1 über zufällige Tokens pro Broker-Start; die Pipe ist auf den aktuellen Windows-Benutzer beschränkt. Getrennte Windows-Identitäten für den Orchestrator folgen mit M3.

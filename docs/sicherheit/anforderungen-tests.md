@@ -1,4 +1,4 @@
-# Anforderungen → Tests (Stand M2a)
+# Anforderungen → Tests (Stand M2b)
 
 Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. C#-Tests (xUnit, Trait `Pruefung`) laufen im selben Prozess mit einstellbarer Uhr, Python-Integrationstests gegen den echten Broker-Prozess über die Named Pipe.
 
@@ -20,6 +20,13 @@ Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. 
 | SEC-05 (Dateisystem) | Symlinks/Junctions/Hardlinks werden nicht verfolgt, Ausschlüsse, Limits; gemeinsame Pfadvektoren | `SandboxTests.Verknuepfungen_*`, `Snapshot_enthaelt_*`, `Snapshot_Limits_greifen`, `Pfadregeln_entsprechen_*` | `test_snapshot_und_lesen_ueber_den_worker`, `test_worker.py::test_pfadregeln_*` |
 | SEC-18 (Teil) | Worker: Signatur, Sequenz, Sitzung, Ablauf, Vorschlags-Hash, Zip-Slip, fehlende/zusätzliche/veränderte Dateien, Verknüpfungen im Archiv; Broker: Ergebnis streng geprüft, immer „nicht vertrauenswürdig“ | `SandboxTests.Ergebnis_wird_streng_geprueft`, `SnapshotId_und_JobSignatur_entsprechen_Python` | `test_worker.py::*` |
 | R05 Snapshot | ohne Freigabe wird nichts gelesen oder übertragen | `EndToEndTests.*` | `test_snapshot_ohne_freigabe_liest_nichts` |
+| SEC-18 (Transfer-VHDX) | VHDX ohne Einbinden gelesen: Header-/Regions-Prüfsummen, offenes Log, BAT außerhalb, zu große Laufwerke abgelehnt; Container: Magie, Art, Länge, SHA-256; leeres Laufwerk = keine Antwort; Gegenprobe mit qemu-Abbild | `TransferTests.*` | `test_transfer.py` |
+| SEC-18 (Signal) | Gastsignal nur im festen Format; ohne Antwort wird gesperrt, keine Wiederholung | `HyperVTests.Signale_*`, `Fehlende_Antwort_sperrt_ohne_Wiederholung` | – |
+| SEC-24 | Netzwerkkarte bei Aufbau, Laufwerkswechsel oder Beobachtung → gesperrt; Bericht mit Fehlern oder fehlendem Worker → gesperrt | `HyperVTests.Netzwerkkarte_*`, `Fehler_im_Bericht_*`, `Bericht_wird_streng_bewertet` | `test_hyperv_ohne_vm_bleibt_gesperrt`; echte VM: `test_hyperv_abnahme.py` |
+| SEC-06 | Netzwerkprüfungen im Gast (DNS, HTTP, TCP v4/v6, Default-Switch) müssen scheitern | `HyperVTests.Erreichbares_Netz_*` (Bewertung) | echte VM: `test_hyperv_abnahme.py` |
+| SEC-21 (Teil) | Gast erhält nur Laufzeit + Worker (keine Testwerkzeuge, keine Editable-Verweise auf Hostpfade); `C:\LocalAi` nur für SYSTEM/Administratoren schreibbar | `HyperVTests.Gastdateien_*` | – (ACL: `provision.ps1`) |
+| R17 / M2b | Aufbau → Selbsttest → Snapshot → Roundtrips über Laufwerkswechsel (simuliert mit echtem Worker); 50 Roundtrips mit echter VM | `HyperVTests.Aufbau_Selbsttest_und_Roundtrips_*` | `test_hyperv_abnahme.py` |
+| Skripte | Syntax aller PowerShell-Skripte (5.1), UTF-8-BOM, Antwortdatei | `HyperVTests.PowerShell_Skripte_sind_gueltig` | – |
 | E2E | Broker-Prozess + Worker (dev-local) + Python-Fake-Agent + Oberflächenlogik: Snapshot, Auflisten, Lesen mit Abwahl, Ablehnung | `EndToEndTests.*` | – |
 
-Noch nicht abgedeckt (folgt): Junctions/Hardlinks unter echtem Windows (Tests vorhanden, laufen nur auf PC 123 voll), SEC-06/-07/-13/-19/-21/-24 und SEC-18 mit Transfer-VHDX (M2b/M2c), SEC-08 bis -11/-14 Web (M6), SEC-16/-22 Modell und Orchestrator (M3), SEC-20 Toolchains (M4).
+Noch nicht abgedeckt (folgt): SEC-07/-13/-19/-21 mit Toolchains (M2c/M4); die Hyper-V-Prüfungen laufen mit echter VM nur auf PC 123 (`test_hyperv_abnahme.py`), SEC-08 bis -11/-14 Web (M6), SEC-16/-22 Modell und Orchestrator (M3), SEC-20 Toolchains (M4).

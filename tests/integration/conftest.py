@@ -35,7 +35,7 @@ class RunningBroker:
     def orchestrator(self) -> BrokerClient:
         return BrokerClient(self.pipe, self.orchestrator_token)
 
-    def stop(self, hard: bool = False) -> None:
+    def stop(self, hard: bool = False, timeout: float = 20) -> None:
         if self.process.poll() is not None:
             return
         if hard:
@@ -43,7 +43,7 @@ class RunningBroker:
         else:
             assert self.process.stdin is not None
             self.process.stdin.close()
-        self.process.wait(timeout=20)
+        self.process.wait(timeout=timeout)
 
 
 def start_broker(data_dir: pathlib.Path, *extra: str) -> RunningBroker:

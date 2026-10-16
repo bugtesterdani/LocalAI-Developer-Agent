@@ -149,5 +149,6 @@ public sealed partial class DesktopTests
         public Task ReleaseAsync(CancellationToken ct) => Task.CompletedTask;
         public Task<JsonElement> StartFakeAgentAsync(CancellationToken ct) => throw new NotSupportedException();
         public Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<FolderGrant>>([]);
+        public Task<JsonElement> StatusAsync(CancellationToken ct) => Task.FromResult(JsonDocument.Parse("{}").RootElement.Clone());
     }
 }

@@ -16,6 +16,7 @@ public interface IBrokerUiApi
     Task ReleaseAsync(CancellationToken ct);
     Task<JsonElement> StartFakeAgentAsync(CancellationToken ct);
     Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct);
+    Task<JsonElement> StatusAsync(CancellationToken ct);
 }
 
 public sealed record AgentItem(string Name, string StateText);
@@ -203,6 +204,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private long _lastSeq;
     private string? _selectAfterRefresh;
     private string _projectText = UiText.Get("ProjectNone");
+    private string? _sandboxDetail;
     private Task? _eventLoop;
 
     public MainViewModel(IBrokerUiApi api, IBrokerUiApi eventsApi, Action<Action> post, string sessionId, string sandboxMode = "test")
@@ -227,7 +229,31 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand ReleaseCommand { get; }
 
     public string SandboxMode { get; }
-    public string SandboxText => UiText.Exists($"Sandbox_{SandboxMode}") ? UiText.Get($"Sandbox_{SandboxMode}") : SandboxMode;
+    public string SandboxText
+    {
+        get
+        {
+            var text = UiText.Exists($"Sandbox_{SandboxMode}") ? UiText.Get($"Sandbox_{SandboxMode}") : SandboxMode;
+            return SandboxDetail is null ? text : $"{text} – {SandboxDetail}";
+        }
+    }
+
+    /// <summary>Zustand der Offline-VM (Aufbau, bereit, gesperrt) aus dem Broker.</summary>
+    public string? SandboxDetail
+    {
+        get => _sandboxDetail;
+        private set
+        {
+            if (Set(ref _sandboxDetail, value))
+            {
+                OnPropertyChanged(nameof(SandboxText));
+                OnPropertyChanged(nameof(IsSandboxProblem));
+            }
+        }
+    }
+
+    /// <summary>VM gesperrt: Kopfzeile rot.</summary>
+    public bool IsSandboxProblem => SandboxDetail?.StartsWith("gesperrt", StringComparison.Ordinal) == true;
 
     /// <summary>Entwicklungsmodus ohne VM: in der Oberfläche deutlich als unsicher markiert.</summary>
     public bool IsUnsafeSandbox => SandboxMode == "dev-local-unsafe";
@@ -290,6 +316,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ? UiText.Get("ProjectNone")
                 : string.Join(", ", grants.Select(g => $"{g.GrantId} ({string.Join("/", g.Rights)}): {g.Root}"));
             Post(() => ProjectText = text);
+            var status = await _api.StatusAsync(_shutdown.Token).ConfigureAwait(false);
+            if (status.TryGetProperty("sandbox", out var sandbox) && sandbox.ValueKind == JsonValueKind.String)
+            {
+                var detail = sandbox.GetString();
+                Post(() => SandboxDetail ??= detail);
+            }
         }).ConfigureAwait(false);
         await RefreshPendingAsync().ConfigureAwait(false);
         _eventLoop = Task.Run(EventLoopAsync);
@@ -409,6 +441,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             else if (e.Type == "emergency.release")
             {
                 IsStopped = false;
+            }
+            else if (e.Type == "sandbox.status" && e.Message is not null)
+            {
+                SandboxDetail = e.Message;
             }
             else if (e.Type == "broker.started" && e.Message is not null)
             {

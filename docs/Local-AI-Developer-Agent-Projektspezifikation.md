@@ -1,10 +1,12 @@
 # Local AI Developer Agent – vollständige Projektspezifikation
 
-Version 1.2 · Stand: 16.10.2026 · Status: umsetzbarer Architekturvorschlag, noch keine implementierte Software
+Version 1.3 · Stand: 16.10.2026 · Status: in Umsetzung (M1–M2b implementiert, siehe `Umsetzungsplan.md`)
 
 **Änderungen in 1.1 gegenüber 1.0:** Implementierung C# (UI, Approval/Tool Broker, Audit) + Python (Orchestrierung, Agenten, Model Gateway, Tools, Sandbox-Worker); Zielsprachen der Agenten C#, Python, C++, HDevelop, PowerShell, Batch über erweiterbare Toolchains; große Repositories ab MVP mit Kontextprofilen über 8K und Repo-Index; Live-Sichtbarkeit der Agenten und nicht blockierende UI; Transfer Host→VM per Copy-VMFile, VM→Host per Transfer-VHDX; Hardwareerkennung statt fester GPU-Annahmen. Zeitplan siehe `Umsetzungsplan.md`.
 
 **Änderungen in 1.2:** Sammelfreigaben für exakt benannte Ziellisten mit Abwahl einzelner Einträge; Sandbox-VM wird bei jedem Sitzungsstart neu installiert, keine VM-Snapshots, die VM erhält nie eine Netzwerkkarte; Lizenzen für Windows-Gast und Toolchains stellt der Nutzer bereit; Oberfläche Deutsch, Agenten-Prompts Englisch.
+
+**Änderungen in 1.3:** Rückweg VM → Host als Container direkt auf dem Rohgerät der Transfer-VHDX (bisher „Härtungsoption“); der Host liest die abgehängte VHDX-Datei mit eigenem, strengem Parser ohne Einbinden. Fertigmeldung des Gasts über einen einzigen KVP-Wert mit festem Format. Laufzeitbefehle über die Gruppe „Hyper-V-Administratoren“, nur der Neuaufbau mit Administratorrechten.
 
 ## 1. Herkunft, Ziel und Verbindlichkeit
 
@@ -278,13 +280,13 @@ Datenaustausch erfolgt ausschließlich über zwei hostkontrollierte Offline-Wege
 
 **VM → Host: Transfer-VHDX.** Eine zweite virtuelle Festplatte am SCSI-Controller dient ausschließlich der Ergebnisrückgabe:
 
-1. Der Worker schreibt Ergebnisse und ein Manifest mit Hashes auf die Transfer-VHDX, flusht und meldet Fertigstellung.
+1. Der Worker schreibt einen Container (Kopf mit Art, Sequenz, Länge und SHA-256, danach die Nutzlast) **direkt ab Sektor 0 auf das Rohgerät** – ohne Dateisystem. Er beschreibt nur ein Laufwerk exakt der erwarteten Größe, dessen erste 4 KiB leer sind; damit ist jedes Transfer-Laufwerk nur einmal nutzbar und das Systemlaufwerk ausgeschlossen. Danach flusht er und setzt den KVP-Wert `LocalAiSignal = result:<Sequenz>`.
 2. Der Host hängt die VHDX im laufenden Betrieb ab (`Remove-VMHardDiskDrive`). Ist Hot-Detach nicht stabil, wird die VM vorher pausiert.
-3. Ein eigener, niedrig privilegierter Importprozess bindet sie mit `Mount-VHD -ReadOnly -NoDriveLetter` ein.
-4. Der Import prüft Manifest, Hashes, Größen, Dateitypen und Pfadnamen und kopiert zulässige Dateien in `Runs\<run>\outbox`.
-5. Danach Dismount; die VHDX wird aus einer leeren Vorlage ersetzt, nicht formatiert, und wieder angehängt.
+3. Der Broker liest die abgehängte VHDX-**Datei** mit einem eigenen, strengen Parser (Header- und Regionsprüfsummen, kein offenes Log, keine Elternlaufwerke, alle Offsets innerhalb der Datei, Größenlimit). Es wird nichts eingebunden; kein Dateisystemtreiber des Hosts berührt Gastdaten.
+4. Der Container wird geprüft (Kennung, Version, Art, Länge, SHA-256, Sequenz passend zum Job) und danach als untrusted Ergebnis an die Ergebnisprüfung gegeben.
+5. Die VHDX wird durch eine Kopie der leeren Vorlage ersetzt, nicht formatiert, und wieder angehängt.
 
-Ein vom Gast beschriebenes Dateisystem ist für den Host eine Angriffsfläche. Daher: nur read-only, kein Laufwerksbuchstabe, kein Explorer, Indexer oder automatischer Scan im Importpfad, harte Größenlimits. Härtungsoption: Containerformat direkt auf dem Rohgerät ohne Dateisystem, vom Host ohne Mount gelesen. Ergebnisse gelten als untrusted; der Host führt Ergebnisdateien niemals aus.
+Die Fertigmeldung über KVP ist der einzige Rückkanal außer der Transfer-VHDX; der Host akzeptiert dort nur `result:<Zahl>` bzw. `report:0`. Bleibt die Meldung aus, wird die Sandbox für die Sitzung gesperrt (keine Wiederholung). Ergebnisse gelten als untrusted; der Host führt Ergebnisdateien niemals aus.
 
 ### Rechteprofil – Beispiel
 

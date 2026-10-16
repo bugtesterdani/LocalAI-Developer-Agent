@@ -130,3 +130,20 @@ def test_snapshot_ohne_freigabe_liest_nichts(sandbox):
     work = pathlib.Path(b.data_dir) / "sandbox-dev" / "work" / "snapshots"
     assert not any(work.glob("*.manifest.json")) if work.exists() else True
     assert orch.outcome(view.proposal.proposal_id).state == ProposalState.AwaitingApproval
+
+
+@pytest.mark.skipif(os.name == "nt", reason="würde unter Windows einen echten VM-Aufbau starten")
+def test_hyperv_ohne_vm_bleibt_gesperrt(broker_factory, tmp_path):
+    """Ohne verfügbare VM wird nichts ausgeführt; die Oberfläche sieht den Grund."""
+    b = broker_factory("--mode", "hyperv", "--config", str(ROOT / "config" / "localai.json"))
+    ui, orch = b.ui(), b.orchestrator()
+    deadline = time.monotonic() + 15
+    while not (ui.status().get("sandbox") or "").startswith("gesperrt") and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert (ui.status().get("sandbox") or "").startswith("gesperrt")
+    grant = orch.grants()[0]
+    outcome = approve_and_wait(ui, orch, orch.submit(req("Workspace.Snapshot", {"grantId": grant.grant_id, "root": grant.root})))
+    assert outcome.state == ProposalState.Failed
+    assert "nicht bereit" in outcome.result.target_results[0].message
+    events = ui.wait_events(0, timeout_ms=100)
+    assert any(e.type == "sandbox.status" for e in events)

@@ -31,6 +31,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.ProjectGrants] = [CallerRole.Ui, CallerRole.Orchestrator],
     };
 
+    /// <summary>Aktueller Zustand der Offline-VM (nur Betriebsart hyperv).</summary>
+    public Func<string?> SandboxStatus { get; init; } = () => null;
+
     /// <summary>Mehrere wartende Instanzen, damit gleichzeitige Verbindungen nicht als "Pipe beschäftigt" scheitern.</summary>
     private const int ListeningInstances = 4;
 
@@ -163,6 +166,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                     ["stopped"] = broker.IsStopped,
                     ["pending"] = broker.Pending().Count,
                     ["mode"] = HostOptions.ModeName(options.Mode),
+                    ["sandbox"] = SandboxStatus(),
                     ["testAdapterInvocations"] = testAdapter?.Invocations ?? 0,
                 };
             case M.Submit:

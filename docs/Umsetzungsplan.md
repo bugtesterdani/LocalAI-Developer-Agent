@@ -1,6 +1,8 @@
 # Local AI Developer Agent – Umsetzungsplan
 
-Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.2 · Plan v4 · Stand: 16.10.2026
+Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.3 · Plan v4 · Stand: 16.10.2026
+
+**Umsetzungsstand:** M1 abgenommen. M2 in drei Schritten: **M2a** (Ordnerrechte, Snapshot, signierte Jobs, Worker, Entwicklungsmodus ohne VM) und **M2b** (Hyper-V-Neuaufbau, Selbsttest, Copy-VMFile, Transfer-VHDX) implementiert, Prüfung auf PC 123 offen; **M2c** (Toolchains) folgt.
 
 ## Entscheidungen
 

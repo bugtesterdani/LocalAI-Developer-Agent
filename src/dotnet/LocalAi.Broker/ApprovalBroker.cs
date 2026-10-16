@@ -361,6 +361,26 @@ public sealed class ApprovalBroker : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Infrastruktur-Ereignis (z. B. Sandbox-Status) ins Journal und an die Oberfläche. Kein Vorschlag, keine Freigabe.
+    /// </summary>
+    public void PublishInfo(string type, string message)
+    {
+        if (!type.StartsWith("sandbox.", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Nur sandbox.* Ereignisse", nameof(type));
+        }
+        lock (_gate)
+        {
+            if (Volatile.Read(ref _disposed) == 1)
+            {
+                return;
+            }
+            _journal.Append(type, new JsonObject { ["message"] = message });
+            AddEvent(type, null, message);
+        }
+    }
+
     /// <summary>Wartet auf Ereignisse nach <paramref name="afterSeq"/> (Long-Polling).</summary>
     public async Task<IReadOnlyList<BrokerEvent>> WaitEventsAsync(long afterSeq, TimeSpan timeout, CancellationToken cancellationToken)
     {

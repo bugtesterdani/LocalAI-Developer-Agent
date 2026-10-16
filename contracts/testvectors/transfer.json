@@ -1,0 +1,12 @@
+{
+  "kind": 1,
+  "sequence": 42,
+  "payloadUtf8": "{\"jobId\":\"j-1\",\"sequence\":42,\"text\":\"Grüße aus der VM\"}",
+  "headerHex": "4c4149584645523101000000010000002a000000000000003900000000000000f94f5946497d1e64123b55eb72f3d3cc4b058c9b1dbc6445cf840a508dfc34d0",
+  "imageLength": 8192,
+  "imageSha256": "cfba22e92a795bb7094d103d4ab0c99c8bd7793fe3411ec4cd9d98e84c1b6af6",
+  "qemuVhdx": {
+    "file": "transfer-qemu.vhdx.gz",
+    "virtualSize": 4194304
+  }
+}
