@@ -57,8 +57,8 @@ public sealed class EndToEndTests
             TimeSpan.FromSeconds(10), "Ausführung erfolgreich");
 
         var log = Path.Combine(hs.DataDirectory, "fake-agent.log");
-        await WaitAsync(() => File.Exists(log) && File.ReadAllText(log).Contains("fertig", StringComparison.Ordinal), TimeSpan.FromSeconds(20), "Fake-Agent fertig");
-        var text = File.ReadAllText(log);
+        await WaitAsync(() => ReadShared(log).Contains("fertig", StringComparison.Ordinal), TimeSpan.FromSeconds(20), "Fake-Agent fertig");
+        var text = ReadShared(log);
         Assert.True(text.Contains("Unzulässiger Pfad korrekt abgewiesen", StringComparison.Ordinal), "Pfadabweisung im Agentenprotokoll");
         Assert.True(text.Contains("vom Nutzer abgewählt: ['t1', 't6']", StringComparison.Ordinal), "Agent erfährt die Abwahl: " + text);
         Assert.True(text.Contains("Denied", StringComparison.Ordinal), "Agent erfährt die Ablehnung");
@@ -81,6 +81,25 @@ public sealed class EndToEndTests
                 Assert.Fail($"Zeitüberschreitung: {what}");
             }
             await Task.Delay(100);
+        }
+    }
+
+    /// <summary>Liest eine Datei, die ein anderer Prozess gerade beschreibt (unter Windows nötig).</summary>
+    private static string ReadShared(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+        catch (IOException)
+        {
+            return string.Empty; // gerade gesperrt – nächster Versuch im Warteintervall
         }
     }
 

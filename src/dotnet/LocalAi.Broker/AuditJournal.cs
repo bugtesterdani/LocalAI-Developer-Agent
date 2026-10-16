@@ -107,10 +107,20 @@ public sealed class AuditJournal : IDisposable
         }
     }
 
-    /// <summary>Prüft eine Journaldatei vollständig (z. B. für Diagnose und Tests).</summary>
+    /// <summary>
+    /// Prüft eine Journaldatei vollständig (z. B. für Diagnose und Tests).
+    /// Darf auch laufen, während der Broker das Journal zum Schreiben geöffnet hat:
+    /// unter Windows muss der Lesezugriff dafür Schreiben durch andere zulassen.
+    /// </summary>
     public static int Verify(string path)
     {
-        var lines = File.ReadAllText(path, Encoding.UTF8).Split('\n');
+        string text;
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        using (var reader = new StreamReader(stream, Encoding.UTF8))
+        {
+            text = reader.ReadToEnd();
+        }
+        var lines = text.Split('\n');
         var prev = GenesisHash;
         var count = 0;
         foreach (var line in lines)

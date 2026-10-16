@@ -218,15 +218,28 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         return new JsonObject { ["pid"] = process.Id, ["log"] = logPath };
     }
 
+    private static readonly SemaphoreSlim LogGate = new(1, 1);
+
+    /// <summary>
+    /// Schreibt die Ausgabe des Fake-Agenten ins Protokoll. Die Datei wird mit FileShare.ReadWrite geöffnet,
+    /// damit sie unter Windows während des Laufs gelesen werden kann.
+    /// </summary>
     private static async Task PumpAsync(StreamReader reader, string logPath)
     {
         try
         {
             while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
-                lock (typeof(PipeServer))
+                await LogGate.WaitAsync().ConfigureAwait(false);
+                try
                 {
-                    File.AppendAllText(logPath, line + Environment.NewLine);
+                    await using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+                    await using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
+                    await writer.WriteLineAsync(line).ConfigureAwait(false);
+                }
+                finally
+                {
+                    LogGate.Release();
                 }
             }
         }
