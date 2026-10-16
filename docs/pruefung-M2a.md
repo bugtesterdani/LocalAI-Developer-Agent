@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 ```
 
 - [ ] Kopfzeile zeigt **rot und fett**: „SANDBOX: ENTWICKLUNGSMODUS – UNSICHER, Worker läuft ohne VM auf diesem PC“.
-- [ ] Projekt: „Demo-Projekt …“ mit Ordner `samples\demo-csv` (Rechte: Auflisten, Lesen).
+- [ ] Projekt: `demo (List/Read): C:\…\samples\demo-csv`.
 - [ ] Im Task-Manager läuft ein `python`-Prozess (der Worker). Er verschwindet beim Schließen der Oberfläche.
 
 ## 3. Testlauf mit Fake-Agent
@@ -64,11 +64,11 @@ powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 Pfad steht in der grünen Info-Zeile. Erwartet u. a.:
 
 ```text
-Snapshot …: 7 Dateien, … Bytes
+Snapshot …: 7 Dateien, … Bytes, 0 übersprungen
 7 Dateien gefunden
 Unzulässiger Pfad korrekt abgewiesen (403): …
 … abgelehnt
-… erfolgreich … übersprungen: ['t…', 't…']
+… erfolgreich, vom Nutzer abgewählt: ['t…', 't…']
   t…: … Zeichen, erste Zeile: # Format
 ```
 
@@ -79,7 +79,7 @@ Unzulässiger Pfad korrekt abgewiesen (403): …
 
 1. **Verknüpfung wird nicht verfolgt:** als Administrator
    `mklink /J samples\demo-csv\link C:\Windows` und `mklink samples\demo-csv\x.txt C:\Windows\win.ini` anlegen, Testlauf wiederholen.
-   Erwartet: weiterhin „7 Dateien“, `link` und `x.txt` fehlen in der Liste. Danach beide wieder löschen.
+   Erwartet: weiterhin „7 Dateien“ (Verknüpfungen werden übersprungen), `link` und `x.txt` fehlen in der Liste. Danach beide wieder löschen.
 2. **Kein Read-Recht:** in `config\demo-project.json` bei `rights` nur `"List"` eintragen, Oberfläche neu starten, Testlauf.
    Erwartet: Fake-Agent meldet „Kein freigegebener Ordner mit List- und Read-Recht“; es erscheint keine Karte. Danach zurückstellen.
 3. **Ohne Sandbox:** in `config\localai.json` `"mode": "none"` setzen.
