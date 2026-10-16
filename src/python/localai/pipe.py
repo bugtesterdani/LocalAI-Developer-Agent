@@ -30,20 +30,50 @@ class BrokerError(Exception):
         self.message = message
 
 
-ERROR_PIPE_BUSY = 231
-
-
 def _open_windows_pipe(path: str, timeout: float):
-    """Öffnet eine Named Pipe unter Windows; wartet, solange alle Serverinstanzen belegt sind."""
+    """Öffnet eine Named Pipe unter Windows über CreateFileW.
+
+    Pythons ``open()`` meldet "Pipe beschäftigt" (ERROR_PIPE_BUSY, 231) nur als
+    ``Errno 22 Invalid argument``. Über die Windows-API erhalten wir den echten
+    Fehlercode und warten mit ``WaitNamedPipeW``, bis eine Serverinstanz frei ist.
+    """
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create_file.restype = wintypes.HANDLE
+    wait_named_pipe = kernel32.WaitNamedPipeW
+    wait_named_pipe.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
+    wait_named_pipe.restype = wintypes.BOOL
+
+    generic_read, generic_write = 0x80000000, 0x40000000
+    open_existing = 3
+    error_file_not_found, error_pipe_busy, error_sem_timeout = 2, 231, 121
+    invalid_handle = wintypes.HANDLE(-1).value
+
     deadline = time.monotonic() + timeout
     while True:
-        try:
-            return open(path, "r+b", buffering=0)  # noqa: SIM115
-        except OSError as err:
-            busy = getattr(err, "winerror", None) == ERROR_PIPE_BUSY
-            if not busy or time.monotonic() > deadline:
-                raise
-            time.sleep(0.02)
+        handle = create_file(path, generic_read | generic_write, 0, None, open_existing, 0, None)
+        if handle is not None and handle != invalid_handle:
+            fd = msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+            return open(fd, "r+b", buffering=0)  # noqa: SIM115
+        error = ctypes.get_last_error()
+        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        if remaining_ms <= 0:
+            raise ctypes.WinError(error)
+        if error == error_pipe_busy:
+            # Wartet, bis eine Instanz frei wird (oder Zeit abläuft); danach erneut versuchen.
+            if not wait_named_pipe(path, min(remaining_ms, 1000)) and ctypes.get_last_error() not in (
+                    error_sem_timeout, error_pipe_busy, error_file_not_found):
+                raise ctypes.WinError(ctypes.get_last_error())
+        elif error == error_file_not_found:
+            time.sleep(0.02)  # Server legt gerade die nächste Instanz an
+        else:
+            raise ctypes.WinError(error)
 
 
 class _Transport:
