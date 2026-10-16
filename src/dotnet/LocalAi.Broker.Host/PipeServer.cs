@@ -12,30 +12,8 @@ namespace LocalAi.Broker.Host;
 /// Named-Pipe-Server des Brokers. Es gibt keine execute(command)-Methode: Ausführung erfolgt nur
 /// brokerintern nach einer Entscheidung über den UI-Token.
 /// </summary>
-public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroker broker, CountingTestAdapter adapter, HostOptions options)
+public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroker broker, CountingTestAdapter? testAdapter, ChildProcesses children, HostOptions options)
 {
-    /// <summary>Vom Broker gestartete Agentenprozesse; werden beim Beenden mitsamt Kindprozessen beendet.</summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, Process> _agents = new();
-
-    /// <summary>Beendet alle noch laufenden Agentenprozesse (inkl. uv → python).</summary>
-    public void StopAgents()
-    {
-        foreach (var (pid, process) in _agents)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                    AppendLog(Path.Combine(options.DataDirectory, "fake-agent.log"), $"[Broker] Agent PID {pid} beim Beenden des Brokers gestoppt");
-                }
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-            }
-        }
-    }
-
     private static readonly IReadOnlyDictionary<string, CallerRole[]> Permissions = new Dictionary<string, CallerRole[]>
     {
         [M.Ping] = [CallerRole.Ui, CallerRole.Orchestrator],
@@ -50,6 +28,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.EmergencyStop] = [CallerRole.Ui],
         [M.Release] = [CallerRole.Ui],
         [M.StartFakeAgent] = [CallerRole.Ui],
+        [M.ProjectGrants] = [CallerRole.Ui, CallerRole.Orchestrator],
     };
 
     /// <summary>Mehrere wartende Instanzen, damit gleichzeitige Verbindungen nicht als "Pipe beschäftigt" scheitern.</summary>
@@ -170,14 +149,21 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         switch (method)
         {
             case M.Ping:
-                return new JsonObject { ["role"] = role.ToString(), ["sessionId"] = broker.SessionId, ["stopped"] = broker.IsStopped };
+                return new JsonObject
+                {
+                    ["role"] = role.ToString(),
+                    ["sessionId"] = broker.SessionId,
+                    ["stopped"] = broker.IsStopped,
+                    ["mode"] = HostOptions.ModeName(options.Mode),
+                };
             case M.Status:
                 return new JsonObject
                 {
                     ["sessionId"] = broker.SessionId,
                     ["stopped"] = broker.IsStopped,
                     ["pending"] = broker.Pending().Count,
-                    ["testAdapterInvocations"] = adapter.Invocations,
+                    ["mode"] = HostOptions.ModeName(options.Mode),
+                    ["testAdapterInvocations"] = testAdapter?.Invocations ?? 0,
                 };
             case M.Submit:
                 return Node(broker.Submit(ContractJson.Deserialize<ProposalRequest>(p)));
@@ -205,6 +191,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 return new JsonObject { ["stopped"] = false };
             case M.StartFakeAgent:
                 return StartFakeAgent();
+            case M.ProjectGrants:
+                return Node(broker.Grants);
             default:
                 throw new BrokerException(BrokerErrorCodes.BadRequest, $"Unbekannte Methode: {method}");
         }
@@ -215,130 +203,19 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         var command = options.FakeAgent
                       ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Kein Fake-Agent in config/localai.json konfiguriert (Datei nicht gefunden?)");
         var logPath = Path.Combine(options.DataDirectory, "fake-agent.log");
-        var resolved = ResolveExecutable(command.Command);
-        AppendLog(logPath, $"[Broker] Starte: {command.Command} {string.Join(' ', command.Arguments)}");
-        AppendLog(logPath, $"[Broker] Arbeitsverzeichnis: {command.WorkingDirectory}");
-        AppendLog(logPath, $"[Broker] Programm: {resolved ?? "NICHT im PATH gefunden"}");
-
-        var start = new ProcessStartInfo(resolved ?? command.Command)
-        {
-            WorkingDirectory = command.WorkingDirectory,
-            UseShellExecute = false,
-            // stdin nicht vom Broker erben (der Broker nutzt sein stdin als Lebenszeichen des Elternprozesses).
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = new System.Text.UTF8Encoding(false),
-            StandardErrorEncoding = new System.Text.UTF8Encoding(false),
-            CreateNoWindow = true,
-        };
-        foreach (var argument in command.Arguments)
-        {
-            start.ArgumentList.Add(argument);
-        }
-        // Der Orchestrator erhält nur seinen eigenen Token, nie den UI-Token.
-        start.Environment["LOCALAI_PIPE"] = pipeName;
-        start.Environment["LOCALAI_TOKEN"] = tokens.Orchestrator;
-        start.Environment.Remove("LOCALAI_UI_TOKEN");
-        start.Environment["PYTHONUTF8"] = "1";
-        start.Environment["PYTHONIOENCODING"] = "utf-8";
-
-        Process process;
         try
         {
-            process = Process.Start(start) ?? throw new InvalidOperationException("Process.Start lieferte keinen Prozess");
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
-        {
-            AppendLog(logPath, $"[Broker] Start fehlgeschlagen: {ex.Message}");
-            throw new BrokerException(BrokerErrorCodes.Unprocessable,
-                $"Fake-Agent konnte nicht gestartet werden ('{command.Command}' in {command.WorkingDirectory}): {ex.Message}");
-        }
-        AppendLog(logPath, $"[Broker] Prozess gestartet, PID {process.Id}");
-        process.StandardInput.Close();
-        _agents[process.Id] = process;
-        var stdout = PumpAsync(process.StandardOutput, logPath);
-        var stderr = PumpAsync(process.StandardError, logPath);
-        _ = Task.Run(async () =>
-        {
-            await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
-            await process.WaitForExitAsync().ConfigureAwait(false);
-            AppendLog(logPath, $"[Broker] Prozess beendet, Exitcode {process.ExitCode}");
-            _agents.TryRemove(process.Id, out _);
-            process.Dispose();
-        });
-        return new JsonObject { ["pid"] = process.Id, ["log"] = logPath };
-    }
-
-    /// <summary>Sucht ein Programm im PATH (unter Windows mit PATHEXT, z. B. uv.exe oder uv.cmd).</summary>
-    private static string? ResolveExecutable(string command)
-    {
-        if (Path.IsPathRooted(command))
-        {
-            return File.Exists(command) ? command : null;
-        }
-        var extensions = OperatingSystem.IsWindows()
-            ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT").Split(';', StringSplitOptions.RemoveEmptyEntries)
-            : [string.Empty];
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            foreach (var extension in Path.HasExtension(command) ? [string.Empty] : extensions)
+            // Der Orchestrator erhält nur seinen eigenen Token, nie den UI-Token.
+            var process = children.Start(command, [], new Dictionary<string, string>
             {
-                var candidate = Path.Combine(dir.Trim('"'), command + extension);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
+                ["LOCALAI_PIPE"] = pipeName,
+                ["LOCALAI_TOKEN"] = tokens.Orchestrator,
+            }, logPath);
+            return new JsonObject { ["pid"] = process.Id, ["log"] = logPath };
         }
-        return null;
-    }
-
-    private static void AppendLog(string logPath, string line)
-    {
-        LogGate.Wait();
-        try
+        catch (ChildProcessException ex)
         {
-            using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-            using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
-            writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {line}");
-        }
-        catch (IOException)
-        {
-        }
-        finally
-        {
-            LogGate.Release();
-        }
-    }
-
-    private static readonly SemaphoreSlim LogGate = new(1, 1);
-
-    /// <summary>
-    /// Schreibt die Ausgabe des Fake-Agenten ins Protokoll. Die Datei wird mit FileShare.ReadWrite geöffnet,
-    /// damit sie unter Windows während des Laufs gelesen werden kann.
-    /// </summary>
-    private static async Task PumpAsync(StreamReader reader, string logPath)
-    {
-        try
-        {
-            while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
-            {
-                await LogGate.WaitAsync().ConfigureAwait(false);
-                try
-                {
-                    await using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-                    await using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
-                    await writer.WriteLineAsync(line).ConfigureAwait(false);
-                }
-                finally
-                {
-                    LogGate.Release();
-                }
-            }
-        }
-        catch (IOException)
-        {
+            throw new BrokerException(BrokerErrorCodes.Unprocessable, $"Fake-Agent: {ex.Message}");
         }
     }
 

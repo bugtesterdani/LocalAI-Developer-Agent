@@ -60,7 +60,19 @@
                     <TextBlock Text=": " Foreground="#D1D5DB" />
                     <TextBlock Text="{Binding ProjectText}" Foreground="#D1D5DB" />
                     <TextBlock Text="  |  " Foreground="#9CA3AF" />
-                    <TextBlock Text="{Binding SandboxText}" Foreground="#FCD34D" />
+                    <TextBlock Text="{Binding SandboxText}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#FCD34D" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsUnsafeSandbox}" Value="True">
+                                        <Setter Property="Foreground" Value="#FCA5A5" />
+                                        <Setter Property="FontWeight" Value="Bold" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                     <TextBlock Text="  |  " Foreground="#9CA3AF" />
                     <TextBlock Text="{Binding StatusText}" Foreground="#D1D5DB" />
                     <TextBlock x:Name="StartupStatus" Foreground="#D1D5DB" Margin="8,0,0,0" />

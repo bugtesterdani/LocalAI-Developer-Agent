@@ -25,7 +25,7 @@ public partial class App : Application
             // Zwei Verbindungen: eine für Anfragen, eine für das Warten auf Ereignisse.
             _requests = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
             _events = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
-            _viewModel = new MainViewModel(_requests, _events, action => Dispatcher.BeginInvoke(action), hs.SessionId);
+            _viewModel = new MainViewModel(_requests, _events, action => Dispatcher.BeginInvoke(action), hs.SessionId, hs.Mode);
             window.DataContext = _viewModel;
             await _viewModel.InitializeAsync();
         }

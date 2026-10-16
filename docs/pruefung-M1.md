@@ -94,7 +94,7 @@ Die Info-Zeile nennt den Pfad (Standard `%LOCALAPPDATA%\LocalAi\broker\fake-agen
 
 ## 6. Audit-Journal (optional)
 
-Datei: `%LOCALAPPDATA%\LocalAi\broker\audit.jsonl` – eine kanonische JSON-Zeile pro Ereignis mit `prevHash` und `hash`.
+Datei (seit M2a): `%LOCALAPPDATA%\LocalAi\broker\audit.db` – SQLite, eine Zeile pro Ereignis mit `prev_hash` und `hash`. (In M1 war es `audit.jsonl`.)
 
 Manipulationstest (Oberfläche vorher schließen):
 

@@ -51,7 +51,8 @@ def start_broker(data_dir: pathlib.Path, *extra: str) -> RunningBroker:
     if not dll.exists():
         pytest.skip(f"Broker nicht gebaut: {dll}")
     process = subprocess.Popen(
-        ["dotnet", str(dll), "--data", str(data_dir), *extra],
+        # Standard: Testmodus (Testadapter, Grant "g-test"); einzelne Tests überschreiben --mode.
+        ["dotnet", str(dll), "--data", str(data_dir), "--mode", "test", *extra],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace",
     )

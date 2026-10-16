@@ -61,10 +61,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
     private Task? _dispatcherLoop;
     private Task? _sweeperLoop;
 
-    public ApprovalBroker(BrokerOptions options, IToolAdapter adapter, AuditJournal journal, IClock? clock = null)
+    public ApprovalBroker(BrokerOptions options, IToolAdapter adapter, AuditJournal journal, IClock? clock, IPolicyContext policyContext)
     {
         _options = options;
-        _policy = new ProposalPolicy(options);
+        _policy = new ProposalPolicy(options, policyContext);
         _adapter = adapter;
         _journal = journal;
         _clock = clock ?? SystemClock.Instance;
@@ -73,6 +73,9 @@ public sealed class ApprovalBroker : IAsyncDisposable
 
     /// <summary>Kennung dieser Broker-Sitzung. Capabilities sind an sie gebunden.</summary>
     public string SessionId { get; }
+
+    /// <summary>Freigegebene Ordner (für Agenten und Oberfläche lesbar, nie änderbar).</summary>
+    public IReadOnlyList<FolderGrant> Grants => _policy.Grants;
 
     public bool IsStopped
     {

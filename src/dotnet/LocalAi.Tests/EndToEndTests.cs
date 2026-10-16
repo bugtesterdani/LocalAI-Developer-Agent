@@ -33,7 +33,8 @@ public sealed class EndToEndTests(ITestOutputHelper output)
             Step($"Datenordner: {hs.DataDirectory}");
             var requests = requestsConn = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
             var events = eventsConn = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
-            var main = mainVm = new MainViewModel(requests, events, a => { lock (_ui) { a(); } }, hs.SessionId);
+            var main = mainVm = new MainViewModel(requests, events, a => { lock (_ui) { a(); } }, hs.SessionId, hs.Mode);
+            Assert.Equal("dev-local-unsafe", hs.Mode);
             await main.InitializeAsync();
             Step("Oberflächenlogik verbunden, Fake-Agent wird gestartet (uv run)");
 
@@ -44,8 +45,23 @@ public sealed class EndToEndTests(ITestOutputHelper output)
                 Assert.True(main.ErrorText is null, "Start des Fake-Agenten fehlgeschlagen: " + main.ErrorText + "\n" + ReadShared(_agentLog!));
                 Step(main.InfoText!);
             }
-            await WaitAsync(() => main.Approvals.Count == 2, TimeSpan.FromSeconds(90), "zwei Vorschläge vom Fake-Agenten");
-            Step("Zwei Vorschläge sind da");
+            // 1. Snapshot und 2. Auflisten einzeln erlauben (echter Worker liest den Demo-Ordner).
+            foreach (var tool in new[] { "Workspace.Snapshot", "File.List" })
+            {
+                await WaitAsync(() => main.Approvals.Any(c => c.Proposal.Tool == tool), TimeSpan.FromSeconds(90), $"Vorschlag {tool}");
+                ApprovalCardViewModel card;
+                lock (_ui)
+                {
+                    card = main.Approvals.Single(c => c.Proposal.Tool == tool);
+                    Assert.True(card.CanApprove, $"{tool} kann erlaubt werden");
+                }
+                Step($"{tool} wird erlaubt");
+                card.ApproveCommand.Execute(null);
+                await WaitAsync(() => !main.Approvals.Contains(card), TimeSpan.FromSeconds(10), $"{tool} verlässt die Queue");
+            }
+
+            await WaitAsync(() => main.Approvals.Count == 2, TimeSpan.FromSeconds(30), "zwei Lese-Vorschläge vom Fake-Agenten");
+            Step("Zwei Lese-Vorschläge sind da");
             await WaitAsync(() => main.EventLog.Any(e => e.Text.Contains("abgewiesen", StringComparison.Ordinal)), TimeSpan.FromSeconds(10),
                 "unzulässiger Pfad abgewiesen");
 
@@ -54,8 +70,9 @@ public sealed class EndToEndTests(ITestOutputHelper output)
             {
                 batch = main.Approvals.Single(c => c.IsBatch);
                 single = main.Approvals.Single(c => !c.IsBatch);
-                batch.Targets[0].IsSelected = false; // src/Parser.cs abwählen
-                batch.Targets[5].IsSelected = false; // README.md abwählen
+                Assert.Equal(7, batch.TotalCount);
+                batch.Targets[0].IsSelected = false; // README.md abwählen
+                batch.Targets[5].IsSelected = false; // tests/ImporterTests.cs abwählen
                 Assert.True(!batch.CanApprove, "Erlauben gesperrt nach Abwahl");
             }
 
@@ -85,6 +102,8 @@ public sealed class EndToEndTests(ITestOutputHelper output)
             Assert.True(text.Contains("Unzulässiger Pfad korrekt abgewiesen", StringComparison.Ordinal), "Pfadabweisung im Agentenprotokoll");
             Assert.True(text.Contains("vom Nutzer abgewählt: ['t1', 't6']", StringComparison.Ordinal), "Agent erfährt die Abwahl: " + text);
             Assert.True(text.Contains("Denied", StringComparison.Ordinal), "Agent erfährt die Ablehnung");
+            Assert.True(text.Contains("7 Dateien gefunden", StringComparison.Ordinal), "Auflisten über den Worker");
+            Assert.True(text.Contains("erste Zeile: # Format", StringComparison.Ordinal), "echter Dateiinhalt aus dem Snapshot");
             Step("Prüfungen bestanden");
         }
         finally

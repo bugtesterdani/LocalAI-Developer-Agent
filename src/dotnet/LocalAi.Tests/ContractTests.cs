@@ -60,20 +60,4 @@ public sealed class ContractTests
         Assert.ThrowsAny<JsonException>(() => ContractJson.Deserialize<UserDecision>(
             """{"proposalId":"a","decision":"Approve"}"""));
     }
-
-    [Fact]
-    public void Pfadregeln_lehnen_Ausbrueche_ab()
-    {
-        string[] bad =
-        [
-            "..\\secret.txt", "a/../b", "/etc/passwd", "\\\\server\\share\\x", "\\\\?\\C:\\x", "C:\\Windows",
-            "datei.txt:stream", "CON", "src/nul.txt", "a//b", "a/./b", "ordner./x", "x\u0001", "",
-        ];
-        foreach (var path in bad)
-        {
-            Assert.Throws<BrokerException>(() => PathRules.NormalizeRelative(path));
-        }
-        Assert.Equal("src/Csv/Parser.cs", PathRules.NormalizeRelative("src\\Csv\\Parser.cs"));
-        Assert.Equal("docs/Übernahme.md", PathRules.NormalizeRelative("docs/Übernahme.md"));
-    }
 }

@@ -22,7 +22,7 @@ public sealed class BrokerTests : IAsyncDisposable
 
     private ApprovalBroker NewBroker(bool start = true)
     {
-        var broker = new ApprovalBroker(new BrokerOptions(), _adapter, new AuditJournal(JournalPath, _clock), _clock);
+        var broker = new ApprovalBroker(new BrokerOptions(), _adapter, new AuditJournal(JournalPath, _clock), _clock, new TestPolicyContext());
         if (start)
         {
             broker.Start(runBackgroundLoops: false);
@@ -38,7 +38,7 @@ public sealed class BrokerTests : IAsyncDisposable
         Tool: tool,
         ToolVersion: "1",
         Purpose: "Test",
-        Arguments: JsonDocument.Parse("{}").RootElement.Clone(),
+        Arguments: JsonDocument.Parse("""{"grantId":"g-test"}""").RootElement.Clone(),
         Targets: Enumerable.Range(1, targets).Select(i => new ToolTarget($"t{i}", $"src/Datei{i}.cs")).ToList(),
         SnapshotId: "snap-1",
         IdempotencyKey: key ?? Guid.NewGuid().ToString("N"));

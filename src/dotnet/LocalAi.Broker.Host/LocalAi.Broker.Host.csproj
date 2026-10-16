@@ -5,6 +5,6 @@
     <AssemblyName>LocalAi.Broker.Host</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\LocalAi.Broker\LocalAi.Broker.csproj" />
+    <ProjectReference Include="..\LocalAi.Sandbox\LocalAi.Sandbox.csproj" />
   </ItemGroup>
 </Project>

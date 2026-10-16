@@ -25,7 +25,7 @@ def make_request(tool: str = "File.Read", paths: list[str] | None = None, key: s
     paths = paths or ["src/Importer.cs"]
     return ProposalRequest(
         schema_version=1, run_id="run-it", task_id="task-it", agent=AgentRole.Coder, tool=tool,
-        tool_version="1", purpose=purpose, arguments={},
+        tool_version="1", purpose=purpose, arguments={"grantId": "g-test"},
         targets=[ToolTarget(target_id=f"t{i}", path=p) for i, p in enumerate(paths, start=1)],
         snapshot_id="snap-it", idempotency_key=key or uuid.uuid4().hex,
     )
@@ -200,7 +200,7 @@ def test_manipuliertes_journal_verhindert_start(broker_factory, tmp_path):
     with sqlite3.connect(data / "audit.db") as db:  # Eintrag nachträglich verfälschen
         db.execute("UPDATE journal SET data = replace(data, 'Original', 'Gefälscht')")
     from conftest import DEFAULT_DLL
-    result = subprocess.run(["dotnet", str(DEFAULT_DLL), "--data", str(data)], input="", capture_output=True,
+    result = subprocess.run(["dotnet", str(DEFAULT_DLL), "--data", str(data), "--mode", "test"], input="", capture_output=True,
                             text=True, encoding="utf-8", errors="replace", timeout=30)
     assert result.returncode == 3
     assert "manipuliert" in result.stderr

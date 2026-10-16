@@ -5,36 +5,50 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 
 - Spezifikation: [docs/Local-AI-Developer-Agent-Projektspezifikation.md](docs/Local-AI-Developer-Agent-Projektspezifikation.md)
 - Umsetzungsplan: [docs/Umsetzungsplan.md](docs/Umsetzungsplan.md)
-- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M1.md](docs/pruefung-M1.md)
+- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M2a.md](docs/pruefung-M2a.md) (vorher: [M1](docs/pruefung-M1.md))
 - Anforderungen → Tests: [docs/sicherheit/anforderungen-tests.md](docs/sicherheit/anforderungen-tests.md)
 
-## Stand: Meilenstein M1 – Freigabe-Kern
+## Stand: Meilenstein M2a – echte Dateizugriffe über Snapshot und Worker
 
 | Teil | Sprache | Status |
 |---|---|---|
 | Verträge (JSON Schema → C# + Pydantic), kanonisches JSON | C# / Python | fertig, Kreuztests grün |
-| Approval Broker, Capabilities, Audit-Journal mit Hashkette | C# | fertig |
+| Approval Broker, Capabilities, Audit-Journal (SQLite, Hashkette) | C# | fertig |
 | Broker-Prozess mit Named Pipe und Rollen-Tokens | C# | fertig |
-| Freigabe-Oberfläche inkl. Sammelfreigabe mit Abwahl, Not-Aus | C# / WPF | fertig, **unter Windows zu prüfen** |
-| Python-Client und Fake-Agent | Python | fertig |
-| Offline-VM, echte Dateizugriffe | – | M2 |
-| Modelle, fünf Agenten | – | M3 |
+| Freigabe-Oberfläche inkl. Sammelfreigabe mit Abwahl, Not-Aus, Sandbox-Anzeige | C# / WPF | fertig |
+| Projektordner mit Rechten, Snapshot (ohne Verknüpfungen), signierte Jobs | C# | fertig |
+| Sandbox-Worker: Snapshot-Import, File.List/Read/ReadMany/Search | Python | fertig |
+| Modus `dev-local-unsafe` (Worker ohne VM, rot markiert) | – | fertig, **nur zum Entwickeln** |
+| Offline-Hyper-V-VM, Copy-VMFile / Transfer-VHDX | PowerShell / C# | M2b |
+| Toolchains in der VM | – | M2c |
+| Modelle, fünf Agenten, Chat | – | M3 |
+
+### Sandbox-Modi (`config/localai.json` → `sandbox.mode`, oder `--mode`)
+
+| Modus | Bedeutung |
+|---|---|
+| `test` | Testadapter zählt nur, nichts wird gelesen |
+| `none` | keine Sandbox – jede Ausführung wird abgelehnt |
+| `dev-local-unsafe` | Worker läuft **ohne VM** als normaler Prozess auf diesem PC; nur zum Entwickeln, in der Oberfläche rot |
+| `hyperv` | Offline-VM (ab M2b) |
 
 ## Struktur
 
 ```text
 contracts/            JSON Schema (einzige Quelle der Verträge) und Testvektoren
-config/localai.json   Startbefehl des Fake-Agenten
+config/               localai.json (Modus, Worker, Fake-Agent), demo-project.json (Ordner + Rechte)
+samples/demo-csv/     kleines Demo-Projekt für den Testlauf
 docs/                 Spezifikation, Plan, Prüfanleitungen
 scripts/              test.ps1 / start.ps1 (Windows), test.sh (Linux)
 src/dotnet/           LocalAi.slnx
   LocalAi.Contracts     generierte Records, kanonisches JSON, Pipe-Protokoll
   LocalAi.Broker        Approval Broker, Policy, Audit-Journal, Testadapter
+  LocalAi.Sandbox       Snapshot, Job-Signatur, Transport, Ergebnisprüfung
   LocalAi.Broker.Host   Broker-Prozess (Named-Pipe-Server)
   LocalAi.Desktop.Core  ViewModels, Broker-Client, deutsche Texte (UiText.resx)
   LocalAi.Desktop       WPF-Oberfläche
   LocalAi.Tests         xUnit-Tests (Filter z. B. `dotnet test --filter Pruefung=SEC-23`)
-src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge), Tests
+src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge, Sandbox-Worker), Tests
 tests/integration/    pytest gegen den echten Broker-Prozess
 tools/codegen/        Generatoren für Verträge, Testvektoren, Oberflächentexte
 ```
@@ -62,5 +76,6 @@ Oberflächentexte stehen in `tools/codegen/make_uitext.py` und werden nach `UiTe
 
 ## Bekannte Übergangslösungen
 
-- **Audit-Journal statt SQLite:** Das Journal ist eine hashverkettete JSON-Lines-Datei. SQLite (Spezifikation §10) folgt in M2.
+- **dev-local-unsafe:** Der Worker prüft Signaturen und liest nur aus der Snapshot-Kopie, läuft aber ohne VM-Isolation. Echte Isolation ab M2b (`hyperv`).
+- **Ordnerrechte:** In M2a nur `List` und `Read`; `Create`/`Modify`/`Delete`/`Execute` folgen mit Patches (M4) und Builds.
 - **Rollen über Tokens:** Orchestrator und UI unterscheiden sich in M1 über zufällige Tokens pro Broker-Start; die Pipe ist auf den aktuellen Windows-Benutzer beschränkt. Getrennte Windows-Identitäten für den Orchestrator folgen mit M3.

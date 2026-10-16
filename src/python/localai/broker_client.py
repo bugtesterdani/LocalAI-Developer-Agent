@@ -12,6 +12,7 @@ from typing import Any
 
 from localai.contracts import (
     BrokerEvent,
+    FolderGrant,
     DecisionKind,
     NarrowRequest,
     ProposalOutcome,
@@ -35,6 +36,9 @@ class BrokerClient:
 
     def outcome(self, proposal_id: str) -> ProposalOutcome:
         return ProposalOutcome.model_validate(self.pipe.call("proposals.outcome", {"proposalId": proposal_id}))
+
+    def grants(self) -> list[FolderGrant]:
+        return [FolderGrant.model_validate(g) for g in self.pipe.call("project.grants")]
 
     def wait_events(self, after_seq: int, timeout_ms: int = 10_000) -> list[BrokerEvent]:
         raw = self.pipe.call("events.wait", {"afterSeq": after_seq, "timeoutMs": timeout_ms})

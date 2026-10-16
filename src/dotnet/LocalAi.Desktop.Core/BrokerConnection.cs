@@ -13,7 +13,7 @@ public sealed class BrokerCallException(int code, string message) : Exception(me
 }
 
 /// <summary>Handshake-Zeile, die der Broker beim Start auf stdout ausgibt.</summary>
-public sealed record BrokerHandshake(string Pipe, string SessionId, string UiToken, string DataDirectory);
+public sealed record BrokerHandshake(string Pipe, string SessionId, string UiToken, string DataDirectory, string Mode);
 
 /// <summary>Startet LocalAi.Broker.Host als Kindprozess; schließt ihn über stdin-EOF.</summary>
 public sealed class BrokerProcess : IAsyncDisposable
@@ -72,7 +72,8 @@ public sealed class BrokerProcess : IAsyncDisposable
             root.GetProperty("pipe").GetString()!,
             root.GetProperty("sessionId").GetString()!,
             root.GetProperty("uiToken").GetString()!,
-            root.GetProperty("dataDirectory").GetString()!);
+            root.GetProperty("dataDirectory").GetString()!,
+            root.TryGetProperty("mode", out var mode) ? mode.GetString()! : "none");
         // stderr weiter abholen, damit der Puffer nicht vollläuft.
         _ = Task.Run(async () =>
         {
@@ -185,6 +186,9 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
     public Task ReleaseAsync(CancellationToken ct) => CallAsync(M.Release, null, ct);
 
     public Task<JsonElement> StartFakeAgentAsync(CancellationToken ct) => CallAsync(M.StartFakeAgent, null, ct);
+
+    public async Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct) =>
+        ContractJson.Deserialize<List<FolderGrant>>(await CallAsync(M.ProjectGrants, null, ct).ConfigureAwait(false));
 
     public async ValueTask DisposeAsync()
     {

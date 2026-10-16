@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "projectId": "demo-csv",
+  "name": "Demo: CSV-Importer",
+  "grants": [
+    {
+      "grantId": "demo",
+      "root": "samples/demo-csv",
+      "rights": ["List", "Read"],
+      "recursive": true
+    }
+  ]
+}

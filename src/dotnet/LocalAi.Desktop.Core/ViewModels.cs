@@ -15,6 +15,7 @@ public interface IBrokerUiApi
     Task EmergencyStopAsync(CancellationToken ct);
     Task ReleaseAsync(CancellationToken ct);
     Task<JsonElement> StartFakeAgentAsync(CancellationToken ct);
+    Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct);
 }
 
 public sealed record AgentItem(string Name, string StateText);
@@ -87,7 +88,9 @@ public sealed class ApprovalCardViewModel : ObservableObject
     public string HashText => Sha256;
     public string ParentText => Proposal.ParentProposalId ?? "–";
     public bool HasParent => Proposal.ParentProposalId is not null;
-    public string SideEffectsText => UiText.Get("SideEffectsRead");
+    public string SideEffectsText => _owner.SandboxMode == "test"
+        ? UiText.Get("SideEffectsTest")
+        : UiText.Get(Proposal.Tool == "Workspace.Snapshot" ? "SideEffectsSnapshot" : "SideEffectsRead");
 
     public string ValidUntilText =>
         ContractTime.Parse(Proposal.ExpiresAt).ToLocalTime().ToString("HH:mm:ss", UiText.Culture);
@@ -199,10 +202,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _isStopped;
     private long _lastSeq;
     private string? _selectAfterRefresh;
+    private string _projectText = UiText.Get("ProjectNone");
     private Task? _eventLoop;
 
-    public MainViewModel(IBrokerUiApi api, IBrokerUiApi eventsApi, Action<Action> post, string sessionId)
+    public MainViewModel(IBrokerUiApi api, IBrokerUiApi eventsApi, Action<Action> post, string sessionId, string sandboxMode = "test")
     {
+        SandboxMode = sandboxMode;
         _api = api;
         _eventsApi = eventsApi;
         _post = post;
@@ -221,8 +226,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand EmergencyStopCommand { get; }
     public RelayCommand ReleaseCommand { get; }
 
-    public string ProjectText => UiText.Get("ProjectNone");
-    public string SandboxText => UiText.Get("SandboxNone");
+    public string SandboxMode { get; }
+    public string SandboxText => UiText.Exists($"Sandbox_{SandboxMode}") ? UiText.Get($"Sandbox_{SandboxMode}") : SandboxMode;
+
+    /// <summary>Entwicklungsmodus ohne VM: in der Oberfläche deutlich als unsicher markiert.</summary>
+    public bool IsUnsafeSandbox => SandboxMode == "dev-local-unsafe";
+
+    public string ProjectText
+    {
+        get => _projectText;
+        private set => Set(ref _projectText, value);
+    }
     public bool HasApprovals => Approvals.Count > 0;
     public string ApprovalsHeader => $"{UiText.Get("Approvals")} ({Approvals.Count})";
 
@@ -269,6 +283,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
+        await GuardAsync(async () =>
+        {
+            var grants = await _api.GrantsAsync(_shutdown.Token).ConfigureAwait(false);
+            var text = grants.Count == 0
+                ? UiText.Get("ProjectNone")
+                : string.Join(", ", grants.Select(g => $"{g.GrantId} ({string.Join("/", g.Rights)}): {g.Root}"));
+            Post(() => ProjectText = text);
+        }).ConfigureAwait(false);
         await RefreshPendingAsync().ConfigureAwait(false);
         _eventLoop = Task.Run(EventLoopAsync);
     }

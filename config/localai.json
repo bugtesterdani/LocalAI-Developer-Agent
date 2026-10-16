@@ -1,4 +1,13 @@
 {
+  "project": "config/demo-project.json",
+  "sandbox": {
+    "mode": "dev-local-unsafe",
+    "devWorker": {
+      "command": "uv",
+      "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.worker"],
+      "workingDirectory": "."
+    }
+  },
   "fakeAgent": {
     "command": "uv",
     "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.fake_agent"],

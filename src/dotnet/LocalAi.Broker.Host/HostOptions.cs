@@ -10,6 +10,22 @@ public enum CallerRole
     Orchestrator,
 }
 
+/// <summary>Betriebsart der Ausführung.</summary>
+public enum SandboxMode
+{
+    /// <summary>Keine Sandbox: Vorschläge werden angenommen, Ausführung ist gesperrt.</summary>
+    None,
+
+    /// <summary>Nur für automatische Tests: Testadapter zählt Aufrufe, Test-Grant "g-test".</summary>
+    Test,
+
+    /// <summary>Entwicklung: Worker läuft als lokaler Prozess auf dem Host. UNSICHER, kein VM-Schutz.</summary>
+    DevLocalUnsafe,
+
+    /// <summary>Offline-VM über Hyper-V (M2b).</summary>
+    HyperV,
+}
+
 /// <summary>Zufällige Tokens pro Broker-Start; nur der UI-Token darf Entscheidungen treffen.</summary>
 public sealed record RoleTokens(string Ui, string Orchestrator)
 {
@@ -36,7 +52,7 @@ public sealed record RoleTokens(string Ui, string Orchestrator)
     private static string NewToken() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
 }
 
-public sealed record OrchestratorCommand(string Command, IReadOnlyList<string> Arguments, string WorkingDirectory);
+public sealed record ProcessCommand(string Command, IReadOnlyList<string> Arguments, string WorkingDirectory);
 
 public sealed record HostOptions
 {
@@ -45,12 +61,18 @@ public sealed record HostOptions
     public TimeSpan ProposalTtl { get; init; } = TimeSpan.FromMinutes(5);
     public TimeSpan TestAdapterDelay { get; init; } = TimeSpan.Zero;
     public bool IgnoreStdin { get; init; }
-    public OrchestratorCommand? FakeAgent { get; init; }
+    public SandboxMode Mode { get; init; } = SandboxMode.None;
+    public string? ProjectPath { get; init; }
+    public string RepoRoot { get; init; } = AppContext.BaseDirectory;
+    public ProcessCommand? FakeAgent { get; init; }
+    public ProcessCommand? DevWorker { get; init; }
 
     public static HostOptions Parse(string[] args)
     {
         var options = new HostOptions();
         string? configPath = null;
+        SandboxMode? mode = null;
+        string? project = null;
         for (var i = 0; i < args.Length; i++)
         {
             string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"Wert fehlt für {args[i]}");
@@ -62,16 +84,44 @@ public sealed record HostOptions
                 case "--test-adapter-delay-ms": options = options with { TestAdapterDelay = TimeSpan.FromMilliseconds(int.Parse(Next())) }; break;
                 case "--ignore-stdin": options = options with { IgnoreStdin = true }; break;
                 case "--config": configPath = Next(); break;
+                case "--mode": mode = ParseMode(Next()); break;
+                case "--project": project = Path.GetFullPath(Next()); break;
                 default: throw new ArgumentException($"Unbekannte Option: {args[i]}");
             }
         }
         configPath ??= FindConfig();
         if (configPath is not null && File.Exists(configPath))
         {
-            options = options with { FakeAgent = ReadFakeAgent(configPath) };
+            options = ApplyConfig(options, configPath);
+        }
+        if (mode is not null)
+        {
+            options = options with { Mode = mode.Value };
+        }
+        if (project is not null)
+        {
+            options = options with { ProjectPath = project };
         }
         return options;
     }
+
+    public static SandboxMode ParseMode(string value) => value switch
+    {
+        "none" => SandboxMode.None,
+        "test" => SandboxMode.Test,
+        "dev-local-unsafe" => SandboxMode.DevLocalUnsafe,
+        "hyperv" => SandboxMode.HyperV,
+        _ => throw new ArgumentException($"Unbekannte Betriebsart: {value} (none, test, dev-local-unsafe, hyperv)"),
+    };
+
+    public static string ModeName(SandboxMode mode) => mode switch
+    {
+        SandboxMode.None => "none",
+        SandboxMode.Test => "test",
+        SandboxMode.DevLocalUnsafe => "dev-local-unsafe",
+        SandboxMode.HyperV => "hyperv",
+        _ => "unbekannt",
+    };
 
     private static string DefaultDataDirectory()
     {
@@ -95,17 +145,39 @@ public sealed record HostOptions
         return null;
     }
 
-    private static OrchestratorCommand? ReadFakeAgent(string configPath)
+    private static HostOptions ApplyConfig(HostOptions options, string configPath)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
-        if (!doc.RootElement.TryGetProperty("fakeAgent", out var agent))
-        {
-            return null;
-        }
+        var root = doc.RootElement;
         var repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, ".."));
-        var command = agent.GetProperty("command").GetString()!;
-        var arguments = agent.GetProperty("arguments").EnumerateArray().Select(a => a.GetString()!).ToList();
-        var workingDirectory = agent.TryGetProperty("workingDirectory", out var wd) ? wd.GetString()! : ".";
-        return new OrchestratorCommand(command, arguments, Path.GetFullPath(Path.Combine(repoRoot, workingDirectory)));
+        options = options with { RepoRoot = repoRoot };
+        if (root.TryGetProperty("fakeAgent", out var agent))
+        {
+            options = options with { FakeAgent = ReadCommand(agent, repoRoot) };
+        }
+        if (root.TryGetProperty("project", out var project))
+        {
+            options = options with { ProjectPath = Path.GetFullPath(Path.Combine(repoRoot, project.GetString()!)) };
+        }
+        if (root.TryGetProperty("sandbox", out var sandbox))
+        {
+            if (sandbox.TryGetProperty("mode", out var mode))
+            {
+                options = options with { Mode = ParseMode(mode.GetString()!) };
+            }
+            if (sandbox.TryGetProperty("devWorker", out var worker))
+            {
+                options = options with { DevWorker = ReadCommand(worker, repoRoot) };
+            }
+        }
+        return options;
+    }
+
+    private static ProcessCommand ReadCommand(JsonElement element, string repoRoot)
+    {
+        var command = element.GetProperty("command").GetString()!;
+        var arguments = element.GetProperty("arguments").EnumerateArray().Select(a => a.GetString()!).ToList();
+        var workingDirectory = element.TryGetProperty("workingDirectory", out var wd) ? wd.GetString()! : ".";
+        return new ProcessCommand(command, arguments, Path.GetFullPath(Path.Combine(repoRoot, workingDirectory)));
     }
 }

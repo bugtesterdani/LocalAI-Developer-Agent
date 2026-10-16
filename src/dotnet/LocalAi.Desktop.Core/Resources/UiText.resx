@@ -19,10 +19,19 @@
     <value>Projekt</value>
   </data>
   <data name="ProjectNone" xml:space="preserve">
-    <value>kein Projekt (M1-Testlauf)</value>
+    <value>kein Projekt</value>
   </data>
-  <data name="SandboxNone" xml:space="preserve">
-    <value>SANDBOX: noch nicht vorhanden (folgt in M2)</value>
+  <data name="Sandbox_test" xml:space="preserve">
+    <value>SANDBOX: Testmodus – es wird nichts ausgeführt</value>
+  </data>
+  <data name="Sandbox_none" xml:space="preserve">
+    <value>SANDBOX: nicht verfügbar – Ausführung gesperrt</value>
+  </data>
+  <data name="Sandbox_dev-local-unsafe" xml:space="preserve">
+    <value>SANDBOX: ENTWICKLUNGSMODUS – UNSICHER, Worker läuft ohne VM auf diesem PC</value>
+  </data>
+  <data name="Sandbox_hyperv" xml:space="preserve">
+    <value>SANDBOX: Offline-VM</value>
   </data>
   <data name="Agents" xml:space="preserve">
     <value>AGENTEN</value>
@@ -91,7 +100,13 @@
     <value>Ersetzt Vorschlag</value>
   </data>
   <data name="SideEffectsRead" xml:space="preserve">
-    <value>Nur Lesen. In M1 führt ein Testadapter nichts tatsächlich aus.</value>
+    <value>Nur Lesen in der Sandbox-Kopie (Snapshot). Der Originalordner wird nicht berührt.</value>
+  </data>
+  <data name="SideEffectsSnapshot" xml:space="preserve">
+    <value>Der Broker liest den freigegebenen Ordner auf diesem PC (ohne Verknüpfungen, Junctions und Hardlinks) und überträgt eine Kopie in die Sandbox. Nichts wird verändert.</value>
+  </data>
+  <data name="SideEffectsTest" xml:space="preserve">
+    <value>Testmodus: Ein Testadapter zählt nur, es wird nichts gelesen.</value>
   </data>
   <data name="UntrustedHint" xml:space="preserve">
     <value>Inhalte aus Dateien, Webseiten und Agentenantworten sind nicht vertrauenswürdig und werden nur als Text angezeigt.</value>

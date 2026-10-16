@@ -1,24 +1,49 @@
 using System.Text.Json;
 using LocalAi.Broker;
 using LocalAi.Broker.Host;
+using LocalAi.Contracts;
+using LocalAi.Sandbox;
 
 // LocalAi.Broker.Host – startet den Approval Broker als eigenen Prozess.
-// Gibt beim Start genau eine JSON-Zeile auf stdout aus (Pipe-Name und Rollen-Tokens) und läuft,
+// Gibt beim Start genau eine JSON-Zeile auf stdout aus (Pipe-Name, Rollen-Tokens, Betriebsart) und läuft,
 // bis stdin geschlossen wird (Elternprozess beendet) oder Strg+C gedrückt wird.
 
 // Ausgaben immer als UTF-8 (ohne BOM), unabhängig von der Konsolen-Codepage (z. B. 850 unter deutschem Windows).
-// Aufrufer (Oberfläche, Tests) lesen stdout/stderr als UTF-8.
 var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true });
 Console.SetError(new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true });
 
-var options = HostOptions.Parse(args);
+HostOptions options;
+try
+{
+    options = HostOptions.Parse(args);
+}
+catch (Exception ex) when (ex is ArgumentException or JsonException or IOException)
+{
+    Console.Error.WriteLine($"FEHLER: Konfiguration ungültig: {ex.Message}");
+    return 2;
+}
 Directory.CreateDirectory(options.DataDirectory);
 
-var adapter = new CountingTestAdapter { Delay = options.TestAdapterDelay };
-var journal = new AuditJournal(Path.Combine(options.DataDirectory, "audit.db"), SystemClock.Instance);
-var brokerOptions = new BrokerOptions { ProposalTtl = options.ProposalTtl };
-var broker = new ApprovalBroker(brokerOptions, adapter, journal);
+var children = new ChildProcesses();
+var clock = SystemClock.Instance;
+CountingTestAdapter? testAdapter;
+IToolAdapter adapter;
+IPolicyContext policy;
+try
+{
+    (adapter, policy, testAdapter) = CreateSandbox(options, children, Guid.NewGuid().ToString("D"));
+}
+catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or ChildProcessException or NotSupportedException)
+{
+    Console.Error.WriteLine($"FEHLER: Sandbox/Projekt konnte nicht eingerichtet werden: {ex.Message}");
+    children.StopAll();
+    return 4;
+}
+
+var journal = new AuditJournal(Path.Combine(options.DataDirectory, "audit.db"), clock);
+var brokerOptions = new BrokerOptions { ProposalTtl = options.ProposalTtl, SandboxId = $"sbx-{HostOptions.ModeName(options.Mode)}" };
+var broker = new ApprovalBroker(brokerOptions, adapter, journal, clock, policy);
 
 try
 {
@@ -28,6 +53,7 @@ catch (AuditTamperException ex)
 {
     Console.Error.WriteLine($"FEHLER: Audit-Journal ist beschädigt oder manipuliert: {ex.Message}");
     Console.Error.WriteLine("Der Broker startet nicht. Journal sichern und prüfen, dann umbenennen, um neu zu beginnen.");
+    children.StopAll();
     return 3;
 }
 
@@ -40,7 +66,7 @@ Console.CancelKeyPress += (_, e) =>
     shutdown.Cancel();
 };
 
-var server = new PipeServer(pipeName, tokens, broker, adapter, options);
+var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, options);
 var serverTask = server.RunAsync(shutdown.Token);
 
 var handshake = new
@@ -50,6 +76,7 @@ var handshake = new
     uiToken = tokens.Ui,
     orchestratorToken = tokens.Orchestrator,
     dataDirectory = Path.GetFullPath(options.DataDirectory),
+    mode = HostOptions.ModeName(options.Mode),
 };
 Console.Out.WriteLine(JsonSerializer.Serialize(handshake));
 Console.Out.Flush();
@@ -83,7 +110,54 @@ catch (OperationCanceledException)
 }
 finally
 {
-    server.StopAgents();
+    children.StopAll();
     await broker.DisposeAsync();
 }
 return 0;
+
+static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test) CreateSandbox(
+    HostOptions options, ChildProcesses children, string sessionId)
+{
+    switch (options.Mode)
+    {
+        case SandboxMode.Test:
+        {
+            var test = new CountingTestAdapter { Delay = options.TestAdapterDelay };
+            return (test, new TestPolicyContext(), test);
+        }
+        case SandboxMode.None:
+        {
+            var project = LoadProject(options);
+            return (new NoSandboxAdapter(), new ProjectPolicyContext(project, new SnapshotRegistry()), null);
+        }
+        case SandboxMode.DevLocalUnsafe:
+        {
+            var project = LoadProject(options);
+            var registry = new SnapshotRegistry();
+            var context = new ProjectPolicyContext(project, registry);
+            var session = new SandboxSession(sessionId);
+            var dir = Path.Combine(options.DataDirectory, "sandbox-dev");
+            // Wie der spätere VM-Neuaufbau: jede Sitzung beginnt mit leerem Arbeitsbereich.
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            var transport = new LocalDirectoryTransport(Path.Combine(dir, "inbox"), Path.Combine(dir, "outbox"));
+            var keyFile = Path.Combine(dir, "session.key");
+            File.WriteAllText(keyFile, Convert.ToHexStringLower(session.Key));
+            var worker = options.DevWorker ?? throw new InvalidDataException("sandbox.devWorker fehlt in config/localai.json");
+            children.Start(worker,
+                ["--inbox", transport.Inbox, "--outbox", transport.Outbox, "--work", Path.Combine(dir, "work"), "--key-file", keyFile],
+                new Dictionary<string, string>(), Path.Combine(options.DataDirectory, "worker.log"));
+            var adapter = new SandboxToolAdapter(session, transport, context, registry, Path.Combine(dir, "scratch"), SystemClock.Instance);
+            return (adapter, context, null);
+        }
+        default:
+            throw new NotSupportedException("Hyper-V-Sandbox folgt in M2b – bis dahin 'dev-local-unsafe' oder 'none' verwenden");
+    }
+}
+
+static ProjectConfig LoadProject(HostOptions options) =>
+    options.ProjectPath is null
+        ? new ProjectConfig(ContractJson.SchemaVersion, "kein-projekt", "Kein Projekt", [])
+        : ProjectLoader.Load(options.ProjectPath, options.RepoRoot);

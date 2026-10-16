@@ -17,7 +17,7 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\LocalAi.Broker\LocalAi.Broker.csproj" />
+    <ProjectReference Include="..\LocalAi.Sandbox\LocalAi.Sandbox.csproj" />
     <ProjectReference Include="..\LocalAi.Desktop.Core\LocalAi.Desktop.Core.csproj" />
     <ProjectReference Include="..\LocalAi.Broker.Host\LocalAi.Broker.Host.csproj" />
   </ItemGroup>
