@@ -14,6 +14,28 @@ namespace LocalAi.Broker.Host;
 /// </summary>
 public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroker broker, CountingTestAdapter adapter, HostOptions options)
 {
+    /// <summary>Vom Broker gestartete Agentenprozesse; werden beim Beenden mitsamt Kindprozessen beendet.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, Process> _agents = new();
+
+    /// <summary>Beendet alle noch laufenden Agentenprozesse (inkl. uv → python).</summary>
+    public void StopAgents()
+    {
+        foreach (var (pid, process) in _agents)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    AppendLog(Path.Combine(options.DataDirectory, "fake-agent.log"), $"[Broker] Agent PID {pid} beim Beenden des Brokers gestoppt");
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+            }
+        }
+    }
+
     private static readonly IReadOnlyDictionary<string, CallerRole[]> Permissions = new Dictionary<string, CallerRole[]>
     {
         [M.Ping] = [CallerRole.Ui, CallerRole.Orchestrator],
@@ -202,6 +224,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         {
             WorkingDirectory = command.WorkingDirectory,
             UseShellExecute = false,
+            // stdin nicht vom Broker erben (der Broker nutzt sein stdin als Lebenszeichen des Elternprozesses).
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = new System.Text.UTF8Encoding(false),
@@ -231,6 +255,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 $"Fake-Agent konnte nicht gestartet werden ('{command.Command}' in {command.WorkingDirectory}): {ex.Message}");
         }
         AppendLog(logPath, $"[Broker] Prozess gestartet, PID {process.Id}");
+        process.StandardInput.Close();
+        _agents[process.Id] = process;
         var stdout = PumpAsync(process.StandardOutput, logPath);
         var stderr = PumpAsync(process.StandardError, logPath);
         _ = Task.Run(async () =>
@@ -238,6 +264,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             await Task.WhenAll(stdout, stderr).ConfigureAwait(false);
             await process.WaitForExitAsync().ConfigureAwait(false);
             AppendLog(logPath, $"[Broker] Prozess beendet, Exitcode {process.ExitCode}");
+            _agents.TryRemove(process.Id, out _);
             process.Dispose();
         });
         return new JsonObject { ["pid"] = process.Id, ["log"] = logPath };

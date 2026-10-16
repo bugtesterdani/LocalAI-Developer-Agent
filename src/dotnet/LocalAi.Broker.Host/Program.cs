@@ -83,6 +83,7 @@ catch (OperationCanceledException)
 }
 finally
 {
+    server.StopAgents();
     await broker.DisposeAsync();
 }
 return 0;

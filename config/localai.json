@@ -1,7 +1,7 @@
 {
   "fakeAgent": {
     "command": "uv",
-    "arguments": ["run", "--project", "src/python", "python", "-m", "localai.fake_agent"],
+    "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.fake_agent"],
     "workingDirectory": "."
   }
 }
