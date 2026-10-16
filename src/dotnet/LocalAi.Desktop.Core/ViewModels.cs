@@ -451,12 +451,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             try
             {
-                await _eventLoop.ConfigureAwait(false);
+                // Begrenzt warten: eine hängende Pipe-Leseoperation darf das Beenden nicht blockieren.
+                await _eventLoop.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
             {
             }
         }
-        _shutdown.Dispose();
     }
 }

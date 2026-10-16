@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+import traceback
 import uuid
 
 from localai.broker_client import BrokerClient
@@ -15,8 +17,11 @@ from localai.contracts import AgentRole, ProposalRequest, ToolTarget
 from localai.pipe import BrokerError
 
 
+_START = time.monotonic()
+
+
 def log(message: str) -> None:
-    print(f"[Fake-Agent] {message}", flush=True)
+    print(f"[Fake-Agent {time.monotonic() - _START:6.1f} s] {message}", flush=True)
 
 
 def request(run_id: str, agent: AgentRole, tool: str, purpose: str, targets: list[ToolTarget],
@@ -43,6 +48,7 @@ def main() -> int:
         log("LOCALAI_PIPE und LOCALAI_TOKEN fehlen – bitte über die Oberfläche starten.")
         return 2
 
+    log(f"Python {sys.version.split()[0]} läuft (PID {os.getpid()}), verbinde mit Pipe {pipe}")
     client = BrokerClient(pipe, token)
     log(f"verbunden: {client.ping()}")
     run_id = f"run-{uuid.uuid4().hex[:8]}"
@@ -84,5 +90,13 @@ def main() -> int:
     return 0
 
 
+def run() -> int:
+    try:
+        return main()
+    except Exception:  # noqa: BLE001 – vollständigen Fehler ins Protokoll schreiben
+        log("FEHLER:\n" + traceback.format_exc())
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
