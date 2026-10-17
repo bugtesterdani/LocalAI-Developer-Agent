@@ -14,7 +14,7 @@ $root = 'C:\LocalAi'
 function Set-Progress([string]$Token) {
     # Fortschritt für den Host (KVP, festes Format). Darf die Provisionierung nie abbrechen.
     try {
-        $key = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Auto'
+        $key = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest'
         if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
         Set-ItemProperty -Path $key -Name 'LocalAiProgress' -Value $Token -Type String
     } catch { }

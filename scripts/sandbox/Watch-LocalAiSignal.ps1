@@ -28,7 +28,8 @@ while ($true) {
         $value = $null
         $progress = $null
         if ($kvp) {
-            foreach ($item in @($kvp.GuestExchangeItems)) {
+            # Gastwerte (Pool »Guest«); zur Sicherheit auch die automatischen Werte (Pool »Auto«).
+            foreach ($item in @($kvp.GuestExchangeItems) + @($kvp.GuestIntrinsicExchangeItems)) {
                 if (-not $item) { continue }
                 $xml = [xml]$item
                 $props = @($xml.INSTANCE.PROPERTY)

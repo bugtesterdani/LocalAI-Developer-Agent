@@ -30,7 +30,7 @@ function Send-ReportWithoutPython([byte[]]$Payload, [int64]$Size) {
         $stream.Write($header, 0, 4096)
         $stream.Flush($true)
     } finally { $stream.Dispose() }
-    $key = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Auto'
+    $key = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest'
     if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
     Set-ItemProperty -Path $key -Name 'LocalAiSignal' -Value 'report:0' -Type String
 }

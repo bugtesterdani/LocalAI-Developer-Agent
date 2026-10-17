@@ -24,7 +24,9 @@ from enum import IntEnum
 HEADER_SIZE = 4096
 MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
 MAGIC = b"LAIXFER1"
-KVP_KEY = r"SOFTWARE\Microsoft\Virtual Machine\Auto"
+# Gast→Host-Pool des Hyper-V-Datenaustauschs (Host liest ihn als GuestExchangeItems).
+# "Auto" ist dagegen für automatisch erzeugte Systemwerte (GuestIntrinsicExchangeItems).
+KVP_KEY = r"SOFTWARE\Microsoft\Virtual Machine\Guest"
 KVP_VALUE = "LocalAiSignal"
 
 
