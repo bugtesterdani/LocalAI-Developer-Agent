@@ -321,7 +321,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             var guestDir = Path.Combine(WorkDirectory, "guest");
             if (Directory.Exists(WorkDirectory))
             {
-                Directory.Delete(WorkDirectory, recursive: true);
+                FileTools.DeleteTree(WorkDirectory);
             }
             Directory.CreateDirectory(guestDir);
             await _prepareGuest(guestDir).ConfigureAwait(false);

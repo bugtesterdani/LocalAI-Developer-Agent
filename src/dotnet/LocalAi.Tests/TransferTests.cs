@@ -13,7 +13,7 @@ public sealed class TransferTests : IDisposable
     private const long Max = 64L * 1024 * 1024;
     private readonly string _dir = Directory.CreateTempSubdirectory("localai-xfer-").FullName;
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() => LocalAi.Sandbox.FileTools.DeleteTree(_dir);
 
     private static JsonElement Vector() =>
         JsonDocument.Parse(File.ReadAllText(Path.Combine(ContractTests.RepoRoot(), "contracts", "testvectors", "transfer.json"))).RootElement.Clone();

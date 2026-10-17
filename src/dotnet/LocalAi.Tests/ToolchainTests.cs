@@ -13,7 +13,7 @@ public sealed class ToolchainTests : IDisposable
     private readonly string _dir = Directory.CreateTempSubdirectory("localai-tc-").FullName;
     private readonly ManualClock _clock = new(new DateTimeOffset(2026, 10, 17, 9, 0, 0, TimeSpan.Zero));
 
-    public void Dispose() => Directory.Delete(_dir, recursive: true);
+    public void Dispose() => LocalAi.Sandbox.FileTools.DeleteTree(_dir);
 
     private static ToolchainManifest Reference(string name) =>
         ToolchainValidator.Parse(File.ReadAllText(Path.Combine(ContractTests.RepoRoot(), "toolchains", name, "toolchain.json")));

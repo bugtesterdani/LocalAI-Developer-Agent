@@ -185,6 +185,17 @@ public sealed class SandboxTests : IDisposable
         Assert.Equal(5, manifest.Skipped!.Count);
     }
 
+    [Fact]
+    public void Arbeitsordner_mit_schreibgeschuetzten_Dateien_wird_geloescht()
+    {
+        var dir = Directory.CreateDirectory(Path.Combine(_dir, "ro", "snapshots")).FullName;
+        var file = Path.Combine(dir, "README.md");
+        File.WriteAllText(file, "x");
+        File.SetAttributes(file, FileAttributes.ReadOnly);
+        FileTools.DeleteTree(Path.Combine(_dir, "ro"));
+        Assert.False(Directory.Exists(Path.Combine(_dir, "ro")));
+    }
+
     // ------------------------------------------------------------------ Ergebnisprüfung
 
     private static SandboxJob Job(params string[] targets)
@@ -227,7 +238,7 @@ public sealed class SandboxTests : IDisposable
     {
         try
         {
-            Directory.Delete(_dir, recursive: true);
+            LocalAi.Sandbox.FileTools.DeleteTree(_dir);
         }
         catch (IOException)
         {

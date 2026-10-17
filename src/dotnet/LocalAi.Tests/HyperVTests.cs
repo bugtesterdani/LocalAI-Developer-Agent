@@ -27,7 +27,7 @@ public sealed class HyperVTests : IAsyncLifetime
         }
         try
         {
-            Directory.Delete(_dir, recursive: true);
+            LocalAi.Sandbox.FileTools.DeleteTree(_dir);
         }
         catch (IOException)
         {

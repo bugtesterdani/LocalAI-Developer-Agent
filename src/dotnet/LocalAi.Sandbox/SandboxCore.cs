@@ -304,3 +304,33 @@ public sealed class NoSandboxAdapter : IToolAdapter
             [new TargetResult("*", ResultStatus.Failed, Message: "Keine Sandbox verfügbar – Ausführung gesperrt")],
             CanonicalJson.Sha256Hex(string.Empty), Truncated: false, Untrusted: true));
 }
+
+/// <summary>Dateisystem-Hilfen für Arbeitsordner der Sandbox.</summary>
+public static class FileTools
+{
+    /// <summary>
+    /// Löscht einen Ordner samt Inhalt. Unter Windows scheitert Directory.Delete an schreibgeschützten Dateien
+    /// (der Worker setzt importierte Snapshot-Dateien schreibgeschützt); deshalb wird das Attribut vorher entfernt.
+    /// Verknüpfungen werden nicht verfolgt, sondern nur selbst entfernt.
+    /// </summary>
+    public static void DeleteTree(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+        foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos("*", new EnumerationOptions
+                 {
+                     RecurseSubdirectories = true,
+                     AttributesToSkip = 0,
+                     IgnoreInaccessible = true,
+                 }))
+        {
+            if (entry.Attributes.HasFlag(FileAttributes.ReadOnly))
+            {
+                entry.Attributes &= ~FileAttributes.ReadOnly;
+            }
+        }
+        Directory.Delete(directory, recursive: true);
+    }
+}

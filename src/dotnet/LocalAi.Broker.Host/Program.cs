@@ -171,7 +171,7 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
             // Wie der spätere VM-Neuaufbau: jede Sitzung beginnt mit leerem Arbeitsbereich.
             if (Directory.Exists(dir))
             {
-                Directory.Delete(dir, recursive: true);
+                FileTools.DeleteTree(dir);
             }
             var transport = new LocalDirectoryTransport(Path.Combine(dir, "inbox"), Path.Combine(dir, "outbox"));
             var keyFile = Path.Combine(dir, "session.key");

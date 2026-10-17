@@ -25,8 +25,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 def sandbox(broker_factory, tmp_path):
     project_dir = tmp_path / "projekt"
     (project_dir / "src").mkdir(parents=True)
-    (project_dir / "README.md").write_text("# Testprojekt\nZeile 2\n", encoding="utf-8")
-    (project_dir / "src" / "Größe.cs").write_text("class Größe {}\n", encoding="utf-8")
+    # write_bytes: unter Windows würde write_text "\n" zu "\r\n" machen und den erwarteten Hash ändern.
+    (project_dir / "README.md").write_bytes("# Testprojekt\nZeile 2\n".encode("utf-8"))
+    (project_dir / "src" / "Größe.cs").write_bytes("class Größe {}\n".encode("utf-8"))
     (project_dir / "bin").mkdir()
     (project_dir / "bin" / "app.dll").write_bytes(b"\x00binaer")
     outside = tmp_path / "ausserhalb"

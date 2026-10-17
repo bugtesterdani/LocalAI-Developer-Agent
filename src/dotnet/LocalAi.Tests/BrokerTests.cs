@@ -229,7 +229,7 @@ public sealed class BrokerTests : IAsyncDisposable
         await _broker.DisposeAsync();
         try
         {
-            Directory.Delete(_dir, recursive: true);
+            LocalAi.Sandbox.FileTools.DeleteTree(_dir);
         }
         catch (IOException)
         {
