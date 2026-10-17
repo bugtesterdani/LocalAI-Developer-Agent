@@ -82,6 +82,14 @@ In `config\localai.json` `"mode": "hyperv"` setzen, dann `scripts\start.ps1`.
 3. **Falsche Edition:** `imageName` auf `"Gibt es nicht"` → »gesperrt: VM-Aufbau fehlgeschlagen: Edition nicht im Abbild gefunden. Vorhanden: …«.
 4. **Fremder Ordner:** `vmDirectory` auf einen Ordner mit anderen Dateien → Aufbau verweigert, nichts wird gelöscht.
 
+## Ergebnisse
+
+| Datum | Rechner | Aufbau (Host + erster Start) | Snapshot | 50 Roundtrips | Ergebnis |
+|---|---|---|---|---|---|
+| 17.10.2026 | DESKTOP-DANI, Windows 11 Pro, ISO de-DE 26300 | 9,1 min (Host 5–6 min, Gast ≈ 3 min) | 5,5 s | je 5,4–7,2 s, Mittel 6,0 s | bestanden, keine Netzwerkkarte, 6/6 Netzwerkprüfungen ohne Verbindung |
+
+Ein Roundtrip dauert vor allem wegen der PowerShell-Starts (Copy-VMFile, Laufwerkswechsel) und des KVP-Abfrageintervalls etwa 6 s; das lässt sich später mit einer dauerhaft laufenden PowerShell-Sitzung verkürzen.
+
 ## Fehlerbehebung
 
 | Meldung | Ursache / Abhilfe |

@@ -93,3 +93,8 @@ def broker_factory(tmp_path):
     yield factory
     for running in started:
         running.stop()
+
+
+def pytest_configure(config):
+    # Auch beim Aufruf aus der Repository-Wurzel (ohne src/python/pyproject.toml als Konfiguration) bekannt.
+    config.addinivalue_line("markers", "integration: Tests gegen den echten C#-Broker-Prozess")
