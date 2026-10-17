@@ -6,7 +6,8 @@ $repo = Split-Path -Parent (Split-Path -Parent $root)
 $failures = New-Object System.Collections.Generic.List[string]
 
 # 1 – Syntax aller Skripte
-$files = @(Get-ChildItem -LiteralPath (Join-Path $repo 'scripts') -Recurse -Include '*.ps1', '*.psm1' -File)
+# Nicht -Include mit -LiteralPath: Windows PowerShell 5.1 ignoriert den Filter dann und liefert alle Dateien.
+$files = @(Get-ChildItem -LiteralPath (Join-Path $repo 'scripts') -Recurse -File | Where-Object { $_.Extension -in '.ps1', '.psm1' })
 foreach ($file in $files) {
     $tokens = $null; $errors = $null
     [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
