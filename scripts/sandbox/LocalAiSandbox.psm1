@@ -243,6 +243,27 @@ function Dismount-LocalAiVhd {
     if ($Method -eq 'Storage') { Dismount-DiskImage -ImagePath $Path | Out-Null } else { Dismount-VHD -Path $Path }
 }
 
+function Remove-LocalAiVmWithDisks {
+    # Löscht die Sandbox-VM und ihre Festplatten – auch wenn sie in einem anderen VM-Ordner liegen
+    # (z. B. Oberfläche und Abnahmetest). Gelöscht werden nur Dateien mit LocalAi-Namen in Ordnern mit Markierung.
+    param([Parameter(Mandatory)]$Vm)
+    if (-not (Test-LocalAiOwnedVm -Vm $Vm)) { throw "VM '$($Vm.Name)' stammt nicht von LocalAi – wird nicht gelöscht." }
+    $disks = @(Get-VMHardDiskDrive -VM $Vm | Select-Object -ExpandProperty Path)
+    Stop-VM -VM $Vm -TurnOff -Force -ErrorAction SilentlyContinue
+    Remove-VM -VM $Vm -Force
+    $removed = 0
+    foreach ($disk in $disks) {
+        if (-not $disk -or -not (Test-Path -LiteralPath $disk)) { continue }
+        $name = Split-Path -Leaf $disk
+        $folder = Split-Path -Parent $disk
+        if (($name -like '*-os.vhdx' -or $name -like 'transfer-*.vhdx') -and (Test-Path -LiteralPath (Join-Path $folder $script:DirectoryMarker))) {
+            Invoke-LocalAiRetry { Remove-Item -LiteralPath $disk -Force } | Out-Null
+            $removed++
+        }
+    }
+    return $removed
+}
+
 function Invoke-LocalAiRetry {
     param([Parameter(Mandatory)][scriptblock]$Action, [int]$Attempts = 20, [int]$DelayMs = 500)
     for ($i = 1; ; $i++) {

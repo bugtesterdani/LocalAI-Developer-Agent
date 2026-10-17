@@ -61,25 +61,28 @@ try {
     }
     Clear-LocalAiCompression -Path $vmDir
     Set-Content -LiteralPath $marker -Value 'Von LocalAi verwaltet. Inhalt wird bei jedem Sitzungsstart gelöscht.' -Encoding UTF8
-    $drive = Get-Item -LiteralPath $vmDir
-    $free = (Get-PSDrive -Name $drive.PSDrive.Name).Free
-    if ($free -lt 30GB) { throw ("Zu wenig freier Speicher auf {0}: ({1:N0} GB, mindestens 30 GB)" -f $drive.PSDrive.Name, ($free / 1GB)) }
 
     # ------------------------------------------------------------------ 2
-    Step 2 'Alte VM entfernen'
+    Step 2 'Alte VM entfernen, Speicherplatz prüfen'
     $old = Get-VM -Name $vmName -ErrorAction SilentlyContinue
     if ($old) {
         if (-not (Test-LocalAiOwnedVm -Vm $old)) {
             throw "Es gibt bereits eine VM '$vmName', die nicht von LocalAi stammt. Anderen vmName in config/localai.json wählen."
         }
-        Stop-VM -VM $old -TurnOff -Force -ErrorAction SilentlyContinue
-        Remove-VM -VM $old -Force
+        $removedDisks = Remove-LocalAiVmWithDisks -Vm $old
+        Write-Host "Alte VM entfernt ($removedDisks Festplatten gelöscht)"
     }
     Get-ChildItem -LiteralPath $vmDir -Filter '*.vhdx' -File | Where-Object {
         $_.Name -eq "$vmName-os.vhdx" -or $_.Name -like 'transfer-*.vhdx'
     } | ForEach-Object { $file = $_.FullName; Invoke-LocalAiRetry { Remove-Item -LiteralPath $file -Force } }
     $vmConfigDir = Join-Path $vmDir $vmName
     if (Test-Path -LiteralPath $vmConfigDir) { Remove-Item -LiteralPath $vmConfigDir -Recurse -Force }
+
+    # Speicherplatz erst prüfen, wenn die alte VM samt Festplatten gelöscht ist (es gibt immer nur eine Sandbox-VM).
+    $drive = Get-Item -LiteralPath $vmDir
+    $free = (Get-PSDrive -Name $drive.PSDrive.Name).Free
+    Write-Host ("Freier Speicher auf {0}: {1:N0} GB" -f $drive.PSDrive.Name, ($free / 1GB))
+    if ($free -lt 30GB) { throw ("Zu wenig freier Speicher auf {0}: {1:N0} GB frei, mindestens 30 GB nötig" -f $drive.PSDrive.Name, ($free / 1GB)) }
 
     # Keine Explorer-Fenster für neu eingebundene Laufwerke.
     $shellHw = Get-Service -Name ShellHWDetection -ErrorAction SilentlyContinue

@@ -12,9 +12,7 @@ try {
     Assert-LocalAiVmName -VmName $VmName
     $vm = Get-VM -Name $VmName -ErrorAction SilentlyContinue
     if ($vm) {
-        if (-not (Test-LocalAiOwnedVm -Vm $vm)) { throw "VM '$VmName' stammt nicht von LocalAi – wird nicht gelöscht." }
-        Stop-VM -VM $vm -TurnOff -Force -ErrorAction SilentlyContinue
-        Remove-VM -VM $vm -Force
+        $null = Remove-LocalAiVmWithDisks -Vm $vm
     }
     $removed = 0
     if (Test-Path -LiteralPath (Join-Path $VmDirectory $DirectoryMarker)) {
