@@ -33,6 +33,7 @@ $vmDir = [string]$req.vmDirectory
 $osDisk = Join-Path $vmDir "$vmName-os.vhdx"
 $isoMounted = $null
 $vhdMounted = $null
+$vhdMethod = 'Hyper-V'
 $shellHw = $null
 $transcript = $false
 $started = Get-Date
@@ -58,6 +59,7 @@ try {
     if (-not (Test-Path -LiteralPath $marker) -and $foreign.Count -gt 0) {
         throw "Der VM-Ordner $vmDir enthält fremde Dateien und wird nicht verwendet. Leeren Ordner angeben."
     }
+    Clear-LocalAiCompression -Path $vmDir
     Set-Content -LiteralPath $marker -Value 'Von LocalAi verwaltet. Inhalt wird bei jedem Sitzungsstart gelöscht.' -Encoding UTF8
     $drive = Get-Item -LiteralPath $vmDir
     $free = (Get-PSDrive -Name $drive.PSDrive.Name).Free
@@ -113,8 +115,13 @@ try {
     # ------------------------------------------------------------------ 4
     Step 4 'Systemfestplatte anlegen'
     New-VHD -Path $osDisk -SizeBytes ([int64]$req.osDiskGB * 1GB) -Dynamic | Out-Null
+    Clear-LocalAiCompression -Path $osDisk
+    Write-Host (Get-LocalAiFileFacts -Path $osDisk)
+    $mounted = Mount-LocalAiVhd -Path $osDisk
     $vhdMounted = $osDisk
-    $disk = Mount-VHD -Path $osDisk -Passthru | Get-Disk
+    $vhdMethod = $mounted.Method
+    $disk = $mounted.Disk
+    Write-Host "Systemfestplatte eingebunden ($vhdMethod), Datenträger $($disk.Number)"
     Initialize-Disk -Number $disk.Number -PartitionStyle GPT
     $basicData = '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}'
     $sysPart = New-Partition -DiskNumber $disk.Number -Size 260MB -GptType $basicData
@@ -156,12 +163,13 @@ try {
 
     # ------------------------------------------------------------------ 7
     Step 7 'Festplatten aushängen, Transfer-Laufwerk anlegen'
-    Dismount-VHD -Path $osDisk
+    Dismount-LocalAiVhd -Path $osDisk -Method $vhdMethod
     $vhdMounted = $null
     if ($isoMounted) { Dismount-DiskImage -ImagePath $isoMounted | Out-Null; $isoMounted = $null }
     $template = [string]$req.transferTemplate
     if (Test-Path -LiteralPath $template) { Remove-Item -LiteralPath $template -Force }
     New-VHD -Path $template -SizeBytes ([int64]$req.transferDiskMB * 1MB) -Fixed | Out-Null
+    Clear-LocalAiCompression -Path $template
     Copy-Item -LiteralPath $template -Destination ([string]$req.transferDisk) -Force
 
     # ------------------------------------------------------------------ 8
@@ -192,13 +200,14 @@ try {
     $exitCode = 0
 }
 catch {
-    $message = ($_.Exception.Message -replace '[\r\n]+', ' ')
+    $message = Get-LocalAiErrorText -ErrorRecord $_
     Write-Host "FEHLER: $message"
     Write-Host $_.ScriptStackTrace
+    Write-Host ($_ | Format-List * -Force | Out-String)
     Add-LocalAiStatus -StatusFile $StatusFile -Line "ERROR $message"
 }
 finally {
-    if ($vhdMounted) { try { Dismount-VHD -Path $vhdMounted } catch { } }
+    if ($vhdMounted) { try { Dismount-LocalAiVhd -Path $vhdMounted -Method $vhdMethod } catch { } }
     if ($isoMounted) { try { Dismount-DiskImage -ImagePath $isoMounted | Out-Null } catch { } }
     if ($shellHw) { try { Start-Service -Name ShellHWDetection } catch { } }
     if ($transcript) { try { Stop-Transcript | Out-Null } catch { } }

@@ -42,6 +42,11 @@ try { Assert-LocalAiVmName -VmName "x'; Remove-VM *"; $failures.Add('VM-Name nic
 $pw = New-LocalAiPassword
 Expect ($pw.Length -ge 30 -and $pw -match '[0-9]' -and $pw -match '[A-Za-z]' -and $pw -match '!') 'Kennwort-Komplexität'
 
+# 3b – Fehlerkette vollständig (Mount-Fehler verstecken den Grund in InnerException)
+try { throw (New-Object System.InvalidOperationException('Fehler beim Einbinden', (New-Object System.IO.IOException("Virtuelle Festplatten muessen unkomprimiert sein`r`nzweite Zeile")))) }
+catch { $text = Get-LocalAiErrorText -ErrorRecord $_ }
+Expect ($text -like 'Fehler beim Einbinden | Virtuelle Festplatten muessen unkomprimiert sein zweite Zeile') "Fehlerkette: $text"
+
 # 4 – Gast-Provisionierung: Argumente kommen unverändert beim Programm an, Platzhalter, Hashprüfung
 Import-Module (Join-Path $root 'guest\LocalAiGuest.psm1') -Force
 $quoted = @{ 'abc' = 'abc'; 'a b' = '"a b"'; 'a"b' = '"a\"b"'; 'C:\x y\' = '"C:\x y\\"'; '' = '""'; 'a\\"b' = '"a\\\\\"b"' }

@@ -82,6 +82,12 @@ In `config\localai.json` `"mode": "hyperv"` setzen, dann `scripts\start.ps1`.
 3. **Falsche Edition:** `imageName` auf `"Gibt es nicht"` → »gesperrt: VM-Aufbau fehlgeschlagen: Edition nicht im Abbild gefunden. Vorhanden: …«.
 4. **Fremder Ordner:** `vmDirectory` auf einen Ordner mit anderen Dateien → Aufbau verweigert, nichts wird gelöscht.
 
+## Fehlerbehebung
+
+| Meldung | Ursache / Abhilfe |
+|---|---|
+| »Systemfestplatte ließ sich nicht einbinden …« | Das Skript versucht `Mount-VHD` und danach `Mount-DiskImage` und schreibt die vollständige Fehlerkette sowie Dateiattribute und Dateisystem in `build.log`. Häufige Ursachen: komprimierter oder verschlüsselter Ordner (wird für den VM-Ordner automatisch aufgehoben bzw. gemeldet), Virenscanner, Ordner auf einem Laufwerk ohne NTFS/ReFS. Abhilfe zum Ausprobieren: `vmDirectory` auf einen leeren Ordner auf einem anderen Laufwerk setzen, z. B. `D:\\Agent\\VM`. |
+
 ## Bekannte Einschränkungen
 
 - `New-VM` legt immer einen (nicht verbundenen) Netzwerkadapter an. Das Skript entfernt ihn **vor dem ersten Start** und bricht ab, falls das nicht gelingt. Die VM läuft zu keinem Zeitpunkt mit Adapter; geprüft wird vor dem Start, bei jedem Job und alle paar Sekunden.

@@ -166,6 +166,83 @@ function Get-LocalAiImageLanguage {
     return ([string]$languages[$index]).Split(' ')[0]
 }
 
+function Get-LocalAiErrorText {
+    # Vollständige Fehlerkette (Hyper-V-/CIM-Fehler verstecken den eigentlichen Grund oft in InnerException).
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $parts = New-Object System.Collections.Generic.List[string]
+    $e = $ErrorRecord.Exception
+    while ($e) {
+        $m = ([string]$e.Message).Trim()
+        if ($m -and -not $parts.Contains($m)) { $parts.Add($m) }
+        $e = $e.InnerException
+    }
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+        $m = ([string]$ErrorRecord.ErrorDetails.Message).Trim()
+        if (-not $parts.Contains($m)) { $parts.Add($m) }
+    }
+    return (($parts -join ' | ') -replace '[\r\n]+', ' ')
+}
+
+function Get-LocalAiFileFacts {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force
+        $root = [System.IO.Path]::GetPathRoot($item.FullName)
+        $fs = (New-Object System.IO.DriveInfo($root)).DriveFormat
+        return "Attribute: $($item.Attributes); Größe: $($item.Length); Dateisystem: $fs"
+    } catch { return "Datei nicht lesbar: $($_.Exception.Message)" }
+}
+
+function Clear-LocalAiCompression {
+    # Hyper-V verlangt unkomprimierte, unverschlüsselte und nicht spärliche VHDX-Dateien.
+    # Für einen Ordner: Komprimierung abschalten, damit neue Dateien darin unkomprimiert entstehen.
+    param([Parameter(Mandatory)][string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::Encrypted) {
+        throw "$Path ist verschlüsselt (EFS). Hyper-V kann darin keine virtuellen Festplatten nutzen – anderen vmDirectory wählen."
+    }
+    if ($item.Attributes -band [System.IO.FileAttributes]::Compressed) {
+        Write-Host "NTFS-Komprimierung wird entfernt: $Path"
+        & compact.exe /u /q $Path | Out-Null
+    }
+    if (-not $item.PSIsContainer -and ($item.Attributes -band [System.IO.FileAttributes]::SparseFile)) {
+        Write-Host "Sparse-Kennzeichen wird entfernt: $Path"
+        & fsutil.exe sparse setflag $Path 0 | Out-Null
+    }
+    $after = (Get-Item -LiteralPath $Path -Force).Attributes
+    if ($after -band [System.IO.FileAttributes]::Compressed) { throw "$Path ist weiterhin komprimiert. Bitte Komprimierung für den Ordner aufheben (Eigenschaften → Erweitert)." }
+}
+
+function Mount-LocalAiVhd {
+    # Bindet eine VHDX ein: zuerst Mount-VHD (Hyper-V), sonst Mount-DiskImage (Speicherverwaltung).
+    # Liefert @{ Disk = <Get-Disk-Objekt>; Method = 'Hyper-V' | 'Storage' }.
+    param([Parameter(Mandatory)][string]$Path)
+    $first = $null
+    try {
+        $disk = Mount-VHD -Path $Path -Passthru -ErrorAction Stop | Get-Disk -ErrorAction Stop
+        return @{ Disk = $disk; Method = 'Hyper-V' }
+    } catch {
+        $first = Get-LocalAiErrorText -ErrorRecord $_
+        Write-Host "Mount-VHD fehlgeschlagen: $first"
+        Write-Host (Get-LocalAiFileFacts -Path $Path)
+        try { Dismount-VHD -Path $Path -ErrorAction SilentlyContinue } catch { }
+    }
+    try {
+        Write-Host 'Zweiter Versuch mit Mount-DiskImage …'
+        Mount-DiskImage -ImagePath $Path -StorageType VHDX -Access ReadWrite -NoDriveLetter -ErrorAction Stop | Out-Null
+        $disk = Invoke-LocalAiRetry { Get-DiskImage -ImagePath $Path -ErrorAction Stop | Get-Disk -ErrorAction Stop }
+        return @{ Disk = $disk; Method = 'Storage' }
+    } catch {
+        $second = Get-LocalAiErrorText -ErrorRecord $_
+        throw "Systemfestplatte ließ sich nicht einbinden. Mount-VHD: $first – Mount-DiskImage: $second – $(Get-LocalAiFileFacts -Path $Path)"
+    }
+}
+
+function Dismount-LocalAiVhd {
+    param([Parameter(Mandatory)][string]$Path, [string]$Method = 'Hyper-V')
+    if ($Method -eq 'Storage') { Dismount-DiskImage -ImagePath $Path | Out-Null } else { Dismount-VHD -Path $Path }
+}
+
 function Invoke-LocalAiRetry {
     param([Parameter(Mandatory)][scriptblock]$Action, [int]$Attempts = 20, [int]$DelayMs = 500)
     for ($i = 1; ; $i++) {
