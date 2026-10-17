@@ -84,8 +84,77 @@ public sealed record SandboxStatus(SandboxState State, string Text)
 public sealed class SignalBoard
 {
     private static readonly Regex Valid = new(@"^(result|report):\d{1,18}$", RegexOptions.CultureInvariant);
+    private static readonly Regex ProgressToken = new("^[a-z0-9-]{1,32}$", RegexOptions.CultureInvariant);
+    private static readonly Regex HeartbeatToken = new("^[A-Za-z]{1,40}$", RegexOptions.CultureInvariant);
     private readonly Lock _gate = new();
     private string? _latest;
+    private string? _progress;
+    private string? _heartbeat;
+
+    /// <summary>Letzter Fortschritt der Provisionierung im Gast (festes Wortformat).</summary>
+    public string? Progress
+    {
+        get { lock (_gate) { return _progress; } }
+    }
+
+    /// <summary>Hyper-V-Heartbeat des Gasts (vom Host gelesen).</summary>
+    public string? Heartbeat
+    {
+        get { lock (_gate) { return _heartbeat; } }
+    }
+
+    public bool PostProgress(string value)
+    {
+        if (!ProgressToken.IsMatch(value))
+        {
+            return false;
+        }
+        lock (_gate)
+        {
+            _progress = value;
+        }
+        return true;
+    }
+
+    public bool PostHeartbeat(string value)
+    {
+        if (!HeartbeatToken.IsMatch(value))
+        {
+            return false;
+        }
+        lock (_gate)
+        {
+            _heartbeat = value;
+        }
+        return true;
+    }
+
+    /// <summary>Deutscher Text zum Stand im Gast, z. B. für die Kopfzeile.</summary>
+    public string DescribeGuest()
+    {
+        var progress = Progress switch
+        {
+            null => "noch keine Meldung aus dem Gast (Windows-Einrichtung läuft)",
+            "setupcomplete" => "Windows eingerichtet, Provisionierung startet",
+            "start" => "Provisionierung läuft",
+            "network" => "Netzwerkprüfungen",
+            "toolchains" => "Toolchains werden installiert",
+            "worker" => "Worker wird eingerichtet",
+            "report" => "Bericht wird übergeben",
+            "report-sent" or "report-sent-ps" => "Bericht übergeben",
+            "report-failed" => "Bericht konnte nicht übergeben werden",
+            var other => other,
+        };
+        var heartbeat = Heartbeat switch
+        {
+            null => "unbekannt",
+            "NoContact" => "kein Kontakt",
+            "LostCommunication" => "Verbindung verloren",
+            var h when h.StartsWith("Ok", StringComparison.Ordinal) => "Windows läuft",
+            var h => h,
+        };
+        return $"{progress}; Heartbeat: {heartbeat}";
+    }
     private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public string? Latest
@@ -350,10 +419,28 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
 
             _watcher = Task.Run(() => _host.WatchSignalsAsync(_signals, p => Lock("Beobachtung der VM: " + GuestReport.Clip(p)), ct), ct);
             SetStatus(SandboxState.WaitingForGuest, "Windows richtet sich in der VM ein (erster Start, dauert einige Minuten)");
-            var remaining = _settings.BuildTimeout - (DateTime.UtcNow - started);
-            if (remaining <= TimeSpan.Zero || !await _signals.WaitForAsync("report:0", remaining, ct).ConfigureAwait(false))
+            var reported = false;
+            string? shown = null;
+            while (!reported)
             {
-                Lock($"VM hat sich nicht innerhalb von {_settings.BuildTimeout.TotalMinutes:F0} Minuten gemeldet – Konsole der VM im Hyper-V-Manager prüfen");
+                var remaining = _settings.BuildTimeout - (DateTime.UtcNow - started);
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+                reported = await _signals.WaitForAsync("report:0", remaining < TimeSpan.FromSeconds(5) ? remaining : TimeSpan.FromSeconds(5), ct)
+                    .ConfigureAwait(false);
+                var guest = _signals.DescribeGuest();
+                if (!reported && guest != shown)
+                {
+                    shown = guest;
+                    SetStatus(SandboxState.WaitingForGuest, "VM startet – " + guest);
+                }
+            }
+            if (!reported)
+            {
+                Lock($"VM hat sich nicht innerhalb von {_settings.BuildTimeout.TotalMinutes:F0} Minuten gemeldet (letzter Stand: {_signals.DescribeGuest()}) – " +
+                     "Konsole der VM im Hyper-V-Manager prüfen, Gastprotokolle mit scripts\\sandbox\\Get-LocalAiGuestLogs.ps1");
                 return;
             }
 

@@ -196,6 +196,12 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.True(board.Post("result:7"));
         Assert.True(await board.WaitForAsync("result:7", TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken));
         Assert.False(await board.WaitForAsync("result:8", TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken));
+        Assert.Contains("noch keine Meldung", board.DescribeGuest(), StringComparison.Ordinal);
+        Assert.False(board.PostProgress("Start; rm"));
+        Assert.True(board.PostProgress("setupcomplete"));
+        Assert.False(board.PostHeartbeat("Ok Apps"));
+        Assert.True(board.PostHeartbeat("OkApplicationsUnknown"));
+        Assert.Equal("Windows eingerichtet, Provisionierung startet; Heartbeat: Windows läuft", board.DescribeGuest());
     }
 
     [Fact, Trait("Pruefung", "R17")]

@@ -86,6 +86,7 @@ In `config\localai.json` `"mode": "hyperv"` setzen, dann `scripts\start.ps1`.
 
 | Meldung | Ursache / Abhilfe |
 |---|---|
+| »VM hat sich nicht … gemeldet (letzter Stand: …)« | Der Stand zeigt, wie weit der Gast kam: »noch keine Meldung« = Windows-Einrichtung (OOBE) hängt oder `SetupComplete.cmd` lief nicht; »Provisionierung läuft/Netzwerkprüfungen/…« = Provisionierung blieb dort hängen; »Bericht übergeben« = Rückweg (Transfer-Laufwerk/KVP) prüfen. Für die Fehlersuche `keepVmOnExit: true` und `buildTimeoutMinutes: 30` setzen, Aufbau wiederholen, danach als Administrator `scripts\sandbox\Get-LocalAiGuestLogs.ps1` – kopiert Einrichtungs- und Provisionierungsprotokolle aus der VM in einen Ordner `gastprotokolle-…`. |
 | »Systemfestplatte ließ sich nicht einbinden …« | Das Skript versucht `Mount-VHD` und danach `Mount-DiskImage` und schreibt die vollständige Fehlerkette sowie Dateiattribute und Dateisystem in `build.log`. Häufige Ursachen: komprimierter oder verschlüsselter Ordner (wird für den VM-Ordner automatisch aufgehoben bzw. gemeldet), Virenscanner, Ordner auf einem Laufwerk ohne NTFS/ReFS. Abhilfe zum Ausprobieren: `vmDirectory` auf einen leeren Ordner auf einem anderen Laufwerk setzen, z. B. `D:\\Agent\\VM`. |
 
 ## Bekannte Einschränkungen

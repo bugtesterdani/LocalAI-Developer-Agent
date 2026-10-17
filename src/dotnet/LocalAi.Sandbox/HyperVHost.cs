@@ -147,6 +147,16 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
                     await LogAsync("Ungültiges Signal verworfen: " + GuestReport.Clip(value, 80)).ConfigureAwait(false);
                 }
             }
+            else if (line.StartsWith("PROGRESS ", StringComparison.Ordinal))
+            {
+                board.PostProgress(line[9..].Trim());
+                await LogAsync(line).ConfigureAwait(false);
+            }
+            else if (line.StartsWith("HEARTBEAT ", StringComparison.Ordinal))
+            {
+                board.PostHeartbeat(line[10..].Trim());
+                await LogAsync(line).ConfigureAwait(false);
+            }
             else if (line.StartsWith("NICS ", StringComparison.Ordinal) || line.StartsWith("ERROR ", StringComparison.Ordinal))
             {
                 await LogAsync(line).ConfigureAwait(false);

@@ -10,6 +10,16 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = 'C:\LocalAi'
+
+function Set-Progress([string]$Token) {
+    # Fortschritt für den Host (KVP, festes Format). Darf die Provisionierung nie abbrechen.
+    try {
+        $key = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Auto'
+        if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+        Set-ItemProperty -Path $key -Name 'LocalAiProgress' -Value $Token -Type String
+    } catch { }
+}
+Set-Progress 'start'
 foreach ($d in 'logs', 'inbox', 'work') { New-Item -ItemType Directory -Force -Path (Join-Path $root $d) | Out-Null }
 try { Start-Transcript -LiteralPath (Join-Path $root 'logs\provision.log') -Append | Out-Null } catch { }
 
@@ -76,9 +86,11 @@ try {
     if ($LASTEXITCODE -ne 0) { $errors.Add("icacls fehlgeschlagen ($LASTEXITCODE)") }
 
     # 2 – Netzwerk
+    Set-Progress 'network'
     $report.networkAdapters = @(Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'PhysicalAdapter = TRUE').Count
     $report.probes = Get-Probes
 
+    Set-Progress 'toolchains'
     # 3 – Toolchains (nur die für das Projekt gewählten und registrierten), danach nur noch lesbar (SEC-21).
     $sourceRoot = Join-Path $root 'toolchain-src'
     $toolchains = @()
@@ -98,6 +110,7 @@ try {
     if (Test-Path -LiteralPath $sourceRoot) { Remove-Item -LiteralPath $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue }
 
     # 4 – Worker
+    Set-Progress 'worker'
     $python = Join-Path $root 'python\python.exe'
     $version = & $python -I -c "import sys, pydantic, localai.worker; print(sys.version.split()[0])"
     if ($LASTEXITCODE -ne 0) { throw "Python oder Worker im Gast nicht lauffähig (Exitcode $LASTEXITCODE)" }
@@ -117,6 +130,7 @@ try {
 }
 
 # 5 – Bericht
+Set-Progress 'report'
 $report.errors = @($errors)
 $report.durationSeconds = [int]((Get-Date) - $started).TotalSeconds
 $json = $report | ConvertTo-Json -Depth 6
@@ -125,9 +139,10 @@ $reportFile = Join-Path $root 'report.json'
 Write-Host $json
 & (Join-Path $root 'python\python.exe') -I -m localai.worker --report $reportFile --transfer-disk auto --transfer-size $size
 Write-Host "Bericht übergeben (Exitcode $LASTEXITCODE)"
+if ($LASTEXITCODE -eq 0) { Set-Progress 'report-sent' }
 if ($LASTEXITCODE -ne 0) {
     # Ohne lauffähiges Python trotzdem melden, damit der Host nicht bis zur Zeitgrenze wartet.
-    try { Send-ReportWithoutPython -Payload ([System.Text.Encoding]::UTF8.GetBytes($json)) -Size $size; Write-Host 'Bericht ohne Python übergeben' }
-    catch { Write-Host "Bericht konnte nicht übergeben werden: $($_.Exception.Message)" }
+    try { Send-ReportWithoutPython -Payload ([System.Text.Encoding]::UTF8.GetBytes($json)) -Size $size; Write-Host 'Bericht ohne Python übergeben'; Set-Progress 'report-sent-ps' }
+    catch { Write-Host "Bericht konnte nicht übergeben werden: $($_.Exception.Message)"; Set-Progress 'report-failed' }
 }
 try { Stop-Transcript | Out-Null } catch { }
