@@ -115,7 +115,7 @@ public sealed class HyperVTests : IAsyncLifetime
         var ct = TestContext.Current.CancellationToken;
 
         var snap = await adapter.ExecuteAsync(Proposal("Workspace.Snapshot", "p", "-", [], root), "inv-0", ct);
-        Assert.Equal(ResultStatus.Succeeded, snap.Status);
+        Assert.True(snap.Status == ResultStatus.Succeeded, $"Snapshot: {snap.TargetResults[0].Message} (Sandbox: {vm.Status.Text})");
         var snapshotId = snap.TargetResults.Single(t => t.TargetId == "snapshot").Text!;
 
         const int Roundtrips = 12;
@@ -123,7 +123,8 @@ public sealed class HyperVTests : IAsyncLifetime
         {
             var read = await adapter.ExecuteAsync(
                 Proposal("File.Read", "p", snapshotId, [new ToolTarget("t1", i % 2 == 0 ? "README.md" : "src/Main.cs")]), $"inv-{i + 1}", ct);
-            Assert.Equal(ResultStatus.Succeeded, read.Status);
+            Assert.True(read.Status == ResultStatus.Succeeded,
+                $"Lesezugriff {i + 1}: {read.Status} – {read.TargetResults[0].Message} (Sandbox: {vm.Status.Text})");
             Assert.True(read.Untrusted);
             Assert.Equal(i % 2 == 0 ? "# Projekt in der VM\nZeile 2\n" : "class Main {}\n", read.TargetResults[0].Text);
         }
@@ -360,14 +361,22 @@ public sealed class HyperVTests : IAsyncLifetime
             string? last = null;
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (File.Exists(SignalFile))
+                string? value = null;
+                try
                 {
-                    var value = (await File.ReadAllTextAsync(SignalFile, cancellationToken)).Trim();
-                    if (value != last)
-                    {
-                        last = value;
-                        board.Post(value);
-                    }
+                    // Mit FileShare.Delete, damit der Worker die Datei währenddessen ersetzen kann (Windows).
+                    await using var stream = new FileStream(SignalFile, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream);
+                    value = (await reader.ReadToEndAsync(cancellationToken)).Trim();
+                }
+                catch (Exception ex) when (ex is FileNotFoundException or IOException or UnauthorizedAccessException)
+                {
+                }
+                if (value is not null && value != last)
+                {
+                    last = value;
+                    board.Post(value);
                 }
                 await Task.Delay(20, cancellationToken);
             }

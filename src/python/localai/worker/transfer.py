@@ -154,7 +154,15 @@ class Signal:
         if self.signal_file is not None:
             tmp = self.signal_file.with_name(self.signal_file.name + ".tmp")
             tmp.write_text(value, encoding="ascii")
-            tmp.replace(self.signal_file)
+            # Unter Windows scheitert das Ersetzen, solange der Host die Datei gerade liest: kurz wiederholen.
+            for attempt in range(50):
+                try:
+                    tmp.replace(self.signal_file)
+                    return
+                except PermissionError:
+                    if attempt == 49:
+                        raise
+                    time.sleep(0.02)
             return
         if sys.platform != "win32":  # pragma: no cover
             raise TransferError("KVP-Signal gibt es nur in einer Windows-VM")
