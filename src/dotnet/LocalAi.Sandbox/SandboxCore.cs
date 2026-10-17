@@ -80,6 +80,14 @@ public static class ProjectLoader
             }
             grants.Add(grant with { Root = root });
         }
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in project.Toolchains ?? [])
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z][a-z0-9-]{0,31}$") || !names.Add(name))
+            {
+                throw new InvalidDataException($"toolchains: ungültiger oder doppelter Name '{name}'");
+            }
+        }
         return project with { Grants = grants };
     }
 }

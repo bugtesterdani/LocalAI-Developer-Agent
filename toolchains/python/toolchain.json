@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "name": "python",
+  "version": "3.12.10",
+  "displayName": "Python 3.12.10 mit pytest",
+  "guestPath": "C:\\Toolchains\\python",
+  "license": {
+    "proprietary": false,
+    "note": "PSF License; pytest: MIT"
+  },
+  "binaries": [
+    { "name": "python", "path": "python.exe" }
+  ],
+  "install": {
+    "kind": "Installer",
+    "file": "python-3.12.10-amd64.exe",
+    "arguments": [
+      "/quiet", "InstallAllUsers=1", "TargetDir={guest}", "PrependPath=0", "Include_launcher=0",
+      "Include_test=0", "Include_doc=0", "Include_tcltk=0", "Shortcuts=0", "AssociateFiles=0", "Include_pip=1"
+    ],
+    "expectedMinutes": 5,
+    "check": { "binary": "python", "arguments": ["--version"], "expectOutput": "3.12.10" }
+  },
+  "postInstall": [
+    { "binary": "python", "arguments": ["-m", "pip", "install", "--no-index", "--find-links", "{source}\\wheels", "pytest"] }
+  ],
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "python", "arguments": ["-m", "pytest", "-q", "-p", "no:cacheprovider", "{selftest}"] },
+      { "binary": "python", "arguments": ["{selftest}\\hello.py"] }
+    ],
+    "expectOutput": "Hallo aus der Sandbox (Python)"
+  },
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1",
+    "PIP_NO_INDEX": "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1"
+  },
+  "packageSource": { "kind": "Pip", "path": "wheels" },
+  "actions": {
+    "run": {
+      "binary": "python",
+      "arguments": ["{script}"],
+      "parameters": { "script": { "type": "Path" } },
+      "timeoutSeconds": 120
+    },
+    "test": {
+      "binary": "python",
+      "arguments": ["-m", "pytest", "-q", "-p", "no:cacheprovider", "{path}", "--junitxml={results}\\pytest.xml"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 600
+    }
+  },
+  "testResultFormat": "JUnit"
+}

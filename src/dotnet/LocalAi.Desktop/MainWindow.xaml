@@ -125,6 +125,40 @@
                 <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatAndPlan}" Style="{StaticResource SectionHeader}" />
                 <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatPlaceholder}" TextWrapping="Wrap"
                            Foreground="#4B5563" Margin="0,0,0,12" />
+
+                <!-- Toolchains: Registrierung als sichtbare, bestätigte Aktion -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <DockPanel DockPanel.Dock="Top">
+                        <Button DockPanel.Dock="Right" Content="{loc:T ScanToolchains}" Command="{Binding ScanToolchainsCommand}" Padding="8,2" />
+                        <TextBlock Text="{loc:T Toolchains}" Style="{StaticResource SectionHeader}" />
+                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="{loc:T ToolchainsHint}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="11" />
+                    <TextBlock DockPanel.Dock="Top" Text="{Binding ToolchainsEmptyText}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,4,0,0"
+                               Visibility="{Binding ToolchainsEmptyText, Converter={StaticResource EmptyToCollapsed}}" />
+                    <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Toolchains}" Focusable="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#E5E7EB" BorderThickness="1" Background="White" Padding="6" Margin="0,4,0,0">
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                                                <Button Content="{loc:T RegisterToolchain}" Command="{Binding RegisterCommand}" Padding="8,2" Margin="4,0,0,0" />
+                                                <Button Content="{loc:T UnregisterToolchain}" Command="{Binding UnregisterCommand}" Padding="8,2" Margin="4,0,0,0" />
+                                            </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding TitleText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding StatusText}" Foreground="#374151" TextWrapping="Wrap" />
+                                                <TextBox Text="{Binding DetailText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontSize="11" />
+                                                <TextBlock Text="{Binding ProblemsText}" Foreground="#B91C1C" TextWrapping="Wrap"
+                                                           Visibility="{Binding ProblemsText, Converter={StaticResource EmptyToCollapsed}}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="{loc:T Events}" Style="{StaticResource SectionHeader}" />
                 <ListView ItemsSource="{Binding EventLog}"
                           VirtualizingPanel.IsVirtualizing="True"

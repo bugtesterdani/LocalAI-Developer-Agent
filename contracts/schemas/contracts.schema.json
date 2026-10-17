@@ -430,6 +430,12 @@
           "items": {
             "$ref": "#/$defs/FolderGrant"
           }
+        },
+        "toolchains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -613,6 +619,410 @@
         "seq",
         "at",
         "type"
+      ]
+    },
+    "ToolchainInstallKind": {
+      "type": "string",
+      "enum": [
+        "Archive",
+        "Installer",
+        "None"
+      ]
+    },
+    "ToolchainParameterType": {
+      "type": "string",
+      "enum": [
+        "Path",
+        "Choice",
+        "Text",
+        "Integer"
+      ]
+    },
+    "TestResultFormat": {
+      "type": "string",
+      "enum": [
+        "Trx",
+        "JUnit",
+        "NUnit",
+        "ExitCode"
+      ]
+    },
+    "PackageSourceKind": {
+      "type": "string",
+      "enum": [
+        "NuGet",
+        "Pip",
+        "None"
+      ]
+    },
+    "ToolchainCommand": {
+      "type": "object",
+      "description": "Fester Programmaufruf: deklariertes Binary plus Argumentliste, kein Shellstring.",
+      "properties": {
+        "binary": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "binary",
+        "arguments"
+      ]
+    },
+    "ToolchainCheck": {
+      "type": "object",
+      "properties": {
+        "binary": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectOutput": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "binary",
+        "arguments"
+      ]
+    },
+    "ToolchainBinary": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "ToolchainInstall": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ToolchainInstallKind"
+        },
+        "file": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectedMinutes": {
+          "type": "integer"
+        },
+        "check": {
+          "$ref": "#/$defs/ToolchainCheck"
+        }
+      },
+      "required": [
+        "kind",
+        "expectedMinutes",
+        "check"
+      ]
+    },
+    "ToolchainSelfTest": {
+      "type": "object",
+      "description": "Kleines Beispiel, das beim VM-Aufbau gebaut und ausgeführt wird.",
+      "properties": {
+        "directory": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolchainCommand"
+          }
+        },
+        "expectOutput": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "directory",
+        "steps",
+        "expectOutput"
+      ]
+    },
+    "ToolchainParameter": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/ToolchainParameterType"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "ToolchainAction": {
+      "type": "object",
+      "description": "Aktionsvorlage; Argumente sind Literale oder genau ein {parameter}.",
+      "properties": {
+        "binary": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolchainParameter"
+          }
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "binary",
+        "arguments"
+      ]
+    },
+    "ToolchainLicense": {
+      "type": "object",
+      "properties": {
+        "proprietary": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "proprietary"
+      ]
+    },
+    "ToolchainPackageSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PackageSourceKind"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "ToolchainManifest": {
+      "type": "object",
+      "description": "toolchain.json im Toolchain-Ordner (Spezifikation §8 Toolchains).",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "guestPath": {
+          "type": "string"
+        },
+        "license": {
+          "$ref": "#/$defs/ToolchainLicense"
+        },
+        "binaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolchainBinary"
+          }
+        },
+        "install": {
+          "$ref": "#/$defs/ToolchainInstall"
+        },
+        "postInstall": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolchainCommand"
+          }
+        },
+        "selfTest": {
+          "$ref": "#/$defs/ToolchainSelfTest"
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolchainAction"
+          }
+        },
+        "testResultFormat": {
+          "$ref": "#/$defs/TestResultFormat"
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "packageSource": {
+          "$ref": "#/$defs/ToolchainPackageSource"
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "displayName",
+        "guestPath",
+        "license",
+        "binaries",
+        "install",
+        "actions",
+        "testResultFormat"
+      ]
+    },
+    "ToolchainInfo": {
+      "type": "object",
+      "description": "Toolchain-Ordner bzw. Registrierung, wie die Oberfläche sie anzeigt.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "fileCount": {
+          "type": "integer"
+        },
+        "totalBytes": {
+          "type": "integer"
+        },
+        "registered": {
+          "type": "boolean"
+        },
+        "registeredDigest": {
+          "type": "string"
+        },
+        "proprietary": {
+          "type": "boolean"
+        },
+        "licenseNote": {
+          "type": "string"
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "usedByProject": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "displayName",
+        "directory",
+        "digest",
+        "fileCount",
+        "totalBytes",
+        "registered",
+        "proprietary",
+        "problems",
+        "usedByProject"
+      ]
+    },
+    "ToolchainRegistration": {
+      "type": "object",
+      "description": "Gespeicherte Registrierung mit den bei der Bestätigung festgehaltenen Datei-Hashes.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "manifestSha256": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "registeredAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "directory",
+        "manifestSha256",
+        "digest",
+        "files",
+        "registeredAt"
       ]
     }
   }

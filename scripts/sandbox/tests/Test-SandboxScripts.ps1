@@ -42,6 +42,32 @@ try { Assert-LocalAiVmName -VmName "x'; Remove-VM *"; $failures.Add('VM-Name nic
 $pw = New-LocalAiPassword
 Expect ($pw.Length -ge 30 -and $pw -match '[0-9]' -and $pw -match '[A-Za-z]' -and $pw -match '!') 'Kennwort-Komplexität'
 
+# 4 – Gast-Provisionierung: Argumente kommen unverändert beim Programm an, Platzhalter, Hashprüfung
+Import-Module (Join-Path $root 'guest\LocalAiGuest.psm1') -Force
+$quoted = @{ 'abc' = 'abc'; 'a b' = '"a b"'; 'a"b' = '"a\"b"'; 'C:\x y\' = '"C:\x y\\"'; '' = '""'; 'a\\"b' = '"a\\\\\"b"' }
+foreach ($case in $quoted.GetEnumerator()) {
+    $actual = ConvertTo-CommandLineArgument $case.Key
+    Expect ($actual -eq $case.Value) "Quoting von [$($case.Key)]: $actual"
+}
+Expect ((Expand-Placeholders '{guest}\bin\{x}' @{ guest = 'C:\Toolchains\a' }) -eq 'C:\Toolchains\a\bin\{x}') 'Platzhalter'
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('lai-guest-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path (Join-Path $tmp 'logs'), (Join-Path $tmp 'src\demo') | Out-Null
+Set-LocalAiGuestRoot -Path $tmp
+if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
+    $run = Invoke-ToolchainProcess -Exe '/bin/echo' -Arguments @('a b', 'x"y', 'C:\p q\') -WorkingDirectory $tmp -TimeoutMinutes 1 -Environment @{}
+    Expect ($run.Output.Trim() -eq 'a b x"y C:\p q\') "Argumente unverändert: $($run.Output)"
+}
+'{"schemaVersion":1,"name":"demo","version":"1","guestPath":"C:\\Toolchains\\demo","install":{"kind":"None","expectedMinutes":1,"check":{"binary":"d","arguments":[]}},"binaries":[{"name":"d","path":"d.exe"}]}' |
+    Set-Content -LiteralPath (Join-Path $tmp 'src\demo\toolchain.json') -Encoding UTF8
+'inhalt' | Set-Content -LiteralPath (Join-Path $tmp 'src\demo\datei.txt') -Encoding ASCII
+'{"name":"demo","version":"1","files":{"datei.txt":"0000000000000000000000000000000000000000000000000000000000000000"}}' |
+    Set-Content -LiteralPath (Join-Path $tmp 'src\demo\pinned.json') -Encoding UTF8
+$r = Install-Toolchain -Name 'demo' -SourceRoot (Join-Path $tmp 'src')
+Expect (-not $r.installed -and $r.error -like 'Hash weicht ab*') "Hashabweichung im Gast: $($r.error)"
+$r = Install-Toolchain -Name 'anders' -SourceRoot (Join-Path $tmp 'src')
+Expect (-not $r.installed -and $r.error) 'fehlende Toolchain'
+Remove-Item -LiteralPath $tmp -Recurse -Force
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Output "FEHLER $_" }
     exit 1

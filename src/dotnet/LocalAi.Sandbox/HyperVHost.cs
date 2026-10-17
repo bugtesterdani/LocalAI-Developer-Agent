@@ -344,7 +344,8 @@ public static class GuestPayloadBuilder
 {
     private static readonly string[] SkipDirectories = ["__pycache__", "test", "tests", "idlelib", "tkinter", "turtledemo", "ensurepip"];
 
-    public static void Build(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, long transferDiskBytes)
+    public static void Build(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, long transferDiskBytes,
+        IReadOnlyList<string>? toolchains = null)
     {
         if (!File.Exists(Path.Combine(sources.PythonHome, "python.exe")))
         {
@@ -387,8 +388,11 @@ public static class GuestPayloadBuilder
 
         File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
         File.WriteAllText(Path.Combine(root, "guest-config.json"),
-            JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes }), new UTF8Encoding(false));
-        File.Copy(Path.Combine(sources.GuestScripts, "provision.ps1"), Path.Combine(root, "provision.ps1"));
+            JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [] }), new UTF8Encoding(false));
+        foreach (var file in new[] { "provision.ps1", "LocalAiGuest.psm1" })
+        {
+            File.Copy(Path.Combine(sources.GuestScripts, file), Path.Combine(root, file));
+        }
         File.Copy(Path.Combine(sources.GuestScripts, "SetupComplete.cmd"), Path.Combine(guestDirectory, "SetupComplete.cmd"));
     }
 

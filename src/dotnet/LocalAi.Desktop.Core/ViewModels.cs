@@ -17,6 +17,9 @@ public interface IBrokerUiApi
     Task<JsonElement> StartFakeAgentAsync(CancellationToken ct);
     Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct);
     Task<JsonElement> StatusAsync(CancellationToken ct);
+    Task<IReadOnlyList<ToolchainInfo>> ScanToolchainsAsync(CancellationToken ct);
+    Task RegisterToolchainAsync(string directory, string digest, CancellationToken ct);
+    Task UnregisterToolchainAsync(string name, CancellationToken ct);
 }
 
 public sealed record AgentItem(string Name, string StateText);
@@ -205,6 +208,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string? _selectAfterRefresh;
     private string _projectText = UiText.Get("ProjectNone");
     private string? _sandboxDetail;
+    private string? _toolchainsEmptyText;
     private Task? _eventLoop;
 
     public MainViewModel(IBrokerUiApi api, IBrokerUiApi eventsApi, Action<Action> post, string sessionId, string sandboxMode = "test")
@@ -218,6 +222,54 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StartFakeRunCommand = new RelayCommand(StartFakeRunAsync, () => !IsStopped);
         EmergencyStopCommand = new RelayCommand(EmergencyStopAsync);
         ReleaseCommand = new RelayCommand(ReleaseAsync, () => IsStopped);
+        ScanToolchainsCommand = new RelayCommand(ScanToolchainsAsync);
+    }
+
+    public ObservableCollection<ToolchainItemViewModel> Toolchains { get; } = [];
+
+    public RelayCommand ScanToolchainsCommand { get; }
+
+    /// <summary>Bestätigung für proprietäre Toolchains (Lizenz). Die Oberfläche setzt hier einen Dialog ein.</summary>
+    public Func<ToolchainInfo, bool> ConfirmLicense { get; set; } = _ => false;
+
+    public string? ToolchainsEmptyText
+    {
+        get => _toolchainsEmptyText;
+        private set => Set(ref _toolchainsEmptyText, value);
+    }
+
+    public Task ScanToolchainsAsync() => GuardAsync(async () =>
+    {
+        var list = await _api.ScanToolchainsAsync(_shutdown.Token).ConfigureAwait(false);
+        Post(() =>
+        {
+            Toolchains.Clear();
+            foreach (var info in list)
+            {
+                Toolchains.Add(new ToolchainItemViewModel(info, this));
+            }
+            ToolchainsEmptyText = list.Count == 0 ? UiText.Get("NoToolchains") : null;
+        });
+    });
+
+    internal async Task RegisterToolchainAsync(ToolchainItemViewModel item)
+    {
+        if (item.Info.Proprietary && !ConfirmLicense(item.Info))
+        {
+            return;
+        }
+        await GuardAsync(async () =>
+        {
+            await _api.RegisterToolchainAsync(item.Info.Directory, item.Info.Digest, _shutdown.Token).ConfigureAwait(false);
+            Post(() => InfoText = UiText.Format("ToolchainRegisteredInfo", item.TitleText));
+        }).ConfigureAwait(false);
+        await ScanToolchainsAsync().ConfigureAwait(false);
+    }
+
+    internal async Task UnregisterToolchainAsync(ToolchainItemViewModel item)
+    {
+        await GuardAsync(() => _api.UnregisterToolchainAsync(item.Name, _shutdown.Token)).ConfigureAwait(false);
+        await ScanToolchainsAsync().ConfigureAwait(false);
     }
 
     public ObservableCollection<AgentItem> Agents { get; }
@@ -299,6 +351,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 StartFakeRunCommand.Refresh();
                 ReleaseCommand.Refresh();
+                foreach (var toolchain in Toolchains)
+                {
+                    toolchain.RefreshCommands();
+                }
                 foreach (var card in Approvals)
                 {
                     card.RefreshCommands();
@@ -325,6 +381,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }).ConfigureAwait(false);
         await RefreshPendingAsync().ConfigureAwait(false);
         _eventLoop = Task.Run(EventLoopAsync);
+        // Hashes großer Toolchains zu berechnen dauert: im Hintergrund, die Oberfläche ist sofort bedienbar.
+        _ = Task.Run(ScanToolchainsAsync);
     }
 
     internal async Task DecideAsync(ApprovalCardViewModel card, bool approve)

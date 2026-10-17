@@ -158,7 +158,8 @@ public sealed partial record ProjectConfig(
     [property: JsonPropertyName("schemaVersion")] long SchemaVersion,
     [property: JsonPropertyName("projectId")] string ProjectId,
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("grants")] IReadOnlyList<FolderGrant> Grants);
+    [property: JsonPropertyName("grants")] IReadOnlyList<FolderGrant> Grants,
+    [property: JsonPropertyName("toolchains"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Toolchains = null);
 
 public sealed partial record SnapshotFile(
     [property: JsonPropertyName("path")] string Path,
@@ -206,3 +207,130 @@ public sealed partial record BrokerEvent(
     [property: JsonPropertyName("runId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RunId = null,
     [property: JsonPropertyName("state"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ProposalState? State = null,
     [property: JsonPropertyName("message"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter<ToolchainInstallKind>))]
+public enum ToolchainInstallKind
+{
+    Archive,
+    Installer,
+    None,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<ToolchainParameterType>))]
+public enum ToolchainParameterType
+{
+    Path,
+    Choice,
+    Text,
+    Integer,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<TestResultFormat>))]
+public enum TestResultFormat
+{
+    Trx,
+    JUnit,
+    NUnit,
+    ExitCode,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PackageSourceKind>))]
+public enum PackageSourceKind
+{
+    NuGet,
+    Pip,
+    None,
+}
+
+/// <summary>Fester Programmaufruf: deklariertes Binary plus Argumentliste, kein Shellstring.</summary>
+public sealed partial record ToolchainCommand(
+    [property: JsonPropertyName("binary")] string Binary,
+    [property: JsonPropertyName("arguments")] IReadOnlyList<string> Arguments);
+
+public sealed partial record ToolchainCheck(
+    [property: JsonPropertyName("binary")] string Binary,
+    [property: JsonPropertyName("arguments")] IReadOnlyList<string> Arguments,
+    [property: JsonPropertyName("expectOutput"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExpectOutput = null);
+
+public sealed partial record ToolchainBinary(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("sha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Sha256 = null);
+
+public sealed partial record ToolchainInstall(
+    [property: JsonPropertyName("kind")] ToolchainInstallKind Kind,
+    [property: JsonPropertyName("expectedMinutes")] long ExpectedMinutes,
+    [property: JsonPropertyName("check")] ToolchainCheck Check,
+    [property: JsonPropertyName("file"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? File = null,
+    [property: JsonPropertyName("arguments"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Arguments = null);
+
+/// <summary>Kleines Beispiel, das beim VM-Aufbau gebaut und ausgeführt wird.</summary>
+public sealed partial record ToolchainSelfTest(
+    [property: JsonPropertyName("directory")] string Directory,
+    [property: JsonPropertyName("steps")] IReadOnlyList<ToolchainCommand> Steps,
+    [property: JsonPropertyName("expectOutput")] string ExpectOutput);
+
+public sealed partial record ToolchainParameter(
+    [property: JsonPropertyName("type")] ToolchainParameterType Type,
+    [property: JsonPropertyName("values"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Values = null,
+    [property: JsonPropertyName("pattern"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Pattern = null);
+
+/// <summary>Aktionsvorlage; Argumente sind Literale oder genau ein {parameter}.</summary>
+public sealed partial record ToolchainAction(
+    [property: JsonPropertyName("binary")] string Binary,
+    [property: JsonPropertyName("arguments")] IReadOnlyList<string> Arguments,
+    [property: JsonPropertyName("parameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, ToolchainParameter>? Parameters = null,
+    [property: JsonPropertyName("timeoutSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? TimeoutSeconds = null);
+
+public sealed partial record ToolchainLicense(
+    [property: JsonPropertyName("proprietary")] bool Proprietary,
+    [property: JsonPropertyName("note"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Note = null,
+    [property: JsonPropertyName("files"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Files = null);
+
+public sealed partial record ToolchainPackageSource(
+    [property: JsonPropertyName("kind")] PackageSourceKind Kind,
+    [property: JsonPropertyName("path"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null);
+
+/// <summary>toolchain.json im Toolchain-Ordner (Spezifikation §8 Toolchains).</summary>
+public sealed partial record ToolchainManifest(
+    [property: JsonPropertyName("schemaVersion")] long SchemaVersion,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("version")] string Version,
+    [property: JsonPropertyName("displayName")] string DisplayName,
+    [property: JsonPropertyName("guestPath")] string GuestPath,
+    [property: JsonPropertyName("license")] ToolchainLicense License,
+    [property: JsonPropertyName("binaries")] IReadOnlyList<ToolchainBinary> Binaries,
+    [property: JsonPropertyName("install")] ToolchainInstall Install,
+    [property: JsonPropertyName("actions")] IReadOnlyDictionary<string, ToolchainAction> Actions,
+    [property: JsonPropertyName("testResultFormat")] TestResultFormat TestResultFormat,
+    [property: JsonPropertyName("postInstall"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolchainCommand>? PostInstall = null,
+    [property: JsonPropertyName("selfTest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ToolchainSelfTest? SelfTest = null,
+    [property: JsonPropertyName("environment"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, string>? Environment = null,
+    [property: JsonPropertyName("packageSource"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ToolchainPackageSource? PackageSource = null,
+    [property: JsonPropertyName("files"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, string>? Files = null);
+
+/// <summary>Toolchain-Ordner bzw. Registrierung, wie die Oberfläche sie anzeigt.</summary>
+public sealed partial record ToolchainInfo(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("version")] string Version,
+    [property: JsonPropertyName("displayName")] string DisplayName,
+    [property: JsonPropertyName("directory")] string Directory,
+    [property: JsonPropertyName("digest")] string Digest,
+    [property: JsonPropertyName("fileCount")] long FileCount,
+    [property: JsonPropertyName("totalBytes")] long TotalBytes,
+    [property: JsonPropertyName("registered")] bool Registered,
+    [property: JsonPropertyName("proprietary")] bool Proprietary,
+    [property: JsonPropertyName("problems")] IReadOnlyList<string> Problems,
+    [property: JsonPropertyName("usedByProject")] bool UsedByProject,
+    [property: JsonPropertyName("registeredDigest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RegisteredDigest = null,
+    [property: JsonPropertyName("licenseNote"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LicenseNote = null);
+
+/// <summary>Gespeicherte Registrierung mit den bei der Bestätigung festgehaltenen Datei-Hashes.</summary>
+public sealed partial record ToolchainRegistration(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("version")] string Version,
+    [property: JsonPropertyName("directory")] string Directory,
+    [property: JsonPropertyName("manifestSha256")] string ManifestSha256,
+    [property: JsonPropertyName("digest")] string Digest,
+    [property: JsonPropertyName("files")] IReadOnlyDictionary<string, string> Files,
+    [property: JsonPropertyName("registeredAt")] string RegisteredAt);

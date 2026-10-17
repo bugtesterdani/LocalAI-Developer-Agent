@@ -14,7 +14,7 @@ namespace LocalAi.Tests;
 public sealed partial class DesktopTests
 {
     private static readonly Type[] ViewModelTypes =
-        [typeof(MainViewModel), typeof(ApprovalCardViewModel), typeof(TargetItemViewModel), typeof(AgentItem), typeof(EventLine)];
+        [typeof(MainViewModel), typeof(ApprovalCardViewModel), typeof(TargetItemViewModel), typeof(AgentItem), typeof(EventLine), typeof(ToolchainItemViewModel)];
 
     private static string XamlPath() =>
         Path.Combine(ContractTests.RepoRoot(), "src", "dotnet", "LocalAi.Desktop", "MainWindow.xaml");
@@ -150,5 +150,14 @@ public sealed partial class DesktopTests
         public Task<JsonElement> StartFakeAgentAsync(CancellationToken ct) => throw new NotSupportedException();
         public Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<FolderGrant>>([]);
         public Task<JsonElement> StatusAsync(CancellationToken ct) => Task.FromResult(JsonDocument.Parse("{}").RootElement.Clone());
+        public List<ToolchainInfo> ToolchainList { get; } = [];
+        public List<string> Registered { get; } = [];
+        public Task<IReadOnlyList<ToolchainInfo>> ScanToolchainsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<ToolchainInfo>>(ToolchainList);
+        public Task RegisterToolchainAsync(string directory, string digest, CancellationToken ct)
+        {
+            Registered.Add(directory + "|" + digest);
+            return Task.CompletedTask;
+        }
+        public Task UnregisterToolchainAsync(string name, CancellationToken ct) => Task.CompletedTask;
     }
 }

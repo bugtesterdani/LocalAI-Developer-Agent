@@ -26,6 +26,9 @@ public partial class App : Application
             _requests = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
             _events = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
             _viewModel = new MainViewModel(_requests, _events, action => Dispatcher.BeginInvoke(action), hs.SessionId, hs.Mode);
+            _viewModel.ConfirmLicense = info => MessageBox.Show(window,
+                UiText.Format("ToolchainLicenseConfirm", info.DisplayName, info.LicenseNote ?? ""),
+                UiText.Get("ToolchainLicenseTitle"), MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
             window.DataContext = _viewModel;
             await _viewModel.InitializeAsync();
         }

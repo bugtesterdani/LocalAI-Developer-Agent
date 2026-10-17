@@ -190,6 +190,15 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
 
     public Task<JsonElement> StatusAsync(CancellationToken ct) => CallAsync(M.Status, null, ct);
 
+    public async Task<IReadOnlyList<ToolchainInfo>> ScanToolchainsAsync(CancellationToken ct) =>
+        ContractJson.Deserialize<List<ToolchainInfo>>(await CallAsync(M.ToolchainsScan, null, ct).ConfigureAwait(false));
+
+    public Task RegisterToolchainAsync(string directory, string digest, CancellationToken ct) =>
+        CallAsync(M.ToolchainsRegister, new { directory, digest }, ct);
+
+    public Task UnregisterToolchainAsync(string name, CancellationToken ct) =>
+        CallAsync(M.ToolchainsUnregister, new { name }, ct);
+
     public async Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct) =>
         ContractJson.Deserialize<List<FolderGrant>>(await CallAsync(M.ProjectGrants, null, ct).ConfigureAwait(false));
 

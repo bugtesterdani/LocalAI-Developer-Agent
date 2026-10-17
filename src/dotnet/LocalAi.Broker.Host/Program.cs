@@ -31,9 +31,16 @@ CountingTestAdapter? testAdapter;
 IToolAdapter adapter;
 IPolicyContext policy;
 HyperVSandbox? vm;
+ToolchainRegistry? toolchains = null;
 try
 {
-    (adapter, policy, testAdapter, vm) = CreateSandbox(options, children, Guid.NewGuid().ToString("D"));
+    var project = options.Mode == SandboxMode.Test ? null : LoadProject(options);
+    if (project is not null)
+    {
+        toolchains = new ToolchainRegistry(Path.Combine(options.DataDirectory, "toolchains.json"), options.ToolchainsDirectory,
+            project.Toolchains ?? [], clock);
+    }
+    (adapter, policy, testAdapter, vm) = CreateSandbox(options, children, Guid.NewGuid().ToString("D"), project, toolchains);
 }
 catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or ChildProcessException or NotSupportedException)
 {
@@ -70,6 +77,7 @@ Console.CancelKeyPress += (_, e) =>
 var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, options)
 {
     SandboxStatus = () => vm?.Status.Text,
+    Toolchains = toolchains,
 };
 if (vm is not null)
 {
@@ -139,7 +147,7 @@ finally
 return 0;
 
 static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, HyperVSandbox? Vm) CreateSandbox(
-    HostOptions options, ChildProcesses children, string sessionId)
+    HostOptions options, ChildProcesses children, string sessionId, ProjectConfig? loadedProject, ToolchainRegistry? toolchains)
 {
     switch (options.Mode)
     {
@@ -150,12 +158,12 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
         }
         case SandboxMode.None:
         {
-            var project = LoadProject(options);
+            var project = loadedProject!;
             return (new NoSandboxAdapter(), new ProjectPolicyContext(project, new SnapshotRegistry()), null, null);
         }
         case SandboxMode.DevLocalUnsafe:
         {
-            var project = LoadProject(options);
+            var project = loadedProject!;
             var registry = new SnapshotRegistry();
             var context = new ProjectPolicyContext(project, registry);
             var session = new SandboxSession(sessionId);
@@ -177,7 +185,7 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
         }
         case SandboxMode.HyperV:
         {
-            var project = LoadProject(options);
+            var project = loadedProject!;
             var registry = new SnapshotRegistry();
             var context = new ProjectPolicyContext(project, registry);
             var session = new SandboxSession(sessionId);
@@ -185,7 +193,11 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
             var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
                 Path.Combine(options.DataDirectory, "hyperv.log"));
             var vm = new HyperVSandbox(settings, host, guestDir => Task.Run(() =>
-                GuestPayloadBuilder.Build(guestDir, GuestPayloadSources.FromRepository(options.RepoRoot), session.Key, settings.TransferDiskBytes)));
+            {
+                // Toolchains zuerst bereitstellen und gegen die Registrierung prüfen (SEC-19/SEC-24).
+                var staged = toolchains!.Stage(Path.Combine(guestDir, "LocalAi", "toolchain-src"), CancellationToken.None);
+                GuestPayloadBuilder.Build(guestDir, GuestPayloadSources.FromRepository(options.RepoRoot), session.Key, settings.TransferDiskBytes, staged);
+            }), project.Toolchains ?? []);
             var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance);
             return (adapter, context, null, vm);
         }

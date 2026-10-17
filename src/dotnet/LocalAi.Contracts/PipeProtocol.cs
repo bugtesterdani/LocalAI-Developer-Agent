@@ -27,6 +27,9 @@ public static class PipeProtocol
         public const string Release = "run.release";
         public const string StartFakeAgent = "dev.startFakeAgent";
         public const string ProjectGrants = "project.grants";
+        public const string ToolchainsScan = "toolchains.scan";
+        public const string ToolchainsRegister = "toolchains.register";
+        public const string ToolchainsUnregister = "toolchains.unregister";
     }
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)

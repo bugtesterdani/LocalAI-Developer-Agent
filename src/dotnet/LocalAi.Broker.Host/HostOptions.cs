@@ -67,6 +67,7 @@ public sealed record HostOptions
     public ProcessCommand? FakeAgent { get; init; }
     public ProcessCommand? DevWorker { get; init; }
     public LocalAi.Sandbox.HyperVSettings? HyperV { get; init; }
+    public string? ToolchainsDirectory { get; init; }
 
     public static HostOptions Parse(string[] args)
     {
@@ -155,6 +156,11 @@ public sealed record HostOptions
         if (root.TryGetProperty("fakeAgent", out var agent))
         {
             options = options with { FakeAgent = ReadCommand(agent, repoRoot) };
+        }
+        if (root.TryGetProperty("toolchains", out var toolchains) && toolchains.TryGetProperty("directory", out var tcDir)
+            && tcDir.ValueKind == JsonValueKind.String && tcDir.GetString()!.Length > 0)
+        {
+            options = options with { ToolchainsDirectory = Path.GetFullPath(Path.Combine(repoRoot, tcDir.GetString()!)) };
         }
         if (root.TryGetProperty("project", out var project))
         {

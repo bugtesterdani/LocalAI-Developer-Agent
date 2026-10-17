@@ -5,10 +5,10 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 
 - Spezifikation: [docs/Local-AI-Developer-Agent-Projektspezifikation.md](docs/Local-AI-Developer-Agent-Projektspezifikation.md)
 - Umsetzungsplan: [docs/Umsetzungsplan.md](docs/Umsetzungsplan.md)
-- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M2b.md](docs/pruefung-M2b.md) (vorher: [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
+- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M2c.md](docs/pruefung-M2c.md) (vorher: [M2b](docs/pruefung-M2b.md), [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
 - Anforderungen → Tests: [docs/sicherheit/anforderungen-tests.md](docs/sicherheit/anforderungen-tests.md)
 
-## Stand: Meilenstein M2b – Offline-VM mit Hyper-V
+## Stand: Meilenstein M2 (a–c) – Sandbox mit Offline-VM und Toolchains
 
 | Teil | Sprache | Status |
 |---|---|---|
@@ -20,7 +20,7 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 | Sandbox-Worker: Snapshot-Import, File.List/Read/ReadMany/Search | Python | fertig |
 | Modus `dev-local-unsafe` (Worker ohne VM, rot markiert) | – | fertig, **nur zum Entwickeln** |
 | Offline-Hyper-V-VM: Neuaufbau je Sitzung (DISM, unattend, ohne NIC), Selbsttest, Copy-VMFile hin, Transfer-VHDX zurück (ohne Einbinden gelesen) | PowerShell / C# / Python | fertig, **auf PC 123 zu prüfen** |
-| Toolchains in der VM | – | M2c |
+| Toolchains: Manifest, Registrierung mit Hashes (UI), Installation + Prüfung + Hallo-Welt beim VM-Aufbau; Vorlagen .NET und Python | C# / PowerShell | fertig, **auf PC 123 zu prüfen** |
 | Modelle, fünf Agenten, Chat | – | M3 |
 
 ### Sandbox-Modi (`config/localai.json` → `sandbox.mode`, oder `--mode`)
@@ -38,6 +38,7 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 contracts/            JSON Schema (einzige Quelle der Verträge) und Testvektoren
 config/               localai.json (Modus, Worker, Fake-Agent), demo-project.json (Ordner + Rechte)
 samples/demo-csv/     kleines Demo-Projekt für den Testlauf
+toolchains/           Vorlagen für Toolchain-Ordner (dotnet, python) mit Anleitung
 docs/                 Spezifikation, Plan, Prüfanleitungen
 scripts/              test.ps1 / start.ps1 (Windows), test.sh (Linux)
   sandbox/              Hyper-V: Aufbau, Copy-VMFile, Laufwerkswechsel, KVP-Signal, Gast-Provisionierung

@@ -2,7 +2,7 @@
 
 Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.3 · Plan v4 · Stand: 16.10.2026
 
-**Umsetzungsstand:** M1 abgenommen. M2 in drei Schritten: **M2a** (Ordnerrechte, Snapshot, signierte Jobs, Worker, Entwicklungsmodus ohne VM) und **M2b** (Hyper-V-Neuaufbau, Selbsttest, Copy-VMFile, Transfer-VHDX) implementiert, Prüfung auf PC 123 offen; **M2c** (Toolchains) folgt.
+**Umsetzungsstand:** M1 abgenommen. M2 in drei Schritten: **M2a** (Ordnerrechte, Snapshot, signierte Jobs, Worker, Entwicklungsmodus ohne VM) und **M2b** (Hyper-V-Neuaufbau, Selbsttest, Copy-VMFile, Transfer-VHDX) implementiert, **M2c** (Toolchain-System: Manifest, Registrierung mit Hashes, Installation und Hallo-Welt-Selbsttest beim VM-Aufbau, Vorlagen .NET und Python) implementiert; Prüfung von M2a–M2c auf PC 123 offen. Danach M3.
 
 ## Entscheidungen
 

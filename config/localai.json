@@ -1,5 +1,8 @@
 {
   "project": "config/demo-project.json",
+  "toolchains": {
+    "directory": "D:\\Agent\\Toolchains"
+  },
   "sandbox": {
     "mode": "dev-local-unsafe",
     "devWorker": {

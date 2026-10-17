@@ -167,7 +167,7 @@ public interface IHyperVHost
 /// <summary>Bericht der Provisionierung im Gast (untrusted) und seine Prüfung.</summary>
 public static class GuestReport
 {
-    public static (bool Ok, string Message) Evaluate(byte[] payload, int hostNetworkAdapters)
+    public static (bool Ok, string Message) Evaluate(byte[] payload, int hostNetworkAdapters, IReadOnlyList<string>? expectedToolchains = null)
     {
         if (hostNetworkAdapters != 0)
         {
@@ -209,7 +209,24 @@ public static class GuestReport
         {
             return (false, "Worker läuft im Gast nicht");
         }
-        return (true, $"Selbsttest bestanden ({probes.Count} Netzwerkprüfungen ohne Verbindung, Python {Clip(w["python"]?.ToString() ?? "?", 20)})");
+        var installed = new List<string>();
+        var toolchains = r["toolchains"] as JsonArray ?? [];
+        foreach (var name in expectedToolchains ?? [])
+        {
+            var entry = toolchains.OfType<JsonObject>().FirstOrDefault(t => t["name"]?.ToString() == name);
+            if (entry is null)
+            {
+                return (false, $"Toolchain {name} fehlt im Bericht der VM");
+            }
+            if (entry["installed"]?.GetValueKind() != JsonValueKind.True || entry["error"] is JsonValue { } err && err.GetValueKind() == JsonValueKind.String)
+            {
+                return (false, $"Toolchain {name} nicht installiert: {Clip(entry["error"]?.ToString() ?? "unbekannt")}");
+            }
+            var selfTest = entry["selfTest"]?.ToString();
+            installed.Add($"{name} {Clip(entry["version"]?.ToString() ?? "", 20)}" + (selfTest == "ok" ? " (Hallo-Welt ok)" : ""));
+        }
+        var tools = installed.Count == 0 ? "" : "; Toolchains: " + string.Join(", ", installed);
+        return (true, $"Selbsttest bestanden ({probes.Count} Netzwerkprüfungen ohne Verbindung, Python {Clip(w["python"]?.ToString() ?? "?", 20)}{tools})");
     }
 
     /// <summary>Gasttext nur gekürzt und ohne Steuerzeichen anzeigen.</summary>
@@ -229,6 +246,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private readonly HyperVSettings _settings;
     private readonly IHyperVHost _host;
     private readonly Func<string, Task> _prepareGuest;
+    private readonly IReadOnlyList<string> _expectedToolchains;
     private readonly SignalBoard _signals = new();
     private readonly SemaphoreSlim _exchange = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
@@ -240,8 +258,9 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private int _diskCounter;
 
     /// <param name="prepareGuest">Legt die Gastdateien im übergebenen Ordner ab (Python, Worker, Schlüssel, Skripte).</param>
-    public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest)
+    public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest, IReadOnlyList<string>? expectedToolchains = null)
     {
+        _expectedToolchains = expectedToolchains ?? [];
         settings.Validate();
         _settings = settings;
         _host = host;
@@ -345,7 +364,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 Lock("Bericht der VM fehlt oder ist ungültig");
                 return;
             }
-            var (ok, text) = GuestReport.Evaluate(message.Payload, nics);
+            var (ok, text) = GuestReport.Evaluate(message.Payload, nics, _expectedToolchains);
             if (!ok)
             {
                 Lock(text);
@@ -357,7 +376,8 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
         }
-        catch (Exception ex) when (ex is HyperVException or IOException or UnauthorizedAccessException or VhdxFormatException or InvalidDataException)
+        catch (Exception ex) when (ex is HyperVException or IOException or UnauthorizedAccessException or VhdxFormatException or InvalidDataException
+                                       or ToolchainException)
         {
             Lock(GuestReport.Clip(ex.Message));
         }

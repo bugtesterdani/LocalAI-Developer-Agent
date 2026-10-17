@@ -29,10 +29,16 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.Release] = [CallerRole.Ui],
         [M.StartFakeAgent] = [CallerRole.Ui],
         [M.ProjectGrants] = [CallerRole.Ui, CallerRole.Orchestrator],
+        [M.ToolchainsScan] = [CallerRole.Ui],
+        [M.ToolchainsRegister] = [CallerRole.Ui],
+        [M.ToolchainsUnregister] = [CallerRole.Ui],
     };
 
     /// <summary>Aktueller Zustand der Offline-VM (nur Betriebsart hyperv).</summary>
     public Func<string?> SandboxStatus { get; init; } = () => null;
+
+    /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
+    public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
 
     /// <summary>Mehrere wartende Instanzen, damit gleichzeitige Verbindungen nicht als "Pipe beschäftigt" scheitern.</summary>
     private const int ListeningInstances = 4;
@@ -197,6 +203,34 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 return StartFakeAgent();
             case M.ProjectGrants:
                 return Node(broker.Grants);
+            case M.ToolchainsScan:
+                return Node(await Task.Run(() => RequireToolchains().Scan(cancellationToken), cancellationToken).ConfigureAwait(false));
+            case M.ToolchainsRegister:
+            {
+                var directory = RequireString(p, "directory");
+                var digest = RequireString(p, "digest");
+                try
+                {
+                    var registration = await Task.Run(() => RequireToolchains().Register(directory, digest, cancellationToken), cancellationToken).ConfigureAwait(false);
+                    broker.PublishInfo("toolchain.registered",
+                        $"{registration.Name} {registration.Version} registriert ({registration.Files.Count} Dateien, Prüfsumme {registration.Digest[..16]}…)");
+                    return Node(registration);
+                }
+                catch (LocalAi.Sandbox.ToolchainException ex)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Unprocessable, ex.Message);
+                }
+            }
+            case M.ToolchainsUnregister:
+            {
+                var name = RequireString(p, "name");
+                var removed = RequireToolchains().Unregister(name);
+                if (removed)
+                {
+                    broker.PublishInfo("toolchain.unregistered", $"{name} entfernt");
+                }
+                return new JsonObject { ["removed"] = removed };
+            }
             default:
                 throw new BrokerException(BrokerErrorCodes.BadRequest, $"Unbekannte Methode: {method}");
         }
@@ -222,6 +256,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             throw new BrokerException(BrokerErrorCodes.Unprocessable, $"Fake-Agent: {ex.Message}");
         }
     }
+
+    private LocalAi.Sandbox.ToolchainRegistry RequireToolchains() =>
+        Toolchains ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Toolchains sind in dieser Betriebsart nicht verfügbar");
 
     private static string RequireString(JsonElement p, string name) =>
         p.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String

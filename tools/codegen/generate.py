@@ -1,7 +1,8 @@
 """Erzeugt C#-Records und Pydantic-Modelle aus contracts/schemas/contracts.schema.json.
 
 Unterstützte Schema-Teilmenge (bewusst klein gehalten):
-  type: string | integer | boolean | object (frei) | array (items) ; enum (string) ; $ref auf #/$defs/X
+  type: string | integer | boolean | object (frei oder additionalProperties = Map) | array (items) ;
+  enum (string) ; $ref auf #/$defs/X
   format: date-time (bleibt string)
 
 Aufruf:
@@ -12,6 +13,7 @@ Aufruf:
 from __future__ import annotations
 
 import json
+import keyword
 import pathlib
 import re
 import sys
@@ -48,6 +50,8 @@ def cs_type(prop: dict) -> str:
         return "long"
     if t == "boolean":
         return "bool"
+    if t == "object" and "additionalProperties" in prop:
+        return f"IReadOnlyDictionary<string, {cs_type(prop['additionalProperties'])}>"
     if t == "object":
         return "JsonElement"
     if t == "array":
@@ -105,6 +109,8 @@ def py_type(prop: dict) -> str:
         return "StrictInt"
     if t == "boolean":
         return "StrictBool"
+    if t == "object" and "additionalProperties" in prop:
+        return f"dict[str, {py_type(prop['additionalProperties'])}]"
     if t == "object":
         return "dict[str, Any]"
     if t == "array":
@@ -136,7 +142,8 @@ def gen_py(defs: dict) -> str:
         lines.append("")
         if "enum" in d:
             lines.append(f"class {name}(str, Enum):")
-            lines += [f'    {v} = "{v}"' for v in d["enum"]]
+            # Python-Schlüsselwörter (None, True, False) als Mitgliedsname mit Unterstrich, Wert bleibt gleich.
+            lines += [f'    {v}{"_" if keyword.iskeyword(v) else ""} = "{v}"' for v in d["enum"]]
             lines.append("")
             continue
         lines.append(f"class {name}(Contract):")

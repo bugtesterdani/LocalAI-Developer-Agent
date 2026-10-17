@@ -228,4 +228,56 @@
   <data name="Event_sandbox.status" xml:space="preserve">
     <value>Sandbox</value>
   </data>
+  <data name="Toolchains" xml:space="preserve">
+    <value>TOOLCHAINS</value>
+  </data>
+  <data name="ScanToolchains" xml:space="preserve">
+    <value>Toolchain-Ordner prüfen</value>
+  </data>
+  <data name="ToolchainsHint" xml:space="preserve">
+    <value>Registrierte und im Projekt gewählte Toolchains werden beim nächsten VM-Aufbau installiert und mit einem Hallo-Welt-Beispiel geprüft. Registrieren hält die Datei-Hashes fest; spätere Änderungen verhindern den Aufbau.</value>
+  </data>
+  <data name="NoToolchains" xml:space="preserve">
+    <value>Keine Toolchains gefunden. Ordner einstellen: config/localai.json → toolchains.directory; je Toolchain ein Unterordner mit toolchain.json.</value>
+  </data>
+  <data name="RegisterToolchain" xml:space="preserve">
+    <value>Registrieren</value>
+  </data>
+  <data name="UnregisterToolchain" xml:space="preserve">
+    <value>Entfernen</value>
+  </data>
+  <data name="ToolchainRegistered" xml:space="preserve">
+    <value>registriert</value>
+  </data>
+  <data name="ToolchainNotRegistered" xml:space="preserve">
+    <value>nicht registriert</value>
+  </data>
+  <data name="ToolchainUsedByProject" xml:space="preserve">
+    <value>vom Projekt verwendet</value>
+  </data>
+  <data name="ToolchainLicense" xml:space="preserve">
+    <value>Lizenz: {0}</value>
+  </data>
+  <data name="ToolchainDetails" xml:space="preserve">
+    <value>{0} Dateien · {1} · Prüfsumme {2}… · {3}</value>
+  </data>
+  <data name="ToolchainRegisteredInfo" xml:space="preserve">
+    <value>Toolchain registriert: {0}</value>
+  </data>
+  <data name="ToolchainLicenseTitle" xml:space="preserve">
+    <value>Lizenz bestätigen</value>
+  </data>
+  <data name="ToolchainLicenseConfirm" xml:space="preserve">
+    <value>{0} ist proprietär.
+
+Lizenzhinweis: {1}
+
+Liegt eine gültige Lizenz vor? Nur dann registrieren.</value>
+  </data>
+  <data name="Event_toolchain.registered" xml:space="preserve">
+    <value>Toolchain registriert</value>
+  </data>
+  <data name="Event_toolchain.unregistered" xml:space="preserve">
+    <value>Toolchain entfernt</value>
+  </data>
 </root>

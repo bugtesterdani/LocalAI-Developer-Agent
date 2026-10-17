@@ -83,6 +83,22 @@ TEXTS = {
     "Event_emergency.release": "Not-Aus aufgehoben",
     "Event_broker.started": "Broker gestartet",
     "Event_sandbox.status": "Sandbox",
+    "Toolchains": "TOOLCHAINS",
+    "ScanToolchains": "Toolchain-Ordner prüfen",
+    "ToolchainsHint": "Registrierte und im Projekt gewählte Toolchains werden beim nächsten VM-Aufbau installiert und mit einem Hallo-Welt-Beispiel geprüft. Registrieren hält die Datei-Hashes fest; spätere Änderungen verhindern den Aufbau.",
+    "NoToolchains": "Keine Toolchains gefunden. Ordner einstellen: config/localai.json → toolchains.directory; je Toolchain ein Unterordner mit toolchain.json.",
+    "RegisterToolchain": "Registrieren",
+    "UnregisterToolchain": "Entfernen",
+    "ToolchainRegistered": "registriert",
+    "ToolchainNotRegistered": "nicht registriert",
+    "ToolchainUsedByProject": "vom Projekt verwendet",
+    "ToolchainLicense": "Lizenz: {0}",
+    "ToolchainDetails": "{0} Dateien · {1} · Prüfsumme {2}… · {3}",
+    "ToolchainRegisteredInfo": "Toolchain registriert: {0}",
+    "ToolchainLicenseTitle": "Lizenz bestätigen",
+    "ToolchainLicenseConfirm": "{0} ist proprietär.\n\nLizenzhinweis: {1}\n\nLiegt eine gültige Lizenz vor? Nur dann registrieren.",
+    "Event_toolchain.registered": "Toolchain registriert",
+    "Event_toolchain.unregistered": "Toolchain entfernt",
 }
 
 HEADER = """<?xml version="1.0" encoding="utf-8"?>

@@ -8,6 +8,11 @@ Start (PowerShell, im Repository)::
 Ablauf: Broker im Modus ``hyperv`` starten (UAC-Abfrage bestätigen) → VM-Aufbau abwarten → Selbsttest
 → Snapshot des Demo-Projekts → 50 Lese-Roundtrips (Copy-VMFile hin, Transfer-VHDX zurück) → Ergebnis
 mit Zeiten in ``%LOCALAPPDATA%\\LocalAi\\abnahme\\hyperv-abnahme.json``. Danach wird die VM gelöscht.
+
+Mit Toolchains (M2c): im Projekt wählen und in der Oberfläche registrieren (die Registrierung wird
+übernommen), dann zusätzlich
+``$env:LOCALAI_HYPERV_TOOLCHAINS = "dotnet,python"`` – geprüft wird, dass beide installiert und ihr
+Hallo-Welt-Selbsttest bestanden ist.
 """
 
 from __future__ import annotations
@@ -53,6 +58,10 @@ def test_hyperv_vm_aufbau_und_roundtrips():
     base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home()))) / "LocalAi" / "abnahme"
     data = base / "broker"
     data.mkdir(parents=True, exist_ok=True)
+    # Toolchain-Registrierungen aus der Oberfläche übernehmen (registriert wird nur dort, R12).
+    registry = base.parent / "broker" / "toolchains.json"
+    if registry.exists():
+        (data / "toolchains.json").write_bytes(registry.read_bytes())
     started = time.monotonic()
     broker = start_broker(data, "--mode", "hyperv", "--config", str(ROOT / "config" / "localai.json"))
     summary: dict = {"roundtrips": ROUNDTRIPS}
@@ -71,6 +80,9 @@ def test_hyperv_vm_aufbau_und_roundtrips():
             time.sleep(5)
         summary["buildMinutes"] = round((time.monotonic() - started) / 60, 1)
         summary["selfTest"] = status
+        # M2c: im Projekt gewählte Toolchains, z. B. LOCALAI_HYPERV_TOOLCHAINS=dotnet,python
+        for name in filter(None, os.environ.get("LOCALAI_HYPERV_TOOLCHAINS", "").split(",")):
+            assert f"{name} " in status and "Hallo-Welt ok" in status, f"Toolchain {name} fehlt im Selbsttest: {status}"
         log(f"VM bereit nach {summary['buildMinutes']} min")
 
         grant = next(g for g in orch.grants() if "List" in [r.value for r in g.rights])

@@ -3,7 +3,7 @@
     Provisionierung im Gast (läuft als SYSTEM über SetupComplete.cmd, ohne Netzwerk).
     1. Antwortdatei mit Kennwort entfernen, Rechte auf C:\LocalAi setzen
     2. Netzwerkprüfungen (alle müssen scheitern)
-    3. Toolchains installieren (M2c)
+    3. Toolchains installieren, prüfen und mit Hallo-Welt testen
     4. Worker als geplante Aufgabe (SYSTEM) einrichten und starten
     5. Bericht über das Transfer-Laufwerk an den Host
 #>
@@ -62,37 +62,8 @@ function Get-Probes {
     return ,$probes
 }
 
-function Send-ReportWithoutPython([byte[]]$Payload, [int64]$Size) {
-    # Gleiches Containerformat wie localai.worker.transfer (Art 3 = Bericht).
-    $disks = @(Get-Disk | Where-Object { $_.Size -eq $Size -and $_.PartitionStyle -eq 'RAW' })
-    if ($disks.Count -ne 1) { throw "Transfer-Laufwerk nicht eindeutig ($($disks.Count))" }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $hash = $sha.ComputeHash($Payload) } finally { $sha.Dispose() }
-    $header = New-Object byte[] 4096
-    [System.Text.Encoding]::ASCII.GetBytes('LAIXFER1').CopyTo($header, 0)
-    [BitConverter]::GetBytes([uint32]1).CopyTo($header, 8)
-    [BitConverter]::GetBytes([uint32]3).CopyTo($header, 12)
-    [BitConverter]::GetBytes([uint64]0).CopyTo($header, 16)
-    [BitConverter]::GetBytes([uint64]$Payload.Length).CopyTo($header, 24)
-    $hash.CopyTo($header, 32)
-    $body = New-Object byte[] ([math]::Ceiling($Payload.Length / 4096) * 4096)
-    $Payload.CopyTo($body, 0)
-    $stream = New-Object System.IO.FileStream("\\.\PhysicalDrive$($disks[0].Number)", [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
-    try {
-        $first = New-Object byte[] 4096
-        $null = $stream.Read($first, 0, 4096)
-        if (@($first | Where-Object { $_ -ne 0 }).Count -gt 0) { throw 'Transfer-Laufwerk ist nicht leer' }
-        $stream.Position = 4096
-        $stream.Write($body, 0, $body.Length)
-        $stream.Flush($true)
-        $stream.Position = 0
-        $stream.Write($header, 0, 4096)
-        $stream.Flush($true)
-    } finally { $stream.Dispose() }
-    $key = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Auto'
-    if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
-    Set-ItemProperty -Path $key -Name 'LocalAiSignal' -Value 'report:0' -Type String
-}
+Import-Module (Join-Path $root 'LocalAiGuest.psm1') -Force
+Set-LocalAiGuestRoot -Path $root
 
 $size = 0
 try {
@@ -108,7 +79,23 @@ try {
     $report.networkAdapters = @(Get-CimInstance -ClassName Win32_NetworkAdapter -Filter 'PhysicalAdapter = TRUE').Count
     $report.probes = Get-Probes
 
-    # 3 – Toolchains folgen mit M2c.
+    # 3 – Toolchains (nur die für das Projekt gewählten und registrierten), danach nur noch lesbar (SEC-21).
+    $sourceRoot = Join-Path $root 'toolchain-src'
+    $toolchains = @()
+    foreach ($name in @($config.toolchains)) {
+        if (-not $name) { continue }
+        Write-Host "Toolchain $name wird installiert …"
+        $entry = Install-Toolchain -Name ([string]$name) -SourceRoot $sourceRoot
+        Write-Host ("Toolchain {0}: installiert={1} Selbsttest={2} {3}" -f $entry.name, $entry.installed, $entry.selfTest, $entry.error)
+        $toolchains += $entry
+        if ($entry.error) { $errors.Add("Toolchain $($entry.name): $($entry.error)") }
+    }
+    $report.toolchains = $toolchains
+    if (Test-Path -LiteralPath 'C:\Toolchains') {
+        & icacls.exe 'C:\Toolchains' /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+        if ($LASTEXITCODE -ne 0) { $errors.Add("icacls C:\Toolchains fehlgeschlagen ($LASTEXITCODE)") }
+    }
+    if (Test-Path -LiteralPath $sourceRoot) { Remove-Item -LiteralPath $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue }
 
     # 4 – Worker
     $python = Join-Path $root 'python\python.exe'

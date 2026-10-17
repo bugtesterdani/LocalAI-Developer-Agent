@@ -1,4 +1,4 @@
-# Anforderungen → Tests (Stand M2b)
+# Anforderungen → Tests (Stand M2c)
 
 Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. C#-Tests (xUnit, Trait `Pruefung`) laufen im selben Prozess mit einstellbarer Uhr, Python-Integrationstests gegen den echten Broker-Prozess über die Named Pipe.
 
@@ -27,6 +27,10 @@ Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. 
 | SEC-21 (Teil) | Gast erhält nur Laufzeit + Worker (keine Testwerkzeuge, keine Editable-Verweise auf Hostpfade); `C:\LocalAi` nur für SYSTEM/Administratoren schreibbar | `HyperVTests.Gastdateien_*` | – (ACL: `provision.ps1`) |
 | R17 / M2b | Aufbau → Selbsttest → Snapshot → Roundtrips über Laufwerkswechsel (simuliert mit echtem Worker); 50 Roundtrips mit echter VM | `HyperVTests.Aufbau_Selbsttest_und_Roundtrips_*` | `test_hyperv_abnahme.py` |
 | Skripte | Syntax aller PowerShell-Skripte (5.1), UTF-8-BOM, Antwortdatei | `HyperVTests.PowerShell_Skripte_sind_gueltig` | – |
+| R12 | Toolchains nur nach sichtbarer Registrierung (UI-Token), proprietäre nur nach Lizenzbestätigung; Registrierung bindet an den angezeigten Stand | `ToolchainTests.Registrierung_*`, `Oberflaeche_registriert_nur_nach_Bestaetigung` | `test_toolchains.py` |
+| SEC-19 | veränderte, hinzugefügte oder fehlende Toolchain-Datei, Verknüpfungen → nicht registrierbar bzw. Aufbau abgebrochen; Gast prüft die Hashes ein zweites Mal | `ToolchainTests.Registrierung_haelt_Hashes_*`, `Erwartete_Hashes_*`, `Verknuepfungen_*` | `test_veraenderter_ordner_wird_nicht_registriert`; Gast: `Test-SandboxScripts.ps1` |
+| SEC-20 (Manifest) | nur deklarierte Binaries und Aktionen, Platzhalter nur als ganzes Argument, keine Steuerzeichen, gesperrte Umgebungsvariablen | `ToolchainTests.Manifeste_ohne_freie_Kommandos` | `test_ungueltiges_manifest_zeigt_probleme` |
+| SEC-24 (Toolchains) | nicht registrierte Projekt-Toolchain oder fehlende/fehlgeschlagene Toolchain im Bericht → gesperrt | `ToolchainTests.Projekt_Toolchain_ohne_Registrierung_*`, `Bericht_prueft_alle_Projekt_Toolchains` | echte VM: `test_hyperv_abnahme.py` mit `LOCALAI_HYPERV_TOOLCHAINS` |
 | E2E | Broker-Prozess + Worker (dev-local) + Python-Fake-Agent + Oberflächenlogik: Snapshot, Auflisten, Lesen mit Abwahl, Ablehnung | `EndToEndTests.*` | – |
 
-Noch nicht abgedeckt (folgt): SEC-07/-13/-19/-21 mit Toolchains (M2c/M4); die Hyper-V-Prüfungen laufen mit echter VM nur auf PC 123 (`test_hyperv_abnahme.py`), SEC-08 bis -11/-14 Web (M6), SEC-16/-22 Modell und Orchestrator (M3), SEC-20 Toolchains (M4).
+Noch nicht abgedeckt (folgt): SEC-07/-13/-20 (Aufrufe) und SEC-21 mit Toolchain-Aktionen (M4); die Hyper-V-Prüfungen laufen mit echter VM nur auf PC 123 (`test_hyperv_abnahme.py`), SEC-08 bis -11/-14 Web (M6), SEC-16/-22 Modell und Orchestrator (M3), SEC-20 Toolchains (M4).

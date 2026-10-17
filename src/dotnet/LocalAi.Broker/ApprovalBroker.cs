@@ -366,9 +366,9 @@ public sealed class ApprovalBroker : IAsyncDisposable
     /// </summary>
     public void PublishInfo(string type, string message)
     {
-        if (!type.StartsWith("sandbox.", StringComparison.Ordinal))
+        if (!type.StartsWith("sandbox.", StringComparison.Ordinal) && !type.StartsWith("toolchain.", StringComparison.Ordinal))
         {
-            throw new ArgumentException("Nur sandbox.* Ereignisse", nameof(type));
+            throw new ArgumentException("Nur sandbox.* und toolchain.* Ereignisse", nameof(type));
         }
         lock (_gate)
         {
@@ -376,8 +376,14 @@ public sealed class ApprovalBroker : IAsyncDisposable
             {
                 return;
             }
-            _journal.Append(type, new JsonObject { ["message"] = message });
-            AddEvent(type, null, message);
+            try
+            {
+                _journal.Append(type, new JsonObject { ["message"] = message });
+                AddEvent(type, null, message);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
 

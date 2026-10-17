@@ -18,6 +18,7 @@ from localai.contracts import (
     ProposalOutcome,
     ProposalRequest,
     ProposalView,
+    ToolchainInfo,
     UserDecision,
 )
 from localai.pipe import PipeClient
@@ -74,6 +75,15 @@ class BrokerClient:
     def narrow(self, proposal_id: str, sha256: str, keep: list[str]) -> ProposalView:
         request = NarrowRequest(proposal_id=proposal_id, proposal_sha256=sha256, keep_target_ids=keep)
         return ProposalView.model_validate(self.pipe.call("approvals.narrow", request.to_json_obj()))
+
+    def toolchains_scan(self) -> list[ToolchainInfo]:
+        return [ToolchainInfo.model_validate(t) for t in self.pipe.call("toolchains.scan")]
+
+    def toolchains_register(self, directory: str, digest: str) -> dict[str, Any]:
+        return self.pipe.call("toolchains.register", {"directory": directory, "digest": digest})
+
+    def toolchains_unregister(self, name: str) -> dict[str, Any]:
+        return self.pipe.call("toolchains.unregister", {"name": name})
 
     def emergency_stop(self) -> None:
         self.pipe.call("run.emergencyStop")
