@@ -257,7 +257,7 @@ public static class GuestReport
         }
         if (r["errors"] is JsonArray { Count: > 0 } errors)
         {
-            return (false, "Provisionierung meldet Fehler: " + Clip(string.Join("; ", errors.Select(e => e?.ToString() ?? ""))));
+            return (false, "Provisionierung meldet Fehler: " + Clip(string.Join("; ", errors.Select(e => e?.ToString() ?? "")), 900));
         }
         if (r["networkAdapters"] is not JsonValue adapters || adapters.GetValueKind() != JsonValueKind.Number || (int)adapters != 0)
         {

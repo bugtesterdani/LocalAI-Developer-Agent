@@ -78,6 +78,16 @@ function Invoke-ToolchainProcess([string]$Exe, [string[]]$Arguments, [string]$Wo
     return [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
 }
 
+function Get-OutputTail([string]$Output, [int]$Max = 600) {
+    # Letzte Zeilen mit Fehlern bevorzugt, damit der Grund im Bericht steht (Volltext: logs\toolchains.log).
+    $lines = @(($Output -split "`r?`n") | Where-Object { $_.Trim() })
+    $errors = @($lines | Where-Object { $_ -match 'error|Fehler|fail' })
+    $pick = if ($errors.Count -gt 0) { $errors | Select-Object -Last 4 } else { $lines | Select-Object -Last 4 }
+    $text = (($pick | ForEach-Object { $_.Trim() }) -join ' | ')
+    if ($text.Length -gt $Max) { $text = $text.Substring($text.Length - $Max) }
+    return $text
+}
+
 function Expand-Placeholders([string]$Text, [hashtable]$Map) {
     foreach ($key in $Map.Keys) { $Text = $Text.Replace('{' + $key + '}', [string]$Map[$key]) }
     return $Text
@@ -148,7 +158,7 @@ function Install-Toolchain([string]$Name, [string]$SourceRoot) {
                 $exe = $file
                 if ($file -like '*.msi') { $exe = Join-Path $env:WINDIR 'System32\msiexec.exe'; $arguments = @('/i', $file) + $arguments }
                 $run = Invoke-ToolchainProcess -Exe $exe -Arguments $arguments -WorkingDirectory $src -TimeoutMinutes $timeout -Environment $environment
-                if ($run.ExitCode -ne 0 -and $run.ExitCode -ne 3010) { throw "Installer endete mit Exitcode $($run.ExitCode)" }
+                if ($run.ExitCode -ne 0 -and $run.ExitCode -ne 3010) { throw "Installer endete mit Exitcode $($run.ExitCode): $(Get-OutputTail $run.Output)" }
             }
             'None' { }
             default { throw "Unbekannte Installationsart: $($manifest.install.kind)" }
@@ -157,13 +167,13 @@ function Install-Toolchain([string]$Name, [string]$SourceRoot) {
         if ($manifest.PSObject.Properties['postInstall'] -and $manifest.postInstall) {
             foreach ($command in @($manifest.postInstall)) {
                 $run = Invoke-ToolchainCommand -Manifest $manifest -Command $command -Map $map -Environment $environment -WorkingDirectory $src -TimeoutMinutes $timeout
-                if ($run.ExitCode -ne 0) { throw "Nachinstallation endete mit Exitcode $($run.ExitCode)" }
+                if ($run.ExitCode -ne 0) { throw "Nachinstallation endete mit Exitcode $($run.ExitCode): $(Get-OutputTail $run.Output)" }
             }
         }
 
         $run = Invoke-ToolchainCommand -Manifest $manifest -Command $manifest.install.check -Map $map -Environment $environment -WorkingDirectory $src -TimeoutMinutes 10
         $result.check = ($run.Output.Trim() -split "`r?`n")[0]
-        if ($run.ExitCode -ne 0) { throw "Prüfbefehl endete mit Exitcode $($run.ExitCode)" }
+        if ($run.ExitCode -ne 0) { throw "Prüfbefehl endete mit Exitcode $($run.ExitCode): $(Get-OutputTail $run.Output)" }
         if ($manifest.install.check.PSObject.Properties['expectOutput'] -and $manifest.install.check.expectOutput -and
             -not $run.Output.Contains([string]$manifest.install.check.expectOutput)) {
             throw "Prüfbefehl liefert nicht '$($manifest.install.check.expectOutput)'"
@@ -177,7 +187,7 @@ function Install-Toolchain([string]$Name, [string]$SourceRoot) {
             $last = $null
             foreach ($step in @($manifest.selfTest.steps)) {
                 $last = Invoke-ToolchainCommand -Manifest $manifest -Command $step -Map $map -Environment $environment -WorkingDirectory $dir -TimeoutMinutes 15
-                if ($last.ExitCode -ne 0) { throw "Selbsttest: Schritt endete mit Exitcode $($last.ExitCode)" }
+                if ($last.ExitCode -ne 0) { throw "Selbsttest: Schritt $($step.arguments -join ' ') endete mit Exitcode $($last.ExitCode): $(Get-OutputTail $last.Output)" }
             }
             if (-not $last.Output.Contains([string]$manifest.selfTest.expectOutput)) { throw "Selbsttest: Ausgabe '$($manifest.selfTest.expectOutput)' fehlt" }
             $result.selfTest = 'ok'
