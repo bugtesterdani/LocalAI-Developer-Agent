@@ -52,6 +52,7 @@ class ModelProfile:
     think: bool | None = None
     offload: bool = False
     temperature: float = 0.2
+    options: tuple[tuple[str, float], ...] = ()  # zusätzliche Ollama-Optionen, z. B. repeat_penalty
 
     @property
     def key(self) -> str:
@@ -134,7 +135,8 @@ class ModelsConfig:
             profile = ModelProfile(
                 name=str(p["name"]), model=str(p["model"]), context_tokens=int(p["contextTokens"]),
                 max_output_tokens=int(p["maxOutputTokens"]), think=p.get("think"),
-                offload=bool(p.get("offload", False)), temperature=float(p.get("temperature", 0.2)))
+                offload=bool(p.get("offload", False)), temperature=float(p.get("temperature", 0.2)),
+                options=tuple(sorted((str(k), float(v)) for k, v in (p.get("options") or {}).items())))
             validate_model_tag(profile.model)
             if profile.context_tokens < 2048 or profile.max_output_tokens >= profile.context_tokens:
                 raise ConfigError(f"Profil {profile.name}: Kontext/Ausgabe unplausibel")

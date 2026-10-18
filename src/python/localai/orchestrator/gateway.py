@@ -42,6 +42,28 @@ class StallAbort(GatewayError):
     """Watchdog hat den Request nach zu langer Stille beendet."""
 
 
+class RepetitionLoop(GatewayError):
+    """Das Modell wiederholt dasselbe Textstück immer wieder (Generierung abgebrochen)."""
+
+
+def find_repetition(text: str, min_repeats: int = 12, max_period: int = 80, min_span: int = 200) -> str | None:
+    """Endet ``text`` mit einem Stück, das sich ``min_repeats``-mal direkt wiederholt? Liefert das Stück oder None.
+
+    Absichtlich streng (viele Wiederholungen über mindestens ``min_span`` Zeichen), damit Code mit gleichförmigen
+    Zeilen (Tabellen, ``++``-Diffzeilen) nicht fälschlich abgebrochen wird."""
+    for period in range(2, max_period + 1):
+        span = period * min_repeats
+        if len(text) < max(span, min_span):
+            continue
+        unit = text[-period:]
+        if not unit.strip():
+            continue
+        repeats = max(min_repeats, -(-min_span // period))
+        if len(text) >= period * repeats and text[-period * repeats:] == unit * repeats:
+            return unit
+    return None
+
+
 class OutOfMemory(GatewayError):
     """Ollama meldet Speichermangel (für die Kalibrierung relevant)."""
 
@@ -395,6 +417,14 @@ class OllamaGateway:
                         for inside, text in splitter.feed(piece):
                             (thinking if inside else content).append(text)
                             (callbacks.on_thinking if inside else callbacks.on_content)(text)
+                    if (think_piece or piece) and tokens % 32 == 0:
+                        # Kleine Modelle geraten gelegentlich in eine Endlosschleife ("…error.error.error…"): Tokens kommen,
+                        # der Watchdog greift also nicht. Früh abbrechen statt bis zur Ausgabegrenze zu warten.
+                        tail = "".join(content[-256:]) if piece else "".join(thinking[-256:])
+                        unit = find_repetition(tail[-2000:])
+                        if unit is not None:
+                            close()
+                            raise RepetitionLoop(f"Wiederholungsschleife abgebrochen (\"{unit[:40]}\" wiederholt sich)")
                     if think_piece or piece:
                         tokens += 1
                         if first_token is None:

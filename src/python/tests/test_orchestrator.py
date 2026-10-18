@@ -347,6 +347,31 @@ def test_langes_modellladen_ist_kein_verbindungsfehler(ollama):
     assert result.content and len(stalls) == 1
 
 
+def test_wiederholungsschleife_wird_frueh_abgebrochen(ollama):
+    from localai.orchestrator.gateway import RepetitionLoop, find_repetition
+    assert find_repetition("x" + "assertionerror." * 40) is not None
+    diff = "".join(f"++    Assert.True(Tokenizer.IsLineEmpty(line{i}));\n++    [Fact]\n" for i in range(30))
+    assert find_repetition(diff) is None, "gleichförmiger Code ist keine Schleife"
+    assert find_repetition("ok " * 10) is None
+    ollama.delay = 0.002
+    ollama.responder = lambda body: ("Plan: " + "assertionerror." * 2000, "")
+    started = time.monotonic()
+    with pytest.raises(RepetitionLoop, match="Wiederholungsschleife"):
+        OllamaGateway(ollama.url).chat(chat_request())
+    assert time.monotonic() - started < 10
+    wait_for(lambda: ollama.disconnects == 1, timeout=5)
+
+
+def test_profiloptionen_gehen_an_ollama(ollama):
+    config = ModelsConfig.parse({"requireCalibration": False, "profiles": [
+        {"name": "leicht", "model": "qwen2.5-coder:7b", "contextTokens": 8192, "maxOutputTokens": 2048,
+         "options": {"repeat_penalty": 1.15}}]})
+    assert config.profiles["leicht"].options == (("repeat_penalty", 1.15),)
+    from localai.orchestrator.models import repo_root
+    base = ModelsConfig.load(repo_root() / "config" / "models.json")
+    assert dict(base.profiles["leicht"].options)["repeat_penalty"] == 1.15
+
+
 def test_fehler_und_speichermangel(ollama):
     gw = OllamaGateway(ollama.url)
     with pytest.raises(GatewayError, match="not found"):

@@ -7,7 +7,8 @@
   "requireCalibration": true,
   "profiles": [
     { "name": "standard",  "model": "qwen2.5-coder:14b", "contextTokens": 8192,  "maxOutputTokens": 2048 },
-    { "name": "leicht",    "model": "qwen2.5-coder:7b",  "contextTokens": 8192,  "maxOutputTokens": 2048 },
+    { "name": "leicht",    "model": "qwen2.5-coder:7b",  "contextTokens": 8192,  "maxOutputTokens": 2048,
+      "options": { "repeat_penalty": 1.15, "repeat_last_n": 256 } },
     { "name": "planung",   "model": "qwen3:8b",          "contextTokens": 8192,  "maxOutputTokens": 2048, "think": true },
     { "name": "erweitert", "model": "qwen2.5-coder:14b", "contextTokens": 16384, "maxOutputTokens": 4096 },
     { "name": "gross",     "model": "qwen2.5-coder:14b", "contextTokens": 32768, "maxOutputTokens": 4096 },

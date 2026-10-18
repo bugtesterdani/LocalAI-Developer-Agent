@@ -19,6 +19,7 @@ from localai.orchestrator.gateway import (
     GatewayError,
     OllamaGateway,
     OutOfMemory,
+    RepetitionLoop,
     StreamCallbacks,
     CancelToken,
 )
@@ -96,7 +97,7 @@ class Agent:
                 model=self.profile.model,
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
                 num_ctx=self.profile.context_tokens, num_predict=self.budget.output, temperature=self.profile.temperature,
-                think=self.profile.think)
+                think=self.profile.think, extra_options=dict(self.profile.options))
             label = f"Schritt {step}/{self.limits.max_steps_per_task} · ~{parts.prompt_tokens} Token Eingabe"
             if parts.dropped_evidence:
                 label += f" · {len(parts.dropped_evidence)} Evidenzblöcke wegen Budget ausgelassen"
@@ -108,6 +109,11 @@ class Agent:
             except OutOfMemory as err:
                 raise AgentFailed(f"Speichermangel bei {self.profile.label()}: {err}. Profil neu kalibrieren oder kleineres "
                                   "Profil wählen.") from err
+            except RepetitionLoop as err:
+                self.reporter.event(role, ActivityKind.Warning, str(err), task_id=task_id)
+                history.append(f"Step {step}: your answer degenerated into endless repetition and was cut off. "
+                               "Answer again, short and concrete.")
+                continue
             except GatewayError as err:
                 gateway_errors += 1
                 self.reporter.event(role, ActivityKind.Error, f"Modellfehler: {err}", task_id=task_id)
