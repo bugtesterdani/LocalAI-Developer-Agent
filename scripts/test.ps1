@@ -18,8 +18,12 @@ Step "3/4 C#-Tests"
 dotnet test src/dotnet/LocalAi.Tests --no-build; Check "C#-Tests"
 
 Step "4/4 Python-Tests (inkl. Integrationstests gegen den Broker)"
+# Die Hyper-V-Abnahme (VM-Aufbau, 15–60 min) gehört nicht in den normalen Testlauf – auch wenn
+# LOCALAI_HYPERV_ABNAHME in dieser PowerShell noch gesetzt ist. Sie wird separat gestartet.
+$abnahme = $env:LOCALAI_HYPERV_ABNAHME
+Remove-Item Env:LOCALAI_HYPERV_ABNAHME -ErrorAction SilentlyContinue
 Push-Location src/python
-try { uv run pytest -q; Check "Python-Tests" } finally { Pop-Location }
+try { uv run pytest -q; Check "Python-Tests" } finally { Pop-Location; if ($abnahme) { $env:LOCALAI_HYPERV_ABNAHME = $abnahme } }
 
 Write-Host ""
 Write-Host "Alles grün." -ForegroundColor Green
