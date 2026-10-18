@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 MAX_READ_FILES = 8
+# Felder, an denen ein unverpacktes Abschlussergebnis erkennbar ist.
+RESULT_KEYS = {"message_de", "tasks", "patch", "test_plan", "test_patch", "verdict", "findings", "fix_patch", "hypothesis"}
 _FENCE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.S)
 
 
@@ -87,6 +89,10 @@ def parse(text: str) -> Action:
         raise ProtocolError("The JSON block must be an object.")
     kind = data.get("action")
     reasoning = reasoning.strip()
+    if kind is None and RESULT_KEYS & set(data):
+        # Kleinere Modelle lassen die Hülle {"action": "finish", "result": …} gern weg und liefern das Ergebnis direkt.
+        # Eindeutig, weil Aktionen nie diese Felder haben; die Prüfung je Rolle folgt in validate_result.
+        return Action("finish", reasoning, result=data)
     if kind == "list":
         depth = data.get("depth", 3)
         if not isinstance(depth, int) or not 1 <= depth <= 5:
@@ -123,7 +129,8 @@ def parse(text: str) -> Action:
         if not isinstance(result, dict):
             raise ProtocolError('finish needs "result": { ... } as described for your role.')
         return Action("finish", reasoning, result=result)
-    raise ProtocolError('Unknown action. Use "list", "read", "search" or "finish".')
+    raise ProtocolError('Unknown action. Use "list", "read", "search" or "finish". A final result must be wrapped: '
+                        '{"action": "finish", "result": { ... }}.')
 
 
 # ------------------------------------------------------------------ Ergebnisprüfung je Rolle

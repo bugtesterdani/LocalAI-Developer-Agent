@@ -87,7 +87,7 @@ def test_tokenschaetzung_konservativ():
 @pytest.mark.parametrize("role", ["Planner", "Coder", "Tester", "Debugger", "Reviewer"])
 def test_prompts_versioniert_englisch_und_im_regelbudget(role):
     text, loaded = prompts.system_prompt(role)
-    assert [p.version for p in loaded] == [1, 1]
+    assert [p.version for p in loaded] == [1, 2]
     assert f"You are the {role} agent" in text
     assert "message_de" in text and "German" in text
     assert estimate_tokens(text) <= Budget.split(8192, 2048).rules
@@ -101,6 +101,17 @@ def test_aktion_aus_json_block_und_ohne_block():
     assert a.reasoning == "I will read."
     b = protocol.parse('Done {"action": "finish", "result": {"message_de": "ok {x}", "patch": "--- a"}}')
     assert b.kind == "finish" and b.result["message_de"] == "ok {x}"
+
+
+def test_unverpacktes_ergebnis_kleiner_modelle_wird_angenommen():
+    # So antwortete qwen2.5-coder:7b im echten Lauf: Ergebnis direkt, ohne {"action": "finish", "result": …}.
+    text = '```json\n{"message_de": "Plan", "acceptance": ["x"], "tasks": [{"id": "T1", "role": "Coder", "title": "a", ' \
+           '"description": "b", "reads": ["src/Importer.cs"], "writes": ["src/Importer.cs"], "depends_on": []}]}\n```'
+    action = protocol.parse(text)
+    assert action.kind == "finish"
+    assert protocol.validate_result("Planner", action.result)["tasks"][0]["id"] == "T1"
+    with pytest.raises(protocol.ProtocolError, match="wrapped"):
+        protocol.parse('```json\n{"foo": 1}\n```')
 
 
 @pytest.mark.parametrize("text", ["no json here", '```json\n{"action": "read", "files": []}\n```',
