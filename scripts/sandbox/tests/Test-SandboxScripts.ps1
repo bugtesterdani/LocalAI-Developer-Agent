@@ -68,6 +68,8 @@ if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) {
 'inhalt' | Set-Content -LiteralPath (Join-Path $tmp 'src\demo\datei.txt') -Encoding ASCII
 '{"name":"demo","version":"1","files":{"datei.txt":"0000000000000000000000000000000000000000000000000000000000000000"}}' |
     Set-Content -LiteralPath (Join-Path $tmp 'src\demo\pinned.json') -Encoding UTF8
+$envProfile = Get-ToolchainProfileEnvironment
+Expect ($envProfile.APPDATA -and (Test-Path -LiteralPath $envProfile.APPDATA) -and $envProfile.LOCALAPPDATA -and $envProfile.USERPROFILE -and $envProfile.DOTNET_CLI_HOME) 'Profilvariablen für Werkzeuge'
 $r = Install-Toolchain -Name 'demo' -SourceRoot (Join-Path $tmp 'src')
 Expect (-not $r.installed -and $r.error -like 'Hash weicht ab*') "Hashabweichung im Gast: $($r.error)"
 $r = Install-Toolchain -Name 'anders' -SourceRoot (Join-Path $tmp 'src')

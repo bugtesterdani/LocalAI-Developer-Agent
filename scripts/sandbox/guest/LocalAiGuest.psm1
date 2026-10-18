@@ -88,6 +88,23 @@ function Get-OutputTail([string]$Output, [int]$Max = 600) {
     return $text
 }
 
+function Get-ToolchainProfileEnvironment {
+    $profileDir = Join-Path $script:Root 'work\home'
+    $roaming = Join-Path $profileDir 'AppData\Roaming'
+    $local = Join-Path $profileDir 'AppData\Local'
+    $temp = Join-Path $local 'Temp'
+    foreach ($d in $roaming, $local, $temp) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+    return @{
+        USERPROFILE     = $profileDir
+        HOME            = $profileDir
+        APPDATA         = $roaming
+        LOCALAPPDATA    = $local
+        TEMP            = $temp
+        TMP             = $temp
+        DOTNET_CLI_HOME = $profileDir
+    }
+}
+
 function Expand-Placeholders([string]$Text, [hashtable]$Map) {
     foreach ($key in $Map.Keys) { $Text = $Text.Replace('{' + $key + '}', [string]$Map[$key]) }
     return $Text
@@ -137,7 +154,9 @@ function Install-Toolchain([string]$Name, [string]$SourceRoot) {
             results  = (Join-Path $script:Root 'work\results')
             selftest = (Join-Path $script:Root "work\selftest-$Name")
         }
-        $environment = @{}
+        # Eigenes Benutzerprofil für Werkzeugprozesse: Als SYSTEM in SetupComplete fehlen APPDATA,
+        # LOCALAPPDATA usw. – NuGet bricht dann mit »Value cannot be null (Parameter 'path1')« ab.
+        $environment = Get-ToolchainProfileEnvironment
         if ($manifest.PSObject.Properties['environment'] -and $manifest.environment) {
             foreach ($entry in $manifest.environment.PSObject.Properties) { $environment[$entry.Name] = Expand-Placeholders ([string]$entry.Value) $map }
         }
