@@ -20,11 +20,22 @@ public sealed class SandboxSession
         _sequence = lastSequence;
     }
 
-    public string SessionId { get; }
+    public string SessionId { get; private set; }
 
-    public byte[] Key { get; }
+    public byte[] Key { get; private set; }
 
     public long LastSequence => Interlocked.Read(ref _sequence);
+
+    /// <summary>
+    /// Übernimmt die Sitzung einer gespeicherten VM (reuseVm), wenn sie erst nach dem Start dieser Instanz frei
+    /// wurde (z. B. Oberfläche gerade geschlossen). Nur vor dem ersten Job aufrufen.
+    /// </summary>
+    public void Adopt(string sessionId, byte[] key, long lastSequence)
+    {
+        SessionId = sessionId;
+        Key = key;
+        Interlocked.Exchange(ref _sequence, lastSequence);
+    }
 
     public long NextSequence() => Interlocked.Increment(ref _sequence);
 }

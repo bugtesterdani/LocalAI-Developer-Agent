@@ -351,6 +351,10 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private string? _currentCode;
     private int _guestUpdate;
     private volatile bool _updating;
+    private FileStream? _instanceLock;
+
+    /// <summary>Wie lange eine zweite Instanz (z. B. Abnahme-Skript nach der Oberfläche) auf die Freigabe der VM wartet.</summary>
+    public TimeSpan InstanceLockWait { get; init; } = TimeSpan.FromMinutes(3);
 
     /// <summary>Version des Gast-Updates, die neu aufgebaute VMs beherrschen (worker.cmd mit Neustart, update.ps1).</summary>
     public const int GuestUpdateVersion = 1;
@@ -502,9 +506,14 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private async Task<bool> TryResumeAsync(CancellationToken ct)
     {
         var loaded = _reuse.Load();
-        if (loaded is not { } l || !l.State.Clean || l.State.Fingerprint != _currentFingerprint || l.State.SessionId != _session!.SessionId)
+        if (loaded is not { } l || !l.State.Clean || l.State.Fingerprint != _currentFingerprint)
         {
             return false;
+        }
+        if (l.State.SessionId != _session!.SessionId)
+        {
+            // Die VM wurde erst nach dem Start dieser Instanz gespeichert (andere Instanz gerade beendet): Sitzung übernehmen.
+            _session.Adopt(l.State.SessionId, l.Key, l.State.LastSequence);
         }
         var info = await _host.GetVmInfoAsync(ct).ConfigureAwait(false);
         if (!info.Exists || info.NetworkAdapters != 0)
@@ -648,10 +657,54 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Nur eine Instanz (Oberfläche oder Abnahme-Skript) darf die VM gleichzeitig benutzen. Die Sperrdatei wird erst
+    /// freigegeben, nachdem die VM gespeichert und ihr Zustand geschrieben ist – eine direkt danach gestartete Instanz
+    /// wartet darauf und setzt die VM dann fort, statt sie neu aufzubauen.
+    /// </summary>
+    private async Task<bool> AcquireInstanceLockAsync(CancellationToken ct)
+    {
+        if (_instanceLock is not null)
+        {
+            return true;
+        }
+        Directory.CreateDirectory(_settings.VmDirectory);
+        var path = Path.Combine(_settings.VmDirectory, "sandbox.lock");
+        var deadline = DateTime.UtcNow + InstanceLockWait;
+        var announced = false;
+        while (true)
+        {
+            try
+            {
+                _instanceLock = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+                return true;
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline)
+            {
+                if (!announced)
+                {
+                    SetStatus(SandboxState.Preparing, "VM wird noch von einer anderen Instanz benutzt bzw. gespeichert – warte auf die Freigabe");
+                    announced = true;
+                }
+                await Task.Delay(2000, ct).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // Nicht Lock(): der gespeicherte Zustand gehört der anderen Instanz und bleibt erhalten.
+                SetStatus(SandboxState.Locked, "gesperrt: VM wird von einer anderen Instanz benutzt (Oberfläche oder Abnahme-Skript) – diese zuerst schließen");
+                return false;
+            }
+        }
+    }
+
     private async Task LifecycleAsync(CancellationToken ct)
     {
         try
         {
+            if (!await AcquireInstanceLockAsync(ct).ConfigureAwait(false))
+            {
+                return;
+            }
             SetStatus(SandboxState.Preparing, "Voraussetzungen werden geprüft");
             if (!File.Exists(_settings.ImagePath))
             {
@@ -919,6 +972,14 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 }
             }
         }
+        if (_instanceLock is null)
+        {
+            // VM gehört einer anderen Instanz (oder wurde nie gestartet): nichts speichern, nichts löschen.
+            SetStatus(SandboxState.Removed, "VM nicht übernommen");
+            _shutdown.Dispose();
+            _exchange.Dispose();
+            return;
+        }
         var kept = false;
         if (ReuseEnabled && Status.IsReady)
         {
@@ -955,5 +1016,8 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         SetStatus(SandboxState.Removed, kept ? "VM gespeichert (wird beim nächsten Start fortgesetzt)" : "VM entfernt");
         _shutdown.Dispose();
         _exchange.Dispose();
+        // Erst jetzt (VM gespeichert, Zustand geschrieben) darf eine andere Instanz die VM übernehmen.
+        _instanceLock?.Dispose();
+        _instanceLock = null;
     }
 }

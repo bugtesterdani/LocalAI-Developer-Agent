@@ -273,6 +273,42 @@ public sealed class HyperVTests : IAsyncLifetime
     }
 
     [Fact, Trait("Pruefung", "M4-Gast-Update")]
+    public async Task Zweite_Instanz_wartet_bis_die_erste_gespeichert_hat_und_setzt_dann_fort()
+    {
+        var settings = Settings() with { ReuseVm = true };
+        var host = new SimulatedHost(settings, Path.Combine(_dir, "guest-sim"));
+        _cleanup.Add(host);
+        var vm1 = await StartReusableAsync(settings, host, new SandboxSession("s-1"), "basis", "code");
+        Assert.Equal(SandboxState.Ready, vm1.Status.State);
+
+        // Zweite Instanz mit kurzer Wartezeit: gibt auf, ohne die VM oder den Zustand der ersten anzufassen.
+        var impatient = new HyperVSandbox(settings, host, _ => Task.CompletedTask, session: new SandboxSession("s-x"),
+            fingerprint: () => "basis") { InstanceLockWait = TimeSpan.FromSeconds(1) };
+        impatient.Start();
+        await impatient.WhenSettled;
+        Assert.Equal(SandboxState.Locked, impatient.Status.State);
+        Assert.Contains("anderen Instanz", impatient.Status.Text, StringComparison.Ordinal);
+        await impatient.DisposeAsync();
+        Assert.Equal(1, host.Builds);
+        Assert.Empty(host.StateActions);
+
+        // Instanz startet, während die erste noch läuft; die erste wird danach beendet (speichert) → Fortsetzen.
+        Assert.Null(HyperVSandbox.LoadReusableSession(settings)); // erste Instanz läuft noch
+        var waiting = new SandboxSession("s-neu");
+        var startTask = Task.Run(() => StartReusableAsync(settings, host, waiting, "basis", "code"), TestContext.Current.CancellationToken);
+        await Task.Delay(1500, TestContext.Current.CancellationToken);
+        await vm1.DisposeAsync();
+        var vm2 = await startTask;
+        _cleanup.Add(vm2);
+        Assert.True(vm2.Status.State == SandboxState.Ready, vm2.Status.Text);
+        Assert.Contains("wiederverwendet", vm2.Status.Text, StringComparison.Ordinal);
+        Assert.Equal(1, host.Builds);
+        Assert.Equal("s-1", waiting.SessionId);
+        var read = await ReadOnceAsync(vm2, waiting, Project(), "w");
+        Assert.True(read.Status == ResultStatus.Succeeded, read.TargetResults[0].Message);
+    }
+
+    [Fact, Trait("Pruefung", "M4-Gast-Update")]
     public async Task Grundlage_geaendert_baut_trotz_Gast_Update_neu_auf()
     {
         var settings = Settings() with { ReuseVm = true };

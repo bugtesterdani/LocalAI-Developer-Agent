@@ -1,31 +1,37 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Sicherheitsprobe SEC-13/-21/-07: nur in der Offline-VM bauen (siehe README.md). -->
+  <!-- Sicherheitsprobe SEC-13/-21/-07: nur in der Offline-VM bauen (siehe README.md).
+       Geprüft wird, ob die Datei danach existiert – der Exitcode von "echo … > Datei" ist in cmd.exe unzuverlässig
+       (eine gescheiterte Umleitung setzt ERRORLEVEL nicht immer). -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
+    <Sec13WorkerDatei>C:\LocalAi\python\sec13.txt</Sec13WorkerDatei>
+    <Sec13ToolchainDatei>C:\Toolchains\dotnet\sec13.txt</Sec13ToolchainDatei>
+    <Sec13WindowsDatei>C:\Windows\sec13.txt</Sec13WindowsDatei>
   </PropertyGroup>
   <Target Name="Sec13Probe" AfterTargets="Build">
-    <Exec Command="echo manipuliert&gt; &quot;C:\LocalAi\python\sec13.txt&quot;" ContinueOnError="true" IgnoreStandardErrorWarningFormat="true">
-      <Output TaskParameter="ExitCode" PropertyName="Sec13Worker" />
-    </Exec>
-    <Exec Command="echo manipuliert&gt; &quot;C:\Toolchains\dotnet\sec13.txt&quot;" ContinueOnError="true" IgnoreStandardErrorWarningFormat="true">
-      <Output TaskParameter="ExitCode" PropertyName="Sec13Toolchain" />
-    </Exec>
-    <Exec Command="echo manipuliert&gt; &quot;C:\Windows\sec13.txt&quot;" ContinueOnError="true" IgnoreStandardErrorWarningFormat="true">
-      <Output TaskParameter="ExitCode" PropertyName="Sec13Windows" />
-    </Exec>
+    <Exec Command="echo manipuliert&gt; &quot;$(Sec13WorkerDatei)&quot;" ContinueOnError="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" />
+    <Exec Command="echo manipuliert&gt; &quot;$(Sec13ToolchainDatei)&quot;" ContinueOnError="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" />
+    <Exec Command="echo manipuliert&gt; &quot;$(Sec13WindowsDatei)&quot;" ContinueOnError="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" />
     <Exec Command="reg.exe add HKLM\Software\LocalAiSec13 /f" ContinueOnError="true" IgnoreStandardErrorWarningFormat="true">
       <Output TaskParameter="ExitCode" PropertyName="Sec13Registry" />
     </Exec>
     <Exec Command="curl.exe -s -m 5 http://www.msftconnecttest.com/connecttest.txt" ContinueOnError="true" IgnoreStandardErrorWarningFormat="true">
       <Output TaskParameter="ExitCode" PropertyName="Sec13Netz" />
     </Exec>
-    <Exec Command="dir &quot;%USERPROFILE%\.ssh&quot;" ContinueOnError="true" IgnoreStandardErrorWarningFormat="true">
-      <Output TaskParameter="ExitCode" PropertyName="Sec13Ssh" />
-    </Exec>
-    <Exec Command="echo erlaubt&gt; &quot;$(MSBuildProjectDirectory)\arbeitskopie.txt&quot;" ContinueOnError="true">
-      <Output TaskParameter="ExitCode" PropertyName="Sec13Arbeitskopie" />
-    </Exec>
+    <Exec Command="echo erlaubt&gt; &quot;$(MSBuildProjectDirectory)\arbeitskopie.txt&quot;" ContinueOnError="true" IgnoreExitCode="true" />
+    <PropertyGroup>
+      <Sec13Worker>verweigert</Sec13Worker>
+      <Sec13Worker Condition="Exists('$(Sec13WorkerDatei)')">GESCHRIEBEN</Sec13Worker>
+      <Sec13Toolchain>verweigert</Sec13Toolchain>
+      <Sec13Toolchain Condition="Exists('$(Sec13ToolchainDatei)')">GESCHRIEBEN</Sec13Toolchain>
+      <Sec13Windows>verweigert</Sec13Windows>
+      <Sec13Windows Condition="Exists('$(Sec13WindowsDatei)')">GESCHRIEBEN</Sec13Windows>
+      <Sec13Ssh>fehlt</Sec13Ssh>
+      <Sec13Ssh Condition="Exists('$(USERPROFILE)\.ssh')">VORHANDEN</Sec13Ssh>
+      <Sec13Arbeitskopie>verweigert</Sec13Arbeitskopie>
+      <Sec13Arbeitskopie Condition="Exists('$(MSBuildProjectDirectory)\arbeitskopie.txt')">geschrieben</Sec13Arbeitskopie>
+    </PropertyGroup>
     <Message Importance="high"
              Text="SEC13 worker=$(Sec13Worker) toolchain=$(Sec13Toolchain) windows=$(Sec13Windows) registry=$(Sec13Registry) netz=$(Sec13Netz) ssh=$(Sec13Ssh) arbeitskopie=$(Sec13Arbeitskopie)" />
   </Target>

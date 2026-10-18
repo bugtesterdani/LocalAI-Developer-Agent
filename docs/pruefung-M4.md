@@ -69,6 +69,10 @@ neu aufgebaut: Der Host setzt sie fort und schickt einen **signierten** Job `San
 Integritätsstufen, `worker.cmd`) und startet sich neu (Exitcode 75 → `worker.cmd` startet ihn wieder). Kopfzeile:
 „Offline-VM bereit – wiederverwendet und aktualisiert …“.
 
+Nur **eine** Instanz (Oberfläche oder Abnahme-Skript) benutzt die VM gleichzeitig (Sperrdatei `sandbox.lock` im
+VM-Ordner). Wird eine zweite gestartet, während die erste noch läuft oder gerade speichert, wartet sie bis zu 3 Minuten
+und setzt die VM dann fort; sonst meldet sie „VM wird von einer anderen Instanz benutzt“ – ohne die VM anzufassen.
+
 Neu aufgebaut wird weiterhin, wenn sich die **Grundlage** ändert: Windows-Abbild, VM-Einstellungen (Speicher,
 Prozessoren …), Python-Laufzeit/-Pakete, Toolchain-Registrierungen oder die Toolchain-Liste des Projekts – oder wenn das
 Update scheitert. Agenten können `Sandbox.Update` nie auslösen (der Broker kennt das Tool nicht; nur der Host hat den

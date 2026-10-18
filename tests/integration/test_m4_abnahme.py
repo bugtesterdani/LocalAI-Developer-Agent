@@ -268,9 +268,12 @@ def test_m4_abnahme():
         assert line, text[-3000:]
         codes = dict(part.split("=", 1) for part in line.group(1).split())
         summary["sec13"] = codes
-        for key in ("worker", "toolchain", "windows", "registry", "netz", "ssh"):
-            assert codes[key] not in ("", "0"), f"SEC-13/-21: {key} hätte scheitern müssen: {codes}"
-        assert codes["arbeitskopie"] == "0", codes
+        for key in ("worker", "toolchain", "windows"):
+            assert codes[key] == "verweigert", f"SEC-13/-21: Schreiben ({key}) hätte scheitern müssen: {codes}"
+        for key in ("registry", "netz"):
+            assert codes[key] not in ("", "0"), f"SEC-13/-06: {key} hätte scheitern müssen: {codes}"
+        assert codes["ssh"] == "fehlt", codes
+        assert codes["arbeitskopie"] == "geschrieben", codes
         # Worker und Toolchain unverändert: erneuter Test läuft wie vorher
         report, _ = report_of(toolchain("Toolchain.Test", "py", snap, "python", {"path": "."}, "pytest_danach"))
         assert report.failed == 0 and report.total == 5

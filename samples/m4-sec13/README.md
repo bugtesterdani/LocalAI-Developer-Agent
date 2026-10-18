@@ -13,5 +13,5 @@ könnte) Befehle im Gast aus und versucht:
 | SSH-Schlüssel/Browserprofil lesen (`%USERPROFILE%\.ssh`) | nicht vorhanden (eigenes, leeres Profil je Job) |
 | in die eigene Arbeitskopie schreiben | erlaubt – das ist der genehmigte Scope |
 
-Die Ergebnisse stehen als Zeile `SEC13 …` im Build-Log (Exitcode je Versuch, 0 = gelungen).
+Die Ergebnisse stehen als Zeile `SEC13 …` im Build-Log: für Dateien `verweigert` bzw. `GESCHRIEBEN` (geprüft wird, ob die Datei danach existiert), für Registry und Netz der Exitcode (0 = gelungen).
 Nur in der Offline-VM bauen, nie auf dem Host. Wird von `tests/integration/test_m4_abnahme.py` benutzt.
