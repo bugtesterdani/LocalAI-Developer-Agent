@@ -316,6 +316,15 @@ def test_watchdog_meldet_stille_und_bricht_spaeter_ab(ollama):
         gw.chat(chat_request())
 
 
+def test_langes_modellladen_ist_kein_verbindungsfehler(ollama):
+    # Ollama schickt den Antwortkopf erst nach dem Laden des Modells (im LAN/bei 14B gerne > 5 s).
+    ollama.load_delay = 1.0
+    stalls = []
+    gw = OllamaGateway(ollama.url, stall_warning=0.4, stall_abort=30, connect_timeout=0.3, poll=0.05)
+    result = gw.chat(chat_request(), callbacks=StreamCallbacks(on_stall=stalls.append))
+    assert result.content and len(stalls) == 1
+
+
 def test_fehler_und_speichermangel(ollama):
     gw = OllamaGateway(ollama.url)
     with pytest.raises(GatewayError, match="not found"):

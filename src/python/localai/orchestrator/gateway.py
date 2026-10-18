@@ -317,23 +317,25 @@ class OllamaGateway:
                 conn.connect()
                 if conn.sock is not None:
                     sockets.append(conn.sock)
+                    # Zeitlimit nur für den Verbindungsaufbau: Bis zur ersten Antwort lädt Ollama ggf. das Modell
+                    # (bei großen Modellen oder über das LAN deutlich länger) – das überwacht der Watchdog.
+                    conn.sock.settimeout(None)
                 cancel.raise_if_cancelled()
                 conn.request("POST", "/api/chat", body=json.dumps(request.body()).encode(),
                              headers={"Content-Type": "application/json"})
-                response = conn.getresponse()
             except (OSError, http.client.HTTPException) as err:
                 cancel.raise_if_cancelled()
                 raise GatewayError(f"Ollama unter {self.url} nicht erreichbar: {err}") from err
-            if response.status >= 400:
-                raise classify_error(_error_text(response.read(), response.status))
-            for sock in sockets:
-                sock.settimeout(None)
-            # Blockierendes Lesen in eigenem Thread; hier wird nur mit Zeitlimit gewartet (Watchdog).
+            # Antwortkopf und Datenstrom blockierend in eigenem Thread; hier wird nur mit Zeitlimit gewartet (Watchdog).
             # (Ein Socket-Timeout würde das Antwortobjekt unbrauchbar machen.)
             chunks: queue.Queue[bytes | BaseException] = queue.Queue()
 
             def pump() -> None:
                 try:
+                    response = conn.getresponse()
+                    if response.status >= 400:
+                        chunks.put(classify_error(_error_text(response.read(), response.status)))
+                        return
                     while True:
                         data = response.read1(65536)
                         chunks.put(data)
@@ -350,6 +352,8 @@ class OllamaGateway:
                     item = chunks.get(timeout=self.poll)
                 except queue.Empty:
                     item = None
+                if isinstance(item, GatewayError):
+                    raise item
                 if isinstance(item, BaseException):
                     cancel.raise_if_cancelled()
                     raise GatewayError(f"Verbindung zu Ollama unterbrochen: {item}") from item

@@ -93,6 +93,7 @@ class FakeOllama:
     delay: float = 0.0
     chunk_chars: int = 6
     first_token_delay: float = 0.0
+    load_delay: float = 0.0  # vor dem Antwortkopf (Modell wird geladen)
     responder: Callable[[dict[str, Any]], tuple[str, str]] = scripted_answer
     error: str | None = None
     chars_per_token: float = 3.5
@@ -167,6 +168,8 @@ class FakeOllama:
                 with fake.lock:
                     fake.loaded = {body["model"]: body.get("options", {}).get("num_ctx", 2048)}
                 content, thinking = fake.responder(body)
+                if fake.load_delay:
+                    time.sleep(fake.load_delay)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/x-ndjson")
                 self.end_headers()
