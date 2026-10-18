@@ -48,6 +48,10 @@ WORKER_ENV = {
     "UseSharedCompilation": "false",
     "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
     "PYTHONDONTWRITEBYTECODE": "1",
+    # dotnet: keine Änderungen an Benutzer-PATH/Registry, keine Workload-Prüfung (offline, niedrige Integrität).
+    "DOTNET_ADD_GLOBAL_TOOLS_TO_PATH": "false",
+    "DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK": "true",
+    "DOTNET_NOLOGO": "1",
 }
 BLOCKED_ENV = {"PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH"}
 # Feste Windows-Systemvariablen ohne Geheimnisse, die Werkzeuge voraussetzen. Ohne ProgramFiles(x86) bricht z. B.
@@ -472,6 +476,39 @@ def label_low_integrity(directory: pathlib.Path) -> None:
         raise ExecError(f"Integritätsstufe für den Arbeitsordner nicht setzbar (icacls {run.returncode})")
 
 
+class SystemTempGuard:
+    """Windows gibt Prozessen mit SYSTEM-Konto als Temp-Ordner fest ``C:\\Windows\\SystemTemp`` (GetTempPath2,
+    unabhängig von TEMP/TMP). Damit MSBuild/NuGet mit niedriger Integrität arbeiten können, kennzeichnet die
+    Provisionierung diesen Ordner als *Low*. Was ein Job dort anlegt, wird nach dem Job wieder entfernt, damit
+    nichts in den nächsten Job hinüberreicht."""
+
+    def __init__(self, folder: pathlib.Path) -> None:
+        self.folder = folder
+        self.before = self._entries()
+
+    @classmethod
+    def for_windows(cls) -> SystemTempGuard | None:
+        folder = pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")) / "SystemTemp"
+        return cls(folder) if os.name == "nt" and folder.is_dir() else None
+
+    def _entries(self) -> set[str]:
+        try:
+            return {p.name for p in self.folder.iterdir()}
+        except OSError:
+            return set()
+
+    def cleanup(self) -> None:
+        for name in self._entries() - self.before:
+            path = self.folder / name
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    remove_tree(path)
+                else:
+                    path.unlink()
+            except OSError:
+                pass
+
+
 @dataclass
 class ExecResult:
     report: TestReport
@@ -516,9 +553,12 @@ class Executor:
             (dirs.root / "no-packages").mkdir(exist_ok=True)
             args = expand(action, params, fixed, dirs.repo)
             env = environment(toolchain, dirs, fixed)
+            system_temp = SystemTempGuard.for_windows() if self.low_integrity else None
             outcome = run_process(exe, args, dirs.repo, env, timeout, dirs.root / "output.log", self.low_integrity)
             report = parse_results(toolchain.manifest.test_result_format if action_name == "test" else TestResultFormat.ExitCode,
                                    dirs.results, outcome.exit_code, outcome.timed_out)
+            if system_temp is not None:
+                system_temp.cleanup()
         finally:
             remove_tree(dirs.root)
         state = "Zeitüberschreitung" if outcome.timed_out else f"Exitcode {outcome.exit_code}"

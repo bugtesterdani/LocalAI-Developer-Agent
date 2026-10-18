@@ -387,3 +387,14 @@ def test_windows_systemvariablen_nur_allowlist_und_ergaenzt():
     assert env["ProgramFiles"] == r"D:\Programme" and env["ProgramFiles(x86)"] == r"D:\Program Files (x86)"
     assert env["USERNAME"] == "SYSTEM" and env["OS"] == "Windows_NT"
     assert "GEHEIM" not in env and "Path" not in env and "PATH" not in env
+
+
+def test_systemtemp_guard_entfernt_nur_neue_eintraege(tmp_path):
+    from localai.worker.execution import SystemTempGuard
+    (tmp_path / "alt.txt").write_text("x")
+    guard = SystemTempGuard(tmp_path)
+    (tmp_path / "MSBuildTemp123").mkdir()
+    (tmp_path / "MSBuildTemp123" / "f.txt").write_text("y")
+    (tmp_path / "neu.tmp").write_text("z")
+    guard.cleanup()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["alt.txt"]

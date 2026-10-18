@@ -113,6 +113,15 @@ try {
         if ($LASTEXITCODE -ne 0) { $errors.Add("icacls C:\Toolchains fehlgeschlagen ($LASTEXITCODE)") }
     }
     if (Test-Path -LiteralPath $sourceRoot) { Remove-Item -LiteralPath $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    # Werkzeugprozesse laufen mit SYSTEM-Token auf niedriger Integrität. Windows gibt SYSTEM-Prozessen als Temp-Ordner
+    # fest C:\Windows\SystemTemp (GetTempPath2, TEMP/TMP werden ignoriert) – MSBuild/NuGet brauchen dort Schreibrecht.
+    # Nur die Integritätsstufe wird gesenkt; der Worker räumt nach jedem Job auf, was der Job dort angelegt hat.
+    $systemTemp = Join-Path $env:SystemRoot 'SystemTemp'
+    $lowIntegrity = -not ($config.PSObject.Properties['lowIntegrityTools'] -and $config.lowIntegrityTools -eq $false)
+    if ($lowIntegrity -and (Test-Path -LiteralPath $systemTemp)) {
+        & icacls.exe $systemTemp /setintegritylevel '(OI)(CI)low' | Out-Null
+        if ($LASTEXITCODE -ne 0) { $errors.Add("icacls SystemTemp fehlgeschlagen ($LASTEXITCODE)") }
+    }
 
     # 4 – Worker
     Set-Progress 'worker'

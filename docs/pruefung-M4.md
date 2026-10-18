@@ -137,6 +137,7 @@ Eigene Projektdatei mit Grant auf diesen Ordner (`List`, `Read`), Ziel z. B. „
 | Testlauf: „keine Ergebnisdatei gefunden“ | Build fehlgeschlagen (Log-Auszug im Chat/Verlauf) oder keine Tests im Projekt. |
 | Werkzeug startet in der VM nicht („CreateProcess … fehlgeschlagen“ oder Zugriffsfehler beim Build) | Niedrige Integritätsstufe verträgt sich nicht mit dem Werkzeug: Log `C:\LocalAi\logs\worker.log` (Gast, `scripts\sandbox\Get-LocalAiGuestLogs.ps1`) schicken; vorübergehend `"lowIntegrityTools": false`. |
 | Exitcode `-532462766` (0xE0434352) bei dotnet | Absturz im MSBuild-Prozess; bis 18.10. fehlten Systemvariablen wie `ProgramFiles(x86)` in der Jobumgebung (NuGet). Ab `M4-Fix 1` behoben; sonst Log `m4-*.log` schicken. |
+| `UnauthorizedAccessException … C:\Windows\SystemTemp\MSBuildTemp…` | Windows gibt SYSTEM-Prozessen fest `C:\Windows\SystemTemp` als Temp-Ordner. Ab `M4-Fix 2` kennzeichnet die Provisionierung ihn für niedrige Integrität; der Worker entfernt nach jedem Job, was der Job dort angelegt hat. VM neu aufbauen. |
 | „Patch nicht angewendet … Hunk n passt nicht“ | Das Modell hat sich auf einen anderen Dateistand bezogen; der Agent bekommt den Grund und korrigiert (höchstens 3×). |
 
 ## Bekannte Einschränkungen
