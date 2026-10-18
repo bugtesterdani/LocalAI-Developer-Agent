@@ -85,8 +85,11 @@ class Agent:
         evidence = list(assignment.evidence)
         history: list[str] = []
         gateway_errors = 0
+        denials = 0
+        invalid = 0
+        max_steps = self.limits.steps_for(role)
         self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: {assignment.title}", task_id)
-        for step in range(1, self.limits.max_steps_per_task + 1):
+        for step in range(1, max_steps + 1):
             cancel.raise_if_cancelled()
             if self.clock.exceeded():
                 minutes = self.limits.max_active_minutes
@@ -101,7 +104,7 @@ class Agent:
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
                 num_ctx=self.profile.context_tokens, num_predict=self.budget.output, temperature=self.profile.temperature,
                 think=self.profile.think, extra_options=dict(self.profile.options))
-            label = f"Schritt {step}/{self.limits.max_steps_per_task} · ~{parts.prompt_tokens} Token Eingabe"
+            label = f"Schritt {step}/{max_steps} · ~{parts.prompt_tokens} Token Eingabe"
             if parts.dropped_evidence:
                 label += f" · {len(parts.dropped_evidence)} Evidenzblöcke wegen Budget ausgelassen"
             try:
@@ -148,12 +151,19 @@ class Agent:
             except protocol.ProtocolError as err:
                 self.reporter.event(role, ActivityKind.Warning, f"Antwort nicht verwertbar: {err}", task_id=task_id)
                 history.append(f"Step {step}: invalid answer – {err}")
+                invalid += 1
+                if self.limits.max_invalid_answers and invalid >= self.limits.max_invalid_answers:
+                    raise LimitReached(f"{invalid} unbrauchbare Antworten für Aufgabe {task_id} (limits.maxInvalidAnswersPerTask)")
                 continue
             outcome = self.bridge.execute(role, task_id, action, cancel)
+            if outcome.denied:
+                denials += 1
+                if self.limits.max_denials_per_task and denials >= self.limits.max_denials_per_task:
+                    raise LimitReached(f"{denials} Vorschläge für Aufgabe {task_id} von dir abgelehnt (limits.maxDenialsPerTask)")
             evidence.extend(outcome.evidence)
             history.append(f"Step {step}: {outcome.summary}")
             self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: weiter nach Schritt {step}", task_id)
-        raise LimitReached(f"{self.limits.max_steps_per_task} Modellschritte für Aufgabe {task_id} erreicht")
+        raise LimitReached(f"{max_steps} Modellschritte für Aufgabe {task_id} erreicht")
 
     def _callbacks(self, task_id: str) -> StreamCallbacks:
         role, reporter, model = self.role, self.reporter, self.profile.model

@@ -23,6 +23,11 @@
   },
   "limits": {
     "maxStepsPerTask": 20,
+    "maxStepsPerRole": {},
+    "maxPlanAttempts": 2,
+    "maxPatchRetries": 3,
+    "maxDenialsPerTask": 3,
+    "maxInvalidAnswersPerTask": 0,
     "maxRepairAttempts": 3,
     "maxActiveMinutes": 30,
     "maxSandboxJobs": 2,

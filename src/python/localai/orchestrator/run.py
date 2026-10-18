@@ -38,7 +38,6 @@ STATE_DE = {dag.TaskState.DONE: "erledigt", dag.TaskState.FAILED: "gescheitert",
             dag.TaskState.SKIPPED: "übersprungen", dag.TaskState.PENDING: "offen", dag.TaskState.RUNNING: "läuft"}
 MAX_CHAT = 15_000
 NOT_EXECUTED = re.compile(r"not\s+executed|nicht\s+ausgef(ü|ue)hrt|not\s+been\s+(run|executed)", re.I)
-MAX_APPLY_RETRIES = 3
 _MAP_PROJECTS = re.compile(r"^Project/build files: (.*?)(?: \(\+\d+ more\))?$", re.M)
 _MAP_HEADER = re.compile(r"^Repo map of snapshot \S+ – \d+ files, (.*)$", re.M)
 
@@ -385,7 +384,8 @@ class Orchestrator:
             text += f"\n\n## Summary of the previous run\n{self.previous_summary}"
         if self.bridge is not None:
             text += f"\n\n## Available toolchains (for verify)\n{self._toolchain_text(self.bridge)}"
-        for attempt in (1, 2):
+        attempts = self.config.limits.max_plan_attempts
+        for attempt in range(1, attempts + 1):
             try:
                 result = planner.run(Assignment("P1", "Plan erstellen", text, list(self.listing), PRIORITY_USER),
                                      state.controls.token("Planner"))
@@ -419,7 +419,7 @@ class Orchestrator:
                 self.reporter.event(t.role, ActivityKind.Task, f"{t.task_id}: {t.title}", task_id=t.task_id,
                                     state=AgentState.Queued)
             return tasks, acceptance
-        self.reporter.chat("Planner", "Ich konnte keinen gültigen Plan erstellen (zweimal ungültig). Bitte formuliere das Ziel genauer.")
+        self.reporter.chat("Planner", f"Ich konnte keinen gültigen Plan erstellen ({attempts}× ungültig). Bitte formuliere das Ziel genauer.")
         return None, []
 
     def _choose_verify(self, entries: list[dict[str, Any]]) -> None:
@@ -494,10 +494,11 @@ class Orchestrator:
                 with self._applied_lock:
                     self.applied.append(AppliedPatch(label, patch, outcome.files))
                 return None
-            if outcome.feedback and retries["n"] < MAX_APPLY_RETRIES:
+            max_retries = self.config.limits.max_patch_retries
+            if outcome.feedback and retries["n"] < max_retries:
                 retries["n"] += 1
                 self.reporter.event(role, ActivityKind.Warning, f"{task_id}: Patch nicht angewendet ({outcome.note_de}) – "
-                                    f"Agent korrigiert (Versuch {retries['n']}/{MAX_APPLY_RETRIES})", task_id=task_id)
+                                    f"Agent korrigiert (Versuch {retries['n']}/{max_retries})", task_id=task_id)
                 return outcome.feedback
             return None
 

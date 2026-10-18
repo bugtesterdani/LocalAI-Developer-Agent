@@ -70,6 +70,15 @@ class Limits:
     max_sandbox_jobs: int = 2
     max_gpu_requests: int = 1
     max_tasks: int = 12
+    # Modellschritte je Rolle (überschreibt max_steps_per_task), z. B. {"Planner": 10}
+    steps_per_role: dict[str, int] = field(default_factory=dict)
+    max_plan_attempts: int = 2  # ungültige Pläne, bevor der Planner aufgibt
+    max_patch_retries: int = 3  # Patch passt nicht → Agent korrigiert höchstens so oft
+    max_denials_per_task: int = 3  # vom Nutzer abgelehnte Vorschläge je Aufgabe, dann Rückfrage (0 = unbegrenzt)
+    max_invalid_answers: int = 0  # unbrauchbare Antworten (falsches Format) je Aufgabe (0 = nur Schrittlimit)
+
+    def steps_for(self, role: str) -> int:
+        return self.steps_per_role.get(role, self.max_steps_per_task)
 
 
 @dataclass(frozen=True)
@@ -78,6 +87,24 @@ class CalibrationSettings:
     min_vram_reserve_gib: float = 2.0
     output_tokens: int = 256
     max_cpu_offload: float = 0.05  # höchster CPU-Anteil für Profile ohne "offload": true
+
+
+def _bounded(raw: dict, key: str, default: int, low: int, high: int) -> int:
+    value = raw.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        raise ConfigError(f"limits.{key} muss eine ganze Zahl von {low} bis {high} sein")
+    return value
+
+
+def _steps_per_role(raw: object) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise ConfigError("limits.maxStepsPerRole muss ein Objekt sein, z. B. {\"Planner\": 10}")
+    result: dict[str, int] = {}
+    for role, value in raw.items():
+        if role not in ROLES:
+            raise ConfigError(f"limits.maxStepsPerRole: unbekannte Rolle {role} (erlaubt: {', '.join(ROLES)})")
+        result[role] = _bounded(raw, role, 20, 1, 200)
+    return result
 
 
 @dataclass
@@ -159,7 +186,12 @@ class ModelsConfig:
             max_active_minutes=float(lim.get("maxActiveMinutes", 30)),
             max_sandbox_jobs=int(lim.get("maxSandboxJobs", 2)),
             max_gpu_requests=int(lim.get("maxGpuRequests", 1)),
-            max_tasks=int(lim.get("maxTasks", 12)))
+            max_tasks=int(lim.get("maxTasks", 12)),
+            steps_per_role=_steps_per_role(lim.get("maxStepsPerRole") or {}),
+            max_plan_attempts=_bounded(lim, "maxPlanAttempts", 2, 1, 10),
+            max_patch_retries=_bounded(lim, "maxPatchRetries", 3, 0, 20),
+            max_denials_per_task=_bounded(lim, "maxDenialsPerTask", 3, 0, 100),
+            max_invalid_answers=_bounded(lim, "maxInvalidAnswersPerTask", 0, 0, 100))
         cal = raw.get("calibration", {})
         calibration = CalibrationSettings(
             runs=int(cal.get("runs", 10)), min_vram_reserve_gib=float(cal.get("minVramReserveGiB", 2.0)),

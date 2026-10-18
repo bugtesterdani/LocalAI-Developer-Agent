@@ -1,4 +1,15 @@
 {
   "_hinweis": "Als config/models.local.json speichern. Nur die Werte, die von config/models.json abweichen; models.local.json wird beim Aktualisieren nie überschrieben. Beispiel: Ollama auf einem anderen Rechner im LAN (dort OLLAMA_HOST=0.0.0.0:11434, siehe docs/pruefung-M3.md).",
-  "ollama": { "url": "http://192.168.178.39:11434", "allowLan": true }
+  "ollama": {
+    "url": "http://192.168.178.39:11434",
+    "allowLan": true
+  },
+  "_hinweis_limits": "Optional – Grenzen je Run: maxStepsPerTask (Modellschritte je Aufgabe), maxStepsPerRole (je Rolle, überschreibt maxStepsPerTask), maxDenialsPerTask (von dir abgelehnte Vorschläge, danach fragt der Agent nach; 0 = unbegrenzt), maxPatchRetries (Patch passt nicht → Korrekturen), maxPlanAttempts (ungültige Pläne), maxInvalidAnswersPerTask (Antworten im falschen Format; 0 = nur Schrittlimit), maxRepairAttempts (Debugger-Durchläufe), maxActiveMinutes.",
+  "limits": {
+    "maxStepsPerRole": {
+      "Planner": 10,
+      "Coder": 25
+    },
+    "maxDenialsPerTask": 5
+  }
 }

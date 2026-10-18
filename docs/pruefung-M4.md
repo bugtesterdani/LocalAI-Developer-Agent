@@ -98,6 +98,23 @@ In `config\localai.json` unter `sandbox.hyperv` (alle optional, Minuten):
 - `pauseOnNoAnswer: false` sperrt wie bisher sofort (Neuaufbau nötig). Netzwerkkarten oder ungültige Rückgaben sperren
   immer.
 
+## Grenzen für Agenten einstellen
+
+In `config\models.local.json` (nur abweichende Werte; Vorlage `config\models.local.example.json`) unter `limits`:
+
+| Schlüssel | Standard | Bedeutung |
+|---|---|---|
+| `maxStepsPerTask` | 20 | Modellschritte je Aufgabe |
+| `maxStepsPerRole` | – | je Rolle, überschreibt den Wert oben, z. B. `{"Planner": 10, "Coder": 25}` |
+| `maxDenialsPerTask` | 3 | so viele Vorschläge darfst du je Aufgabe ablehnen, dann hört der Agent auf und fragt nach (0 = unbegrenzt) |
+| `maxPatchRetries` | 3 | Korrekturen, wenn ein Patch nicht passt |
+| `maxPlanAttempts` | 2 | ungültige Pläne, bevor der Planner aufgibt |
+| `maxInvalidAnswersPerTask` | 0 | Antworten im falschen Format je Aufgabe (0 = nur das Schrittlimit zählt) |
+| `maxRepairAttempts` | 3 | Debugger-Durchläufe (Testfehler oder Review-Befunde) |
+| `maxActiveMinutes` | 30 | aktive Zeit ohne neue Nachricht von dir (Warten auf Freigaben zählt nicht) |
+
+Änderungen gelten ab dem nächsten Orchestrator-Start (Oberfläche neu starten oder „Orchestrator beenden“).
+
 ## 1. Automatische Tests
 
 ```powershell

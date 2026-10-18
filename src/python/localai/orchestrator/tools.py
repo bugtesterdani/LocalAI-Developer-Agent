@@ -52,6 +52,7 @@ STATE_TEXT = {
 class ToolOutcome:
     evidence: list[Evidence]
     summary: str  # englische Kurzfassung für den Verlauf des Agenten
+    denied: bool = False  # vom Nutzer abgelehnt
 
 
 @dataclass
@@ -295,7 +296,7 @@ class ToolBridge:
                 messages = [r.message for r in outcome.result.target_results if r.message]
                 if messages:
                     hint = "; ".join(messages)[:500]
-            return ToolOutcome([], f"{describe}: {state}" + (f" ({hint})" if hint else ""))
+            return ToolOutcome([], f"{describe}: {state}" + (f" ({hint})" if hint else ""), denied=state == "denied")
         targets = {t.target_id: t for t in request.targets}
         evidence: list[Evidence] = []
         notes: list[str] = []

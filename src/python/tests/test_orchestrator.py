@@ -801,3 +801,24 @@ def test_pruefLaeufe_aus_repo_map_und_plan():
                                  {"toolchain": "go", "action": "test", "parameters": {}}], toolchains)
     assert [s.describe() for s in ok] == ["dotnet build (project=a.csproj, configuration=Release)"]
     assert len(problems) == 3
+
+
+def test_grenzen_je_rolle_und_ablehnungen_einstellbar():
+    from localai.orchestrator.models import ConfigError
+    config = models_config(maxStepsPerRole={"Planner": 4}, maxDenialsPerTask=2, maxPatchRetries=1, maxPlanAttempts=3)
+    assert config.limits.steps_for("Planner") == 4 and config.limits.steps_for("Coder") == 20
+    assert (config.limits.max_denials_per_task, config.limits.max_patch_retries, config.limits.max_plan_attempts) == (2, 1, 3)
+    for bad in ({"maxStepsPerRole": {"Hacker": 3}}, {"maxDenialsPerTask": -1}, {"maxPlanAttempts": "zwei"}):
+        with pytest.raises(ConfigError):
+            models_config(**bad)
+
+
+def test_nach_zu_vielen_ablehnungen_fragt_der_agent_nach(ollama, tmp_path):
+    broker = FakeBroker(decide=lambda r: ProposalState.Denied if r.tool.startswith("File.Read") else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path, maxDenialsPerTask=2)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: any("Kein Plan" in c for c in broker.chats("Planner")), timeout=30)
+    assert any("2 Vorschläge für Aufgabe P1 von dir abgelehnt" in c for c in broker.chats("Planner"))
+    assert sum(1 for p in broker.proposals.values() if p.tool.startswith("File.Read")) == 2
+    orch.stop()
+    thread.join(5)
