@@ -43,7 +43,7 @@ Neu im Repository: `config\m4-csharp-project.json`, `config\m4-python-project.js
    copy toolchains\dotnet\toolchain.json D:\Agent\Toolchains\dotnet-9.0.306\toolchain.json
    ```
    (Falls du `version`/`install.file` angepasst hattest: nur den Abschnitt `actions` übernehmen.)
-2. **Offline-NuGet-Pakete** für Testprojekte (xUnit, Test-SDK) einmal mit Internet laden – braucht `dotnet` auf dem
+2. **Offline-NuGet-Pakete** für Testprojekte (die Beispiele zielen auf `net10.0`, passend zu einer dotnet-10-Toolchain) (xUnit, Test-SDK) einmal mit Internet laden – braucht `dotnet` auf dem
    Host, führt nur `dotnet restore` eines Vorlagenprojekts aus:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\toolchains\Get-NuGetOfflinePackages.ps1 -ToolchainDirectory D:\Agent\Toolchains\dotnet-9.0.306
@@ -87,7 +87,12 @@ uv run --project src/python pytest -s tests/integration/test_m4_abnahme.py
 - [ ] **SEC-20:** nicht deklarierte Aktion, freies Kommando, eingeschmuggelte Option, zusätzlicher Parameter, unbekanntes Tool → alle abgewiesen, keine offene Freigabe entsteht.
 - [ ] **SEC-13/-21/-07:** Build von `samples\m4-sec13` (MSBuild-Target wie ein bösartiges NuGet-Paket): Schreiben nach `C:\LocalAi\python`, `C:\Toolchains\dotnet`, `C:\Windows`, Registry HKLM, Internet und `%USERPROFILE%\.ssh` scheitern; nur die eigene Arbeitskopie ist beschreibbar. Danach laufen die Python-Tests unverändert weiter.
 - [ ] **Großes Repository:** 2.213 generierte Dateien → Snapshot und Repo-Map ≤ 12.000 Zeichen, `src/Core/CsvParser.cs` steht oben.
-- [ ] Ergebnisdatei `%LOCALAPPDATA%\LocalAi\abnahme\m4-abnahme.json` (Zeiten, SEC-13-Exitcodes) bitte an Claude schicken.
+- [ ] Ergebnisdatei `%LOCALAPPDATA%\LocalAi\abnahme\m4-abnahme.json` (Zeiten, SEC-13-Exitcodes) bitte an Claude schicken; bei Fehlern zusätzlich die Logs `m4-*.log` daneben.
+
+Die Abnahme nutzt denselben VM-Ordner wie die Oberfläche (`%LOCALAPPDATA%\LocalAi\vm`). Mit `reuseVm: true` wird die VM
+am Ende gespeichert und beim nächsten Lauf – oder von der Oberfläche – fortgesetzt, solange sich Worker, Gastskripte,
+Toolchain-Registrierungen und die Toolchain-Liste des Projekts (`dotnet`, `python`) nicht ändern. Nach einem Update mit
+neuem Worker-Code wird einmal neu aufgebaut.
 
 ## 3. Ende zu Ende C# mit Modell
 
@@ -131,6 +136,7 @@ Eigene Projektdatei mit Grant auf diesen Ordner (`List`, `Read`), Ziel z. B. „
 | Testlauf: `NU1101 Unable to find package …` | Paket fehlt in der Offline-Quelle → Abschnitt 0 Schritt 2 (ggf. mit `-Project`), neu registrieren, VM neu aufbauen. |
 | Testlauf: „keine Ergebnisdatei gefunden“ | Build fehlgeschlagen (Log-Auszug im Chat/Verlauf) oder keine Tests im Projekt. |
 | Werkzeug startet in der VM nicht („CreateProcess … fehlgeschlagen“ oder Zugriffsfehler beim Build) | Niedrige Integritätsstufe verträgt sich nicht mit dem Werkzeug: Log `C:\LocalAi\logs\worker.log` (Gast, `scripts\sandbox\Get-LocalAiGuestLogs.ps1`) schicken; vorübergehend `"lowIntegrityTools": false`. |
+| Exitcode `-532462766` (0xE0434352) bei dotnet | Absturz im MSBuild-Prozess; bis 18.10. fehlten Systemvariablen wie `ProgramFiles(x86)` in der Jobumgebung (NuGet). Ab `M4-Fix 1` behoben; sonst Log `m4-*.log` schicken. |
 | „Patch nicht angewendet … Hunk n passt nicht“ | Das Modell hat sich auf einen anderen Dateistand bezogen; der Agent bekommt den Grund und korrigiert (höchstens 3×). |
 
 ## Bekannte Einschränkungen

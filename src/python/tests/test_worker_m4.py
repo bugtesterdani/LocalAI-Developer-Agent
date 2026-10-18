@@ -378,3 +378,12 @@ def test_kontextzeile_ohne_praefix_von_kleinen_modellen():
     patch = patching.parse("--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,4 @@\ndef f():\n\n+    # neu\n     return 1\nDieser Patch ergänzt einen Kommentar.\n")
     patching.apply_hunks(file, patch[0].hunks, "f.py")
     assert file.encode() == b"def f():\n\n    # neu\n    return 1\n"
+
+
+def test_windows_systemvariablen_nur_allowlist_und_ergaenzt():
+    from localai.worker.execution import windows_system_env
+    env = windows_system_env({"PROGRAMFILES": r"D:\Programme", "SYSTEMDRIVE": "D:", "GEHEIM": "x", "Path": "y",
+                              "USERNAME": "SYSTEM"})
+    assert env["ProgramFiles"] == r"D:\Programme" and env["ProgramFiles(x86)"] == r"D:\Program Files (x86)"
+    assert env["USERNAME"] == "SYSTEM" and env["OS"] == "Windows_NT"
+    assert "GEHEIM" not in env and "Path" not in env and "PATH" not in env

@@ -118,5 +118,5 @@ def test_hyperv_vm_aufbau_und_roundtrips():
         log(f"Fertig: {json.dumps(summary, ensure_ascii=False)}")
     finally:
         (base / "hyperv-abnahme.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        log("Broker wird beendet, VM wird gelöscht …")
+        log("Broker wird beendet (VM: gelöscht, gespeichert oder belassen – je nach reuseVm/keepVmOnExit) …")
         broker.stop(timeout=300)

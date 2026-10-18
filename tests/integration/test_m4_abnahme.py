@@ -16,7 +16,10 @@ Geprüft wird ohne Modell, direkt über den Broker (jede Aktion ein genehmigter 
    Netz und SSH-Schlüssel scheitern, nur die eigene Arbeitskopie ist beschreibbar; danach arbeitet der Worker normal.
 5. Großes Repository (> 2.000 Dateien): Snapshot und Repo-Map im Zeichenbudget, zentrale Datei oben.
 
-Ergebnis mit Zeiten: ``%LOCALAPPDATA%\\LocalAi\\abnahme\\m4-abnahme.json``. Danach wird die VM gelöscht.
+Ergebnis mit Zeiten: ``%LOCALAPPDATA%\\LocalAi\\abnahme\\m4-abnahme.json``, die vollständigen Logs der Toolchain-Läufe
+daneben (``m4-*.log``). Die VM liegt im selben Ordner wie die der Oberfläche (``%LOCALAPPDATA%\\LocalAi\\vm``): mit
+``reuseVm`` wird sie gespeichert und beim nächsten Lauf (oder von der Oberfläche) fortgesetzt, sofern das Projekt der
+Oberfläche dieselben Toolchains wählt (``dotnet``, ``python``); mit ``keepVmOnExit`` bleibt sie stehen.
 """
 
 from __future__ import annotations
@@ -32,7 +35,8 @@ import uuid
 
 import pytest
 
-from localai.contracts import AgentRole, ProposalRequest, ProposalState, TestReport, ToolTarget
+from localai.contracts import AgentRole, ProposalRequest, ProposalState, ToolTarget
+from localai.contracts import TestReport as Report
 from localai.pipe import BrokerError
 
 from conftest import ROOT, start_broker
@@ -130,14 +134,28 @@ def run(ui, orch, req: ProposalRequest, timeout: float = 1800):
     return orch.wait_final(view.proposal.proposal_id, timeout=timeout, poll=0.5)
 
 
-def report_of(outcome) -> tuple[TestReport, str]:
+def vm_exit_text() -> str:
+    try:
+        hyperv = json.loads((ROOT / "config" / "localai.json").read_text(encoding="utf-8-sig"))["sandbox"]["hyperv"]
+    except (OSError, KeyError, ValueError):
+        hyperv = {}
+    if hyperv.get("reuseVm"):
+        return "VM wird gespeichert (reuseVm) …"
+    if hyperv.get("keepVmOnExit"):
+        return "VM bleibt stehen (keepVmOnExit) …"
+    return "VM wird gelöscht …"
+
+
+def report_of(outcome) -> tuple[Report, str]:
     by_id = {r.target_id: r for r in outcome.result.target_results}
-    return TestReport.model_validate_json(by_id["tests"].text), by_id["log"].text or ""
+    return Report.model_validate_json(by_id["tests"].text), by_id["log"].text or ""
 
 
 def test_m4_abnahme():
     base = pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home()))) / "LocalAi" / "abnahme"
-    data = base / "broker-m4"
+    base.mkdir(parents=True, exist_ok=True)
+    # Datenordner neben dem der Oberfläche → derselbe VM-Ordner (…\LocalAi\vm), damit reuseVm greift.
+    data = base.parent / "broker-m4"
     data.mkdir(parents=True, exist_ok=True)
     registry = base.parent / "broker" / "toolchains.json"
     assert registry.exists(), f"Keine Toolchain-Registrierungen ({registry}) – in der Oberfläche unter TOOLCHAINS registrieren"
@@ -197,6 +215,9 @@ def test_m4_abnahme():
             t0 = time.monotonic()
             out = run(ui, orch, request(tool, {"grantId": grant_id, "toolchain": name, "parameters": parameters}, [], snap))
             summary[f"{key}_s"] = round(time.monotonic() - t0, 1)
+            if out.result is not None:
+                text = "\n\n".join(f"== {r.target_id}: {r.status.value} {r.message or ''}\n{r.text or ''}" for r in out.result.target_results)
+                (base / f"m4-{key}.log").write_text(text, encoding="utf-8")
             assert out.state == ProposalState.Succeeded, out
             return out
 
@@ -272,5 +293,5 @@ def test_m4_abnahme():
         log(f"Fertig: {json.dumps(summary, ensure_ascii=False)}")
     finally:
         (base / "m4-abnahme.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        log("Broker wird beendet, VM wird gelöscht …")
+        log("Broker wird beendet, " + vm_exit_text())
         broker.stop(timeout=300)

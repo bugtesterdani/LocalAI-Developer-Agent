@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Sicherheitsprobe SEC-13/-21/-07: nur in der Offline-VM bauen (siehe README.md). -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <Target Name="Sec13Probe" AfterTargets="Build">

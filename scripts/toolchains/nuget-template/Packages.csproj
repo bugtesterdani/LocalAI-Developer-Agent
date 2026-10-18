@@ -2,7 +2,7 @@
   <!-- Andere Testframeworks (MSTest, NUnit): eigenes Projekt mit -Project angeben.
        Nur Paketliste für die Offline-Quelle (Get-NuGetOfflinePackages.ps1); wird nie gebaut. -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>

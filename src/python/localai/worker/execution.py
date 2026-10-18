@@ -50,6 +50,27 @@ WORKER_ENV = {
     "PYTHONDONTWRITEBYTECODE": "1",
 }
 BLOCKED_ENV = {"PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH"}
+# Feste Windows-Systemvariablen ohne Geheimnisse, die Werkzeuge voraussetzen. Ohne ProgramFiles(x86) bricht z. B.
+# NuGet im MSBuild-Prozess mit „Value cannot be null (path1)“ ab (Exitcode 0xE0434352).
+WINDOWS_SYSTEM_ENV = (
+    "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "CommonProgramFiles", "CommonProgramFiles(x86)",
+    "CommonProgramW6432", "PUBLIC", "OS", "COMPUTERNAME", "USERNAME", "USERDOMAIN", "PROCESSOR_IDENTIFIER",
+    "PROCESSOR_LEVEL", "PROCESSOR_REVISION", "DriverData",
+)
+
+
+def windows_system_env(source: dict[str, str] | os._Environ) -> dict[str, str]:
+    """Übernimmt nur die festen Systemvariablen (Groß-/Kleinschreibung egal); fehlende werden sinnvoll ergänzt."""
+    folded = {k.upper(): v for k, v in source.items()}
+    env = {name: folded[name.upper()] for name in WINDOWS_SYSTEM_ENV if name.upper() in folded}
+    drive = folded.get("SYSTEMDRIVE", "C:")
+    env.setdefault("ProgramFiles", drive + "\\Program Files")
+    env.setdefault("ProgramFiles(x86)", drive + "\\Program Files (x86)")
+    env.setdefault("ProgramW6432", env["ProgramFiles"])
+    env.setdefault("CommonProgramFiles", env["ProgramFiles"] + "\\Common Files")
+    env.setdefault("CommonProgramFiles(x86)", env["ProgramFiles(x86)"] + "\\Common Files")
+    env.setdefault("OS", "Windows_NT")
+    return env
 
 
 class ExecError(Exception):
@@ -198,6 +219,7 @@ def environment(toolchain: Toolchain, dirs: JobDirs, fixed: dict[str, str]) -> d
     env: dict[str, str] = {}
     if os.name == "nt":
         system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        env.update(windows_system_env(os.environ))
         env.update({
             "SystemRoot": system_root, "windir": system_root, "SystemDrive": system_root[:2],
             "ComSpec": os.path.join(system_root, "System32", "cmd.exe"),
@@ -206,6 +228,7 @@ def environment(toolchain: Toolchain, dirs: JobDirs, fixed: dict[str, str]) -> d
             "NUMBER_OF_PROCESSORS": os.environ.get("NUMBER_OF_PROCESSORS", "2"),
             "PROCESSOR_ARCHITECTURE": os.environ.get("PROCESSOR_ARCHITECTURE", "AMD64"),
             "ProgramData": str(home / "ProgramData"), "ALLUSERSPROFILE": str(home / "ProgramData"),
+            "HOMEDRIVE": str(home)[:2], "HOMEPATH": str(home)[2:],
         })
         (home / "ProgramData").mkdir(exist_ok=True)
     else:
