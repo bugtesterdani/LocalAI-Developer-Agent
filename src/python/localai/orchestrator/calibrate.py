@@ -33,7 +33,6 @@ from localai.orchestrator.models import (
 )
 
 GIB = hardware.GIB
-MAX_OFFLOAD = 0.05  # mehr CPU-Anteil nur in ausdrücklichen Offload-Profilen
 FILLER_UNITS = [
     "public static int Add{n}(int a, int b) => a + b + {n};",
     "def handle_{n}(items: list[int]) -> int:\n    return sum(i * {n} for i in items if i > 0)",
@@ -80,7 +79,7 @@ class Target:
 
 def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: int, min_reserve_gib: float,
             hw: hardware.Hardware, digest: str, accept_unknown_vram: bool, sampler_factory=hardware.PeakSampler,
-            log=print) -> Measurement:
+            log=print, max_offload: float = 0.05) -> Measurement:
     cpt = 3.0
     fill_tokens = target.context_tokens - output_tokens - 300
     prompt_tokens_seen: list[int] = []
@@ -155,11 +154,11 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
             reasons.append(f"VRAM nicht messbar ({where}) – mit --ohne-vram-messung bewusst akzeptieren")
     elif reserve < min_reserve_gib * GIB:
         reasons.append(f"VRAM-Reserve {reserve / GIB:.1f} GiB < {min_reserve_gib:g} GiB")
-    if offload is not None and offload > MAX_OFFLOAD and not target.offload:
-        # Modell passt nicht in den Grafikspeicher: dann ist auch keine VRAM-Reserve übrig (§9). Bewusst zulassen nur
-        # über ein Profil mit "offload": true.
+    if offload is not None and offload > max_offload and not target.offload:
+        # Modell passt nicht in den Grafikspeicher: dann ist auch keine VRAM-Reserve übrig (§9). Bewusst zulassen über
+        # ein Profil mit "offload": true oder einen höheren Grenzwert calibration.maxCpuOffload.
         reasons.append(f"{offload:.0%} des Modells auf der CPU – passt nicht in den Grafikspeicher "
-                       "(kleineres Modell oder Profil mit \"offload\": true)")
+                       "(kleineres Modell, Profil mit \"offload\": true oder calibration.maxCpuOffload erhöhen)")
     stable = not reasons
     return Measurement(
         model=target.model, digest=digest, context_tokens=target.context_tokens, hardware=hw.fingerprint(), runs=runs,
@@ -252,7 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         for t in targets:
             print(f"\n{t.profile_name}: {t.model} mit {t.context_tokens} Token Kontext, {runs} Läufe")
             m = measure(gateway, t, runs, config.calibration.output_tokens, config.calibration.min_vram_reserve_gib, hw,
-                        installed[t.model], args.ohne_vram_messung, sampler_factory=sampler)
+                        installed[t.model], args.ohne_vram_messung, sampler_factory=sampler,
+                        max_offload=config.calibration.max_cpu_offload)
             existing = store.get_key(m.key)
             if t.profile_name.startswith("messreihe-") and existing is not None and existing.stable and existing.runs >= m.runs:
                 print("  (Messreihe ersetzt die stabile Profilkalibrierung nicht)")

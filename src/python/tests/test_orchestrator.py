@@ -480,6 +480,11 @@ def test_cpu_offload_sperrt_normale_profile(ollama, tmp_path):
     store.put(_measurement(model="qwen2.5-coder:7b", digest="d7"))
     choice = choose_profiles(config, store, {"qwen2.5-coder:14b": "d1", "qwen2.5-coder:7b": "d7"}, "hw1")["Coder"]
     assert choice.profile.name == "leicht" and "CPU" in choice.problems[0]
+    # Bewusst höherer Grenzwert (z. B. 7B mit 8 % auf der CPU): dann wird das Profil verwendet.
+    tolerant = ModelsConfig.parse({**{"profiles": [
+        {"name": "standard", "model": "qwen2.5-coder:14b", "contextTokens": 8192, "maxOutputTokens": 2048}]},
+        "calibration": {"maxCpuOffload": 0.6}})
+    assert choose_profiles(tolerant, store, {"qwen2.5-coder:14b": "d1"}, "hw1")["Coder"].profile.name == "standard"
 
 
 def test_kalibrierung_ohne_vram_messung_nur_ausdruecklich(ollama):

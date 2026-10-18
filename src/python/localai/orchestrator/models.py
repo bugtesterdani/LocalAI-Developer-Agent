@@ -77,6 +77,7 @@ class CalibrationSettings:
     runs: int = 10
     min_vram_reserve_gib: float = 2.0
     output_tokens: int = 256
+    max_cpu_offload: float = 0.05  # höchster CPU-Anteil für Profile ohne "offload": true
 
 
 @dataclass
@@ -162,6 +163,7 @@ class ModelsConfig:
         cal = raw.get("calibration", {})
         calibration = CalibrationSettings(
             runs=int(cal.get("runs", 10)), min_vram_reserve_gib=float(cal.get("minVramReserveGiB", 2.0)),
+            max_cpu_offload=float(cal.get("maxCpuOffload", 0.05)),
             output_tokens=int(cal.get("outputTokens", 256)))
         url = str(ollama.get("url", "http://127.0.0.1:11434"))
         from localai.orchestrator.gateway import GatewayError, validate_loopback
@@ -295,7 +297,8 @@ def choose_profiles(config: ModelsConfig, store: CalibrationStore, installed: di
                     stale.append("Hardware hat sich seit der Kalibrierung geändert")
                 if not m.stable:
                     stale.append(f"nicht stabil ({m.reason})")
-                elif m.offload_fraction is not None and m.offload_fraction > 0.05 and not profile.offload:
+                elif (m.offload_fraction is not None and m.offload_fraction > config.calibration.max_cpu_offload
+                      and not profile.offload):
                     # Auch für ältere Messungen: ohne Offload-Profil muss das Modell in den Grafikspeicher passen.
                     stale.append(f"{m.offload_fraction:.0%} des Modells auf der CPU – passt nicht in den Grafikspeicher")
                 if stale and config.require_calibration:
