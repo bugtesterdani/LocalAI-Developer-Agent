@@ -149,6 +149,9 @@ TEXTS = {
     "Event_orchestrator.responsive": "Orchestrator antwortet wieder",
     "Event_run.cancelled": "Run abgebrochen",
     "Event_run.agentCancelled": "Agent abgebrochen",
+    "RebuildSandbox": "VM neu aufbauen",
+    "SandboxRebuildConfirm": "Die Sandbox-VM wird verworfen und neu aufgebaut (dauert einige Minuten, Administratorrechte werden angefragt). Ein gerade laufender Auftrag wird vorher abgeschlossen, danach ist bis zum Ende des Aufbaus keine Ausführung möglich.\n\nJetzt neu aufbauen?",
+    "SandboxRebuildInfo": "VM wird neu aufgebaut – Fortschritt in der Kopfzeile.",
 }
 
 HEADER = """<?xml version="1.0" encoding="utf-8"?>

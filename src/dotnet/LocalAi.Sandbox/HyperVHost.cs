@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using LocalAi.Contracts;
 
 namespace LocalAi.Sandbox;
 
@@ -194,6 +196,16 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
         return new VmInfo(result.GetProperty("exists").GetBoolean(), result.GetProperty("state").GetString() ?? "", result.GetProperty("nics").GetInt32());
     }
 
+    public async Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken)
+    {
+        if (action is not ("Start" or "Save"))
+        {
+            throw new ArgumentException("Start oder Save", nameof(action));
+        }
+        var result = await RunJsonAsync("Set-LocalAiVmState.ps1", ["-VmName", settings.VmName, "-Action", action], cancellationToken).ConfigureAwait(false);
+        return new VmInfo(true, result.GetProperty("state").GetString() ?? "", result.GetProperty("nics").GetInt32());
+    }
+
     public Task RemoveVmAsync(CancellationToken cancellationToken) =>
         RunJsonAsync("Remove-LocalAiSandbox.ps1", ["-VmName", settings.VmName, "-VmDirectory", settings.VmDirectory], cancellationToken);
 
@@ -346,6 +358,74 @@ public sealed record GuestPayloadSources(
                 ?? throw new InvalidDataException("site-packages der Python-Umgebung nicht gefunden");
         }
         return new GuestPayloadSources(home, site, Path.Combine(python, "localai"), Path.Combine(repoRoot, "scripts", "sandbox", "guest"), DefaultPackages);
+    }
+}
+
+/// <summary>
+/// Fingerabdruck eines VM-Aufbaus für die Wiederverwendung: Abbild (Pfad, Größe, Zeitstempel), VM-Einstellungen,
+/// Python-Laufzeit, Worker-Code, Gastskripte und die Registrierungen der Projekt-Toolchains. Ändert sich etwas
+/// davon, wird neu aufgebaut. Schnell: große Dateien (Abbild, Toolchains) gehen über Metadaten bzw. ihre
+/// bei der Registrierung festgehaltenen Hashes ein.
+/// </summary>
+public static class SandboxFingerprint
+{
+    private static readonly HashSet<string> WorkerFiles = new(StringComparer.Ordinal) { "__init__.py", "canonical.py", "pathrules.py" };
+
+    public static string Compute(HyperVSettings settings, GuestPayloadSources sources, IEnumerable<ToolchainRegistration> toolchains,
+        IEnumerable<string> projectToolchains)
+    {
+        var lines = new List<string>
+        {
+            "v1",
+            $"image|{settings.ImagePath}|{Facts(settings.ImagePath)}|{settings.ImageName}|{settings.ImageIndex}",
+            $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.ProductKey is not null}",
+            $"python|{sources.PythonHome}|{Facts(Path.Combine(sources.PythonHome, "python.exe"))}",
+        };
+        IEnumerable<string?> entries = Directory.Exists(sources.SitePackages)
+            ? Directory.EnumerateFileSystemEntries(sources.SitePackages).Select(Path.GetFileName).Order(StringComparer.Ordinal)
+            : [];
+        foreach (var entry in entries)
+        {
+            if (GuestPayloadBuilder.PackageName(entry!) is { } package && sources.Packages.Contains(package, StringComparer.OrdinalIgnoreCase))
+            {
+                lines.Add("pkg|" + entry);
+            }
+        }
+        // Nur was im Gast tatsächlich läuft: Worker und seine Abhängigkeiten (Orchestrator-Änderungen erzwingen keinen Neuaufbau).
+        foreach (var (dir, include) in new (string, Func<string, bool>)[]
+                 {
+                     (sources.LocalAiPackage, rel => WorkerFiles.Contains(rel) || rel.StartsWith("worker/", StringComparison.Ordinal)
+                                                     || rel.StartsWith("contracts/", StringComparison.Ordinal)),
+                     (sources.GuestScripts, _ => true),
+                 })
+        {
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+                         .Where(f => !f.Contains("__pycache__", StringComparison.Ordinal) && !f.EndsWith(".pyc", StringComparison.Ordinal))
+                         .Order(StringComparer.Ordinal))
+            {
+                var rel = Path.GetRelativePath(dir, file).Replace('\\', '/');
+                if (include(rel))
+                {
+                    lines.Add($"file|{rel}|{Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))}");
+                }
+            }
+        }
+        var registered = toolchains.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in projectToolchains.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            lines.Add($"toolchain|{name}|{(registered.TryGetValue(name, out var r) ? r.Digest : "nicht-registriert")}");
+        }
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines))));
+    }
+
+    private static string Facts(string path)
+    {
+        var info = new FileInfo(path);
+        return info.Exists ? $"{info.Length}|{info.LastWriteTimeUtc.Ticks}" : "fehlt";
     }
 }
 

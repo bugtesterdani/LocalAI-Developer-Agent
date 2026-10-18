@@ -132,6 +132,135 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.Empty(Directory.GetFiles(Path.Combine(host.GuestRoot, "inbox")));
     }
 
+    private async Task<HyperVSandbox> StartReusableAsync(HyperVSettings settings, SimulatedHost host, SandboxSession session, string fingerprint)
+    {
+        var vm = new HyperVSandbox(settings, host, guestDir =>
+        {
+            var root = Directory.CreateDirectory(Path.Combine(guestDir, "LocalAi")).FullName;
+            File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(session.Key));
+            return Task.CompletedTask;
+        }, session: session, fingerprint: () => fingerprint);
+        vm.Start();
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+        while (vm.Status.State is not (SandboxState.Ready or SandboxState.Locked) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+        return vm;
+    }
+
+    private async Task<ToolResult> ReadOnceAsync(HyperVSandbox vm, SandboxSession session, string root, string inv)
+    {
+        var grant = new FolderGrant("p", root, [FolderRight.List, FolderRight.Read], true);
+        var registry = new SnapshotRegistry();
+        var context = new ProjectPolicyContext(new ProjectConfig(1, "p", "p", [grant]), registry);
+        var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(_dir, "scratch-" + inv), SystemClock.Instance)
+        {
+            JobTimeout = TimeSpan.FromSeconds(30),
+            SnapshotTimeout = TimeSpan.FromSeconds(30),
+        };
+        var ct = TestContext.Current.CancellationToken;
+        var snap = await adapter.ExecuteAsync(Proposal("Workspace.Snapshot", "p", "-", [], root), inv + "-s", ct);
+        Assert.True(snap.Status == ResultStatus.Succeeded, $"Snapshot: {snap.TargetResults[0].Message} (Sandbox: {vm.Status.Text})");
+        var id = snap.TargetResults.Single(t => t.TargetId == "snapshot").Text!;
+        return await adapter.ExecuteAsync(Proposal("File.Read", "p", id, [new ToolTarget("t1", "README.md")]), inv + "-r", ct);
+    }
+
+    [Fact, Trait("Pruefung", "M3-Wiederverwendung")]
+    public async Task Passende_VM_wird_fortgesetzt_statt_neu_aufgebaut()
+    {
+        var settings = Settings() with { ReuseVm = true };
+        var host = new SimulatedHost(settings, Path.Combine(_dir, "guest-sim"));
+        _cleanup.Add(host);
+        var root = Project();
+
+        Assert.Null(HyperVSandbox.LoadReusableSession(settings));
+        var first = new SandboxSession("s-erste");
+        var vm1 = await StartReusableAsync(settings, host, first, "fp-1");
+        Assert.Equal(SandboxState.Ready, vm1.Status.State);
+        Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm1, first, root, "a")).Status);
+        // Absturz während der Sitzung (kein sauberes Ende): keine Wiederverwendung.
+        Assert.Null(HyperVSandbox.LoadReusableSession(settings));
+        await vm1.DisposeAsync();
+        Assert.Equal(["Save"], host.StateActions);
+        Assert.Contains("gespeichert", vm1.Status.Text, StringComparison.Ordinal);
+
+        // Programm neu gestartet: gleiche Sitzung, Sequenz geht weiter, kein Neuaufbau.
+        var second = HyperVSandbox.LoadReusableSession(settings);
+        Assert.NotNull(second);
+        Assert.Equal("s-erste", second!.SessionId);
+        Assert.Equal(first.LastSequence, second.LastSequence);
+        var vm2 = await StartReusableAsync(settings, host, second, "fp-1");
+        Assert.True(vm2.Status.State == SandboxState.Ready, vm2.Status.Text);
+        Assert.Contains("wiederverwendet", vm2.Status.Text, StringComparison.Ordinal);
+        Assert.Equal(1, host.Builds);
+        var read = await ReadOnceAsync(vm2, second, root, "b");
+        Assert.True(read.Status == ResultStatus.Succeeded, read.TargetResults[0].Message);
+        Assert.Equal("# Projekt in der VM\nZeile 2\n", read.TargetResults[0].Text);
+        await vm2.DisposeAsync();
+
+        // Anderer Stand (z. B. Worker oder Toolchain geändert): Neuaufbau.
+        var third = HyperVSandbox.LoadReusableSession(settings)!;
+        var vm3 = await StartReusableAsync(settings, host, third, "fp-2");
+        _cleanup.Add(vm3);
+        Assert.Equal(SandboxState.Ready, vm3.Status.State);
+        Assert.Equal(2, host.Builds);
+        Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm3, third, root, "c")).Status);
+    }
+
+    [Fact, Trait("Pruefung", "M3-Wiederverwendung")]
+    public async Task Gesperrte_VM_wird_nie_wiederverwendet_und_Neuaufbau_auf_Knopfdruck()
+    {
+        var settings = Settings() with { ReuseVm = true };
+        var host = new SimulatedHost(settings, Path.Combine(_dir, "guest-sim"));
+        _cleanup.Add(host);
+        var session = new SandboxSession("s-x");
+        var vm = await StartReusableAsync(settings, host, session, "fp");
+        _cleanup.Add(vm);
+        Assert.Equal(SandboxState.Ready, vm.Status.State);
+        vm.Lock("Test");
+        Assert.Null(HyperVSandbox.LoadReusableSession(settings));
+        await vm.RebuildAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+        while (vm.Status.State != SandboxState.Ready && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+        Assert.True(vm.Status.State == SandboxState.Ready, vm.Status.Text);
+        Assert.Equal(2, host.Builds);
+        Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm, session, Project(), "d")).Status);
+    }
+
+    [Fact, Trait("Pruefung", "M3-Wiederverwendung")]
+    public void Fingerabdruck_aendert_sich_nur_mit_dem_Gaststand()
+    {
+        var src = Directory.CreateDirectory(Path.Combine(_dir, "fp")).FullName;
+        var pkg = Directory.CreateDirectory(Path.Combine(src, "localai")).FullName;
+        Directory.CreateDirectory(Path.Combine(pkg, "worker"));
+        Directory.CreateDirectory(Path.Combine(pkg, "orchestrator"));
+        var scripts = Directory.CreateDirectory(Path.Combine(src, "guest")).FullName;
+        var site = Directory.CreateDirectory(Path.Combine(src, "site")).FullName;
+        Directory.CreateDirectory(Path.Combine(site, "pydantic"));
+        File.WriteAllText(Path.Combine(pkg, "worker", "tools.py"), "a");
+        File.WriteAllText(Path.Combine(pkg, "orchestrator", "run.py"), "a");
+        File.WriteAllText(Path.Combine(scripts, "provision.ps1"), "a");
+        var sources = new GuestPayloadSources(src, site, pkg, scripts, ["pydantic"]);
+        var settings = Settings();
+        var reg = new ToolchainRegistration("dotnet", "10", "/tc", "m", "digest-1", new Dictionary<string, string>(), "2026-10-18T00:00:00.000Z");
+        string Fp(ToolchainRegistration r) => SandboxFingerprint.Compute(settings, sources, [r], ["dotnet"]);
+        var baseline = Fp(reg);
+        Assert.Equal(baseline, Fp(reg));
+        File.WriteAllText(Path.Combine(pkg, "orchestrator", "run.py"), "b");
+        Assert.Equal(baseline, Fp(reg)); // Orchestrator läuft nicht im Gast
+        Assert.NotEqual(baseline, Fp(reg with { Digest = "digest-2" }));
+        Assert.NotEqual(baseline, SandboxFingerprint.Compute(settings with { MemoryMB = 4096 }, sources, [reg], ["dotnet"]));
+        File.WriteAllText(Path.Combine(scripts, "provision.ps1"), "b");
+        var scriptChanged = Fp(reg);
+        Assert.NotEqual(baseline, scriptChanged);
+        File.WriteAllText(Path.Combine(pkg, "worker", "tools.py"), "b");
+        Assert.NotEqual(scriptChanged, Fp(reg));
+    }
+
     [Fact, Trait("Pruefung", "SEC-24")]
     public async Task Fehler_im_Bericht_sperren_die_Sandbox()
     {
@@ -335,11 +464,21 @@ public sealed class HyperVTests : IAsyncLifetime
         public bool DropJobs { get; set; }
         public int Swaps { get; private set; }
         public int JobsCopied { get; private set; }
+        public int Builds { get; private set; }
+        public List<string> StateActions { get; } = [];
+        private string[]? _workerArgs;
 
         public Task<HostCheck> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(new HostCheck(true, "simuliert"));
 
         public async Task BuildAsync(string requestFile, string statusFile, Action<string> progress, CancellationToken cancellationToken)
         {
+            Builds++;
+            StopAll();
+            // Neuaufbau = frischer Gast: kein Zustand aus einer früheren VM.
+            if (Directory.Exists(Path.Combine(GuestRoot, "work")))
+            {
+                Directory.Delete(Path.Combine(GuestRoot, "work"), recursive: true);
+            }
             using var request = JsonDocument.Parse(await File.ReadAllTextAsync(requestFile, cancellationToken));
             var guestDir = request.RootElement.GetProperty("guestDirectory").GetString()!;
             Assert.Equal(settings.VmName, request.RootElement.GetProperty("vmName").GetString());
@@ -352,8 +491,12 @@ public sealed class HyperVTests : IAsyncLifetime
             await File.WriteAllBytesAsync(Raw, new byte[settings.TransferDiskBytes], cancellationToken);
             var key = Path.Combine(guestDir, "LocalAi", "session.key");
             var common = new[] { "--transfer-disk", Raw, "--transfer-size", settings.TransferDiskBytes.ToString(), "--signal-file", SignalFile };
-            _processes.Add(StartWorker(["--inbox", Path.Combine(GuestRoot, "inbox"), "--work", Path.Combine(GuestRoot, "work"),
-                "--key-file", key, "--require-ready", "--poll-ms", "20", .. common]));
+            // Schlüssel wie im echten Gast in die VM kopieren (die Gastdateien des Hosts werden später gelöscht).
+            var guestKey = Path.Combine(GuestRoot, "session.key");
+            File.Copy(key, guestKey, overwrite: true);
+            _workerArgs = ["--inbox", Path.Combine(GuestRoot, "inbox"), "--work", Path.Combine(GuestRoot, "work"),
+                "--key-file", guestKey, "--require-ready", "--poll-ms", "20", .. common];
+            _processes.Add(StartWorker(_workerArgs));
             // Provisionierung: Bericht über das Transfer-Laufwerk.
             var report = Path.Combine(GuestRoot, "report.json");
             await File.WriteAllTextAsync(report, ReportJson, cancellationToken);
@@ -365,6 +508,7 @@ public sealed class HyperVTests : IAsyncLifetime
         public async Task WatchSignalsAsync(SignalBoard board, Action<string> problem, CancellationToken cancellationToken)
         {
             string? last = null;
+            board.PostHeartbeat("OkApplicationsHealthy");
             while (!cancellationToken.IsCancellationRequested)
             {
                 string? value = null;
@@ -412,11 +556,27 @@ public sealed class HyperVTests : IAsyncLifetime
             return Task.FromResult(Nics);
         }
 
-        public Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken) => Task.FromResult(new VmInfo(true, "Running", Nics));
+        public Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken) => Task.FromResult(new VmInfo(_workerArgs is not null, "Saved", Nics));
+
+        /// <summary>Speichern = Worker anhalten (Gastdateien bleiben), Fortsetzen = Worker mit demselben Zustand weiter.</summary>
+        public Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken)
+        {
+            StateActions.Add(action);
+            if (action == "Save")
+            {
+                StopAll();
+            }
+            else if (Nics == 0 && _workerArgs is not null && _processes.Count == 0)
+            {
+                _processes.Add(StartWorker(_workerArgs));
+            }
+            return Task.FromResult(new VmInfo(true, action == "Save" ? "Saved" : "Running", Nics));
+        }
 
         public Task RemoveVmAsync(CancellationToken cancellationToken)
         {
             StopAll();
+            _workerArgs = null;
             return Task.CompletedTask;
         }
 

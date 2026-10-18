@@ -38,6 +38,13 @@ public sealed record HyperVSettings
     /// <summary>Beibehalten statt löschen, wenn die Sitzung endet (nur zur Fehlersuche).</summary>
     public bool KeepVmOnExit { get; init; }
 
+    /// <summary>
+    /// VM beim Programmende speichern statt löschen und beim nächsten Start fortsetzen, wenn sie zum aktuellen Stand passt
+    /// (gleicher Fingerabdruck aus Abbild, Einstellungen, Worker und Toolchains) und die letzte Sitzung sauber endete.
+    /// Abweichung von R17 (Neuaufbau je Sitzung) auf ausdrücklichen Wunsch; „VM neu aufbauen“ erzwingt den Neuaufbau.
+    /// </summary>
+    public bool ReuseVm { get; init; }
+
     public long TransferDiskBytes => TransferDiskMB * 1024L * 1024L;
 
     private static readonly Regex VmNamePattern = new("^[A-Za-z0-9-]{1,40}$");
@@ -230,6 +237,9 @@ public interface IHyperVHost
 
     Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken);
 
+    /// <summary>Vorhandene VM starten/fortsetzen ("Start", nie mit Netzwerkkarte) oder Zustand speichern ("Save").</summary>
+    Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken);
+
     Task RemoveVmAsync(CancellationToken cancellationToken);
 }
 
@@ -325,15 +335,44 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private Task? _watcher;
     private string? _currentDisk;
     private int _diskCounter;
+    private readonly SandboxSession? _session;
+    private readonly Func<string>? _fingerprint;
+    private readonly SandboxReuseStore _reuse;
+    private string? _currentFingerprint;
+    private DateTimeOffset _builtAt;
+    private CancellationTokenSource? _lifecycleCts;
+    private bool _forceRebuild;
 
     /// <param name="prepareGuest">Legt die Gastdateien im übergebenen Ordner ab (Python, Worker, Schlüssel, Skripte).</param>
-    public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest, IReadOnlyList<string>? expectedToolchains = null)
+    /// <param name="session">Sitzung (Schlüssel, Sequenz) – nötig für die Wiederverwendung.</param>
+    /// <param name="fingerprint">Fingerabdruck des Aufbaus (Abbild, Einstellungen, Worker, Toolchains) – nötig für die Wiederverwendung.</param>
+    public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest, IReadOnlyList<string>? expectedToolchains = null,
+        SandboxSession? session = null, Func<string>? fingerprint = null)
     {
         _expectedToolchains = expectedToolchains ?? [];
         settings.Validate();
         _settings = settings;
         _host = host;
         _prepareGuest = prepareGuest;
+        _session = session;
+        _fingerprint = fingerprint;
+        _reuse = new SandboxReuseStore(settings.VmDirectory);
+    }
+
+    private bool ReuseEnabled => _settings.ReuseVm && _session is not null && _fingerprint is not null;
+
+    /// <summary>
+    /// Lädt eine gespeicherte Sitzung für die Wiederverwendung (vor dem Erzeugen des Adapters aufrufen).
+    /// Nur wenn die letzte Sitzung sauber endete; sonst null → neue Sitzung, Neuaufbau.
+    /// </summary>
+    public static SandboxSession? LoadReusableSession(HyperVSettings settings)
+    {
+        if (!settings.ReuseVm)
+        {
+            return null;
+        }
+        var loaded = new SandboxReuseStore(settings.VmDirectory).Load();
+        return loaded is { State.Clean: true } l ? new SandboxSession(l.State.SessionId, l.Key, l.State.LastSequence) : null;
     }
 
     public event Action<SandboxStatus>? StatusChanged;
@@ -347,8 +386,52 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
 
     public string WorkDirectory => Path.Combine(_settings.VmDirectory, "host");
 
-    /// <summary>Startet den Aufbau im Hintergrund.</summary>
-    public void Start() => _lifecycle = Task.Run(() => LifecycleAsync(_shutdown.Token));
+    /// <summary>Startet den Aufbau (bzw. die Wiederverwendung) im Hintergrund.</summary>
+    public void Start()
+    {
+        _lifecycleCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+        var token = _lifecycleCts.Token;
+        _lifecycle = Task.Run(() => LifecycleAsync(token));
+    }
+
+    /// <summary>„VM neu aufbauen“: verwirft die laufende VM (auch eine gesperrte) und baut sie neu auf.</summary>
+    public async Task RebuildAsync()
+    {
+        await _exchange.WaitAsync(_shutdown.Token).ConfigureAwait(false);
+        try
+        {
+            if (_lifecycleCts is not null)
+            {
+                await _lifecycleCts.CancelAsync().ConfigureAwait(false);
+            }
+            foreach (var task in new[] { _lifecycle, _watcher })
+            {
+                if (task is null)
+                {
+                    continue;
+                }
+                try
+                {
+                    await task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or HyperVException)
+                {
+                }
+            }
+            _reuse.Delete();
+            _forceRebuild = true;
+            lock (_gate)
+            {
+                _status = new SandboxStatus(SandboxState.Preparing, "VM wird neu aufgebaut");
+            }
+            StatusChanged?.Invoke(Status);
+            Start();
+        }
+        finally
+        {
+            _exchange.Release();
+        }
+    }
 
     public Task WhenSettled => _lifecycle ?? Task.CompletedTask;
 
@@ -365,8 +448,103 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         StatusChanged?.Invoke(new SandboxStatus(state, text));
     }
 
-    /// <summary>Sperrt die Sandbox endgültig für diese Sitzung (Neuaufbau nötig).</summary>
-    public void Lock(string reason) => SetStatus(SandboxState.Locked, "gesperrt: " + reason);
+    /// <summary>Sperrt die Sandbox für diese Sitzung (Neuaufbau nötig). Eine gesperrte VM wird nie wiederverwendet.</summary>
+    public void Lock(string reason)
+    {
+        if (ReuseEnabled)
+        {
+            _reuse.Delete();
+        }
+        SetStatus(SandboxState.Locked, "gesperrt: " + reason);
+    }
+
+    /// <summary>Hält Sitzung, Laufwerk und Fingerabdruck für die nächste Sitzung fest (nur mit reuseVm).</summary>
+    private void SaveReuseState(bool clean)
+    {
+        if (!ReuseEnabled || _currentFingerprint is null || _currentDisk is null)
+        {
+            return;
+        }
+        try
+        {
+            _reuse.Save(new SandboxReuseState(1, _currentFingerprint, _session!.SessionId, "", "", _session.LastSequence, _currentDisk,
+                Volatile.Read(ref _diskCounter), _builtAt, clean), _session.Key);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+        }
+    }
+
+    /// <summary>Setzt eine passende, gespeicherte VM fort. false → neu aufbauen.</summary>
+    private async Task<bool> TryResumeAsync(CancellationToken ct)
+    {
+        var loaded = _reuse.Load();
+        if (loaded is not { } l || !l.State.Clean || l.State.Fingerprint != _currentFingerprint || l.State.SessionId != _session!.SessionId)
+        {
+            return false;
+        }
+        var info = await _host.GetVmInfoAsync(ct).ConfigureAwait(false);
+        if (!info.Exists || info.NetworkAdapters != 0)
+        {
+            return false;
+        }
+        SetStatus(SandboxState.WaitingForGuest, "vorhandene VM wird fortgesetzt (Stand passt)");
+        // Ab jetzt gilt die VM als in Benutzung: stürzt das Programm ab, wird beim nächsten Start neu aufgebaut.
+        _reuse.Save(l.State with { Clean = false }, l.Key);
+        _currentDisk = l.State.CurrentDisk;
+        Volatile.Write(ref _diskCounter, l.State.DiskCounter);
+        _builtAt = l.State.BuiltAt;
+        Directory.CreateDirectory(WorkDirectory);
+        var started = await _host.SetVmStateAsync("Start", ct).ConfigureAwait(false);
+        if (started.NetworkAdapters != 0)
+        {
+            Lock($"VM hat {started.NetworkAdapters} Netzwerkkarte(n)");
+            return true;
+        }
+        var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var resumed = false;
+        _watcher = Task.Run(() => _host.WatchSignalsAsync(_signals, p =>
+        {
+            if (resumed)
+            {
+                Lock("Beobachtung der VM: " + GuestReport.Clip(p));
+            }
+        }, watch.Token), watch.Token);
+        async Task<bool> GiveUp(string text)
+        {
+            SetStatus(SandboxState.Preparing, text);
+            await watch.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await _watcher!.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or HyperVException)
+            {
+            }
+            _watcher = null;
+            return false;
+        }
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
+        while (_signals.Heartbeat?.StartsWith("Ok", StringComparison.Ordinal) != true)
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                return await GiveUp($"vorhandene VM antwortet nicht ({_signals.DescribeGuest()}) – wird neu aufgebaut").ConfigureAwait(false);
+            }
+            await Task.Delay(1000, ct).ConfigureAwait(false);
+        }
+        // Frisches, leeres Transfer-Laufwerk; dabei Netzwerkkarten erneut prüfen.
+        var (leftover, nics) = await CollectAsync(ct).ConfigureAwait(false);
+        if (nics != 0)
+        {
+            Lock($"VM hat {nics} Netzwerkkarte(n)");
+            return true;
+        }
+        resumed = true;
+        var note = leftover is null ? "" : " (alte Rückgabe auf dem Transfer-Laufwerk verworfen)";
+        SetStatus(SandboxState.Ready, $"Offline-VM bereit – wiederverwendet (aufgebaut {_builtAt.ToLocalTime():dd.MM. HH:mm}){note}");
+        return true;
+    }
 
     private async Task LifecycleAsync(CancellationToken ct)
     {
@@ -385,8 +563,18 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 return;
             }
 
-            SetStatus(SandboxState.Preparing, "Gastdateien werden zusammengestellt");
             Directory.CreateDirectory(_settings.VmDirectory);
+            if (ReuseEnabled)
+            {
+                _currentFingerprint = _fingerprint!();
+                if (!_forceRebuild && await TryResumeAsync(ct).ConfigureAwait(false))
+                {
+                    return;
+                }
+                _forceRebuild = false;
+                _reuse.Delete();
+            }
+            SetStatus(SandboxState.Preparing, "Gastdateien werden zusammengestellt");
             var guestDir = Path.Combine(WorkDirectory, "guest");
             if (Directory.Exists(WorkDirectory))
             {
@@ -458,6 +646,8 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 return;
             }
             var minutes = (DateTime.UtcNow - started).TotalMinutes;
+            _builtAt = DateTimeOffset.UtcNow;
+            SaveReuseState(clean: false);
             SetStatus(SandboxState.Ready, $"Offline-VM bereit – {text}; Aufbau {minutes:F0} min");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -561,6 +751,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 return new SandboxReply(null, "Keine Antwort der Sandbox (Ergebnis unklar) – Sandbox gesperrt");
             }
             var (message, swapNics) = await CollectAsync(cancellationToken).ConfigureAwait(false);
+            SaveReuseState(clean: false);
             if (swapNics != 0)
             {
                 Lock($"VM hat {swapNics} Netzwerkkarte(n)");
@@ -624,8 +815,30 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 }
             }
         }
-        if (!_settings.KeepVmOnExit)
+        var kept = false;
+        if (ReuseEnabled && Status.IsReady)
         {
+            try
+            {
+                // Zustand speichern (schnelles Fortsetzen beim nächsten Start) und als sauber markieren.
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                var saved = await _host.SetVmStateAsync("Save", cts.Token).ConfigureAwait(false);
+                if (saved.NetworkAdapters == 0)
+                {
+                    SaveReuseState(clean: true);
+                    kept = true;
+                }
+            }
+            catch (Exception ex) when (ex is HyperVException or OperationCanceledException or IOException)
+            {
+            }
+        }
+        if (!kept && !_settings.KeepVmOnExit)
+        {
+            if (ReuseEnabled)
+            {
+                _reuse.Delete();
+            }
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -635,7 +848,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             {
             }
         }
-        SetStatus(SandboxState.Removed, "VM entfernt");
+        SetStatus(SandboxState.Removed, kept ? "VM gespeichert (wird beim nächsten Start fortgesetzt)" : "VM entfernt");
         _shutdown.Dispose();
         _exchange.Dispose();
     }

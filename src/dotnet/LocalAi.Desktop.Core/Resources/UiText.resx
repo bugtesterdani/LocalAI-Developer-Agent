@@ -427,4 +427,15 @@ Liegt eine gültige Lizenz vor? Nur dann registrieren.</value>
   <data name="Event_run.agentCancelled" xml:space="preserve">
     <value>Agent abgebrochen</value>
   </data>
+  <data name="RebuildSandbox" xml:space="preserve">
+    <value>VM neu aufbauen</value>
+  </data>
+  <data name="SandboxRebuildConfirm" xml:space="preserve">
+    <value>Die Sandbox-VM wird verworfen und neu aufgebaut (dauert einige Minuten, Administratorrechte werden angefragt). Ein gerade laufender Auftrag wird vorher abgeschlossen, danach ist bis zum Ende des Aufbaus keine Ausführung möglich.
+
+Jetzt neu aufbauen?</value>
+  </data>
+  <data name="SandboxRebuildInfo" xml:space="preserve">
+    <value>VM wird neu aufgebaut – Fortschritt in der Kopfzeile.</value>
+  </data>
 </root>

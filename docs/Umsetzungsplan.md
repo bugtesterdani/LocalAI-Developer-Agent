@@ -18,7 +18,7 @@ Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.3 · Plan v4 · Sta
 | D8 | Antwortzeit | zweitrangig; UI hängt nie; Live-Ansicht pro Agent |
 | D9 | Transfer | Copy-VMFile Host → VM, Transfer-VHDX VM → Host |
 | D10 | Sammelfreigaben | erlaubt für Lesen/Suchen/Listen/Patches mit exakter Liste; einzelne Dateien abwählbar |
-| D11 | VM-Lebenszyklus | **bei jedem Sitzungsstart Neuinstallation** (DISM + unattend), dann Toolchains; keine Snapshots; VM nie mit NIC; Löschung bei Sitzungsende |
+| D11 | VM-Lebenszyklus | **bei jedem Sitzungsstart Neuinstallation** (DISM + unattend), dann Toolchains; keine Snapshots; VM nie mit NIC; Löschung bei Sitzungsende. **Option `reuseVm` (18.10.2026, auf Wunsch):** eine sauber beendete VM wird gespeichert und beim nächsten Start fortgesetzt, wenn Abbild, Einstellungen, Worker und Toolchains unverändert sind; gesperrte oder abgestürzte Sitzungen werden nie wiederverwendet; Knopf „VM neu aufbauen“ |
 | D12 | Lizenzen | Windows-Gast (Voll- oder Evaluierungsversion), HALCON, Visual Studio Professional: alles vorhanden bzw. Sache des Nutzers |
 | D13 | Sprache | Oberfläche Deutsch, Prompts Englisch |
 

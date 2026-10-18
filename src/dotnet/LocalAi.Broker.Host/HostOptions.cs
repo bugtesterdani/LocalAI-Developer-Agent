@@ -225,6 +225,7 @@ public sealed record HostOptions
             BuildTimeout = TimeSpan.FromMinutes(Int("buildTimeoutMinutes") ?? (int)defaults.BuildTimeout.TotalMinutes),
             ProductKey = Str("productKey"),
             KeepVmOnExit = e.TryGetProperty("keepVmOnExit", out var keep) && keep.ValueKind == JsonValueKind.True,
+            ReuseVm = e.TryGetProperty("reuseVm", out var reuse) && reuse.ValueKind == JsonValueKind.True,
         };
     }
 

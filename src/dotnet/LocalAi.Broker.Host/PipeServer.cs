@@ -40,12 +40,16 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.OrchestratorWait] = [CallerRole.Orchestrator],
         [M.OrchestratorStatus] = [CallerRole.Ui],
         [M.OrchestratorStop] = [CallerRole.Ui],
+        [M.SandboxRebuild] = [CallerRole.Ui],
     };
 
     public const int MaxChatChars = 16_000;
 
     /// <summary>Aktueller Zustand der Offline-VM (nur Betriebsart hyperv).</summary>
     public Func<string?> SandboxStatus { get; init; } = () => null;
+
+    /// <summary>„VM neu aufbauen“ (nur Betriebsart hyperv).</summary>
+    public Func<Task>? RebuildSandbox { get; init; }
 
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
@@ -306,6 +310,13 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 var after = p.TryGetProperty("afterSeq", out var a) ? a.GetInt64() : 0;
                 var timeoutMs = p.TryGetProperty("timeoutMs", out var t) ? Math.Clamp(t.GetInt32(), 0, 30_000) : 10_000;
                 return Node(await Inbox.WaitAsync(after, TimeSpan.FromMilliseconds(timeoutMs), cancellationToken).ConfigureAwait(false));
+            }
+            case M.SandboxRebuild:
+            {
+                var rebuild = RebuildSandbox ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Neuaufbau gibt es nur in der Betriebsart hyperv");
+                broker.PublishInfo("sandbox.status", "VM wird neu aufgebaut (auf Wunsch)");
+                await rebuild().ConfigureAwait(false);
+                return new JsonObject { ["rebuilding"] = true };
             }
             case M.OrchestratorStatus:
                 return Orchestrator.Status();

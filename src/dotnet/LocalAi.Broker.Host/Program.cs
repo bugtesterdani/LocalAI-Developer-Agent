@@ -84,6 +84,7 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
     Inbox = inbox,
     Orchestrator = orchestrator,
     SandboxStatus = () => vm?.Status.Text,
+    RebuildSandbox = vm is null ? null : vm.RebuildAsync,
     Toolchains = toolchains,
 };
 if (vm is not null)
@@ -196,8 +197,9 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
             var project = loadedProject!;
             var registry = new SnapshotRegistry();
             var context = new ProjectPolicyContext(project, registry);
-            var session = new SandboxSession(sessionId);
             var settings = options.HyperV ?? throw new InvalidDataException("sandbox.hyperv fehlt in config/localai.json");
+            // reuseVm: Sitzung der zuletzt sauber beendeten VM übernehmen (Schlüssel, Sequenz); sonst neue Sitzung.
+            var session = HyperVSandbox.LoadReusableSession(settings) ?? new SandboxSession(sessionId);
             var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
                 Path.Combine(options.DataDirectory, "hyperv.log"));
             var vm = new HyperVSandbox(settings, host, guestDir => Task.Run(() =>
@@ -205,7 +207,9 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
                 // Toolchains zuerst bereitstellen und gegen die Registrierung prüfen (SEC-19/SEC-24).
                 var staged = toolchains!.Stage(Path.Combine(guestDir, "LocalAi", "toolchain-src"), CancellationToken.None);
                 GuestPayloadBuilder.Build(guestDir, GuestPayloadSources.FromRepository(options.RepoRoot), session.Key, settings.TransferDiskBytes, staged);
-            }), project.Toolchains ?? []);
+            }), project.Toolchains ?? [], session,
+                () => SandboxFingerprint.Compute(settings, GuestPayloadSources.FromRepository(options.RepoRoot), toolchains!.Registrations,
+                    project.Toolchains ?? []));
             var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance);
             return (adapter, context, null, vm);
         }

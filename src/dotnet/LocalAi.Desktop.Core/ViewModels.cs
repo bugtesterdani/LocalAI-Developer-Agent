@@ -25,6 +25,7 @@ public interface IBrokerUiApi
     Task RunCancelAsync(CancellationToken ct);
     Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct);
     Task OrchestratorStopAsync(CancellationToken ct);
+    Task RebuildSandboxAsync(CancellationToken ct);
 }
 
 public sealed record EventLine(string Time, string Text);
@@ -243,6 +244,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         SendChatCommand = new RelayCommand(SendChatAsync, () => CanSendChat);
         CancelRunCommand = new RelayCommand(CancelRunAsync);
         StopOrchestratorCommand = new RelayCommand(StopOrchestratorAsync);
+        RebuildSandboxCommand = new RelayCommand(RebuildSandboxAsync, () => IsHyperV);
         _activityBuffer = new ActivityBuffer(ApplyActivity, post, useTimer: throttle);
     }
 
@@ -254,6 +256,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand SendChatCommand { get; }
     public RelayCommand CancelRunCommand { get; }
     public RelayCommand StopOrchestratorCommand { get; }
+    public RelayCommand RebuildSandboxCommand { get; }
+
+    /// <summary>Betriebsart mit Offline-VM: Knopf „VM neu aufbauen“ sichtbar.</summary>
+    public bool IsHyperV => SandboxMode == "hyperv";
+
+    /// <summary>Rückfrage vor dem Neuaufbau (dauert Minuten). Die Oberfläche setzt hier einen Dialog ein.</summary>
+    public Func<bool> ConfirmRebuild { get; set; } = () => false;
+
+    private async Task RebuildSandboxAsync()
+    {
+        if (!ConfirmRebuild())
+        {
+            return;
+        }
+        await GuardAsync(async () =>
+        {
+            await _api.RebuildSandboxAsync(_shutdown.Token).ConfigureAwait(false);
+            Post(() => InfoText = UiText.Get("SandboxRebuildInfo"));
+        }).ConfigureAwait(false);
+    }
 
     /// <summary>Für Tests: gepufferte Aktivität sofort anwenden.</summary>
     public ActivityBuffer ActivityBuffer => _activityBuffer;

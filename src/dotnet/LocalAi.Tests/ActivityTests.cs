@@ -294,5 +294,11 @@ public sealed class ActivityTests : IDisposable
         public Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<ActivityEvent>>([]);
         public Task OrchestratorStopAsync(CancellationToken ct) => Task.CompletedTask;
+        public int Rebuilds { get; private set; }
+        public Task RebuildSandboxAsync(CancellationToken ct)
+        {
+            Rebuilds++;
+            return Task.CompletedTask;
+        }
     }
 }

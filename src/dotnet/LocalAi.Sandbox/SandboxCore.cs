@@ -12,15 +12,19 @@ public sealed class SandboxSession
 {
     private long _sequence;
 
-    public SandboxSession(string sessionId, byte[]? key = null)
+    /// <param name="lastSequence">Bei wiederverwendeter VM: zuletzt verwendete Sequenz (der Gast lehnt kleinere ab).</param>
+    public SandboxSession(string sessionId, byte[]? key = null, long lastSequence = 0)
     {
         SessionId = sessionId;
         Key = key ?? RandomNumberGenerator.GetBytes(32);
+        _sequence = lastSequence;
     }
 
     public string SessionId { get; }
 
     public byte[] Key { get; }
+
+    public long LastSequence => Interlocked.Read(ref _sequence);
 
     public long NextSequence() => Interlocked.Increment(ref _sequence);
 }

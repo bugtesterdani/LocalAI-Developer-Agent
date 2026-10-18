@@ -32,6 +32,8 @@ public partial class App : Application
             _viewModel.ConfirmLicense = info => MessageBox.Show(window,
                 UiText.Format("ToolchainLicenseConfirm", info.DisplayName, info.LicenseNote ?? ""),
                 UiText.Get("ToolchainLicenseTitle"), MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+            _viewModel.ConfirmRebuild = () => MessageBox.Show(window, UiText.Get("SandboxRebuildConfirm"), UiText.Get("RebuildSandbox"),
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
             window.DataContext = _viewModel;
             await _viewModel.InitializeAsync();
         }

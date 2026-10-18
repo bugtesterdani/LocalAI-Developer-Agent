@@ -38,6 +38,7 @@ public static class PipeProtocol
         public const string OrchestratorWait = "orchestrator.wait";
         public const string OrchestratorStatus = "orchestrator.status";
         public const string OrchestratorStop = "orchestrator.stop";
+        public const string SandboxRebuild = "sandbox.rebuild";
     }
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)

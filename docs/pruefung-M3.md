@@ -56,7 +56,7 @@ powershell -ExecutionPolicy Bypass -File scripts\test.ps1
 
 | Schritt | Erwartet |
 |---|---|
-| 3/4 C#-Tests | `Passed: 74` – neu `ActivityTests` (Aktivitätsstrom, Journal, Abbruch pro Agent, Agentenansicht mit „hängt?“, gedrosseltes Rendering, Chat, Hänger-Anzeige) |
+| 3/4 C#-Tests | `Passed: 78` – neu `ActivityTests` (Aktivitätsstrom, Journal, Abbruch pro Agent, Agentenansicht mit „hängt?“, gedrosseltes Rendering, Chat, Hänger-Anzeige) |
 | 4/4 Python-Tests | `156 passed`, 1–2 übersprungen – neu `test_orchestrator.py` (Gateway mit simuliertem Ollama, Abbruch, Watchdog, Kontextbudget, Protokoll, DAG, Scheduler, Limits, Kalibrierung, vollständiger Run) und `tests/integration/test_orchestrator_broker.py` (echter Broker + Orchestrator-Prozess, Rechte, Abbruch, SEC-22) |
 
 ## 2. Vorführung ohne Modell (Oberfläche prüfen)
@@ -145,6 +145,28 @@ Hänger:
 - [ ] Nach ca. 30 s: „Orchestrator antwortet nicht · … – hängt?“ und links der Knopf **Orchestrator beenden**.
 - [ ] Oberfläche bleibt bedienbar; offene Freigaben können abgelehnt werden.
 - [ ] **Orchestrator beenden** oder **NOT-AUS** beendet ihn („Orchestrator gestoppt“).
+
+## 7. VM wiederverwenden (Option `reuseVm`)
+
+Auf Wunsch: Wird nur die Software neu gestartet, muss die VM nicht neu aufgebaut werden. In deiner `config\localai.json` unter `sandbox.hyperv`:
+
+```json
+"reuseVm": true
+```
+
+Verhalten:
+- Beim Beenden der Oberfläche wird eine **bereite** VM gespeichert (Hyper-V „Gespeichert“) statt gelöscht. Sitzungsschlüssel und Sequenz liegen in `sandbox-state.json` im VM-Ordner (Schlüssel mit Windows-DPAPI an dein Konto gebunden).
+- Beim nächsten Start wird sie fortgesetzt, wenn der **Fingerabdruck** passt: Windows-Abbild (Pfad, Größe, Datum), VM-Einstellungen, Python-Laufzeit, Worker-Code, Gastskripte und die Registrierungen der Projekt-Toolchains. Änderungen am Orchestrator oder an der Oberfläche zählen nicht.
+- Neu aufgebaut wird, wenn sich etwas davon geändert hat, die VM fehlt, eine Netzwerkkarte hat, nicht innerhalb von 5 Minuten antwortet, oder die letzte Sitzung gesperrt bzw. abgestürzt ist.
+- Knopf **VM neu aufbauen** in der Kopfzeile erzwingt jederzeit einen Neuaufbau (mit Rückfrage).
+
+Sicherheitshinweis: Das weicht bewusst von „Neuinstallation je Sitzung“ (R17) ab. Daten früherer Snapshots bleiben in der VM, und eine während einer Sitzung veränderte VM lebt weiter. Bei Zweifeln deshalb **VM neu aufbauen**.
+
+- [ ] Mit `reuseVm: true` starten, warten bis „bereit“, Oberfläche schließen → in Hyper-V-Manager Zustand „Gespeichert“.
+- [ ] Erneut starten → nach Sekunden „Offline-VM bereit – wiederverwendet (aufgebaut TT.MM. HH:mm)“; Snapshot und Lesen funktionieren.
+- [ ] Toolchain neu registrieren (oder `memoryMB` ändern) → beim nächsten Start Neuaufbau.
+- [ ] **VM neu aufbauen** → Rückfrage, danach Aufbau mit Fortschritt in der Kopfzeile.
+- [ ] Oberfläche während des Aufbaus schließen bzw. Not-Aus mit gesperrter VM → beim nächsten Start Neuaufbau.
 
 ## Fehlersuche
 

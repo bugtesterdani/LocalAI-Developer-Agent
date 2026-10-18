@@ -21,7 +21,8 @@
       "transferDiskMB": 64,
       "buildTimeoutMinutes": 90,
       "productKey": null,
-      "keepVmOnExit": false
+      "keepVmOnExit": false,
+      "reuseVm": false
     }
   },
   "orchestrator": {
