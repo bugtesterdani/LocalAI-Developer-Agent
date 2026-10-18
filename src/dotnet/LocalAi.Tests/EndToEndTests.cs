@@ -23,7 +23,8 @@ public sealed class EndToEndTests(ITestOutputHelper output)
 
         var data = Path.Combine(Path.GetTempPath(), "localai-e2e-" + Guid.NewGuid().ToString("N"));
         Step("Broker wird gestartet");
-        var broker = await BrokerProcess.StartAsync(CancellationToken.None, ["--data", data]);
+        // Betriebsart fest vorgeben: unabhängig davon, was in config/localai.json gerade eingestellt ist (z. B. hyperv).
+        var broker = await BrokerProcess.StartAsync(CancellationToken.None, ["--data", data, "--mode", "dev-local-unsafe"]);
         BrokerConnection? requestsConn = null, eventsConn = null;
         MainViewModel? mainVm = null;
         try
