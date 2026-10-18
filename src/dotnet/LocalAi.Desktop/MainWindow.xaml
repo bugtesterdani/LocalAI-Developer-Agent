@@ -100,80 +100,221 @@
 
         <Grid Margin="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="190" />
+                <ColumnDefinition Width="230" />
                 <ColumnDefinition Width="*" MinWidth="280" />
                 <ColumnDefinition Width="600" />
             </Grid.ColumnDefinitions>
 
-            <!-- Agenten -->
-            <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                <TextBlock Text="{loc:T Agents}" Style="{StaticResource SectionHeader}" />
-                <ItemsControl ItemsSource="{Binding Agents}" Focusable="False">
-                    <ItemsControl.ItemTemplate>
+            <!-- Agenten: Zustand als Text (nicht nur Farbe), Abbruch pro Agent -->
+            <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                <TextBlock DockPanel.Dock="Top" Text="{loc:T Agents}" Style="{StaticResource SectionHeader}" />
+                <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="1" Background="White" Padding="6" Margin="0,8,0,0">
+                    <StackPanel>
+                        <TextBlock Text="{Binding OrchestratorText}" TextWrapping="Wrap" FontSize="11">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#374151" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsOrchestratorProblem}" Value="True">
+                                            <Setter Property="Foreground" Value="#B91C1C" />
+                                            <Setter Property="FontWeight" Value="Bold" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <Button Content="{loc:T StopOrchestrator}" Command="{Binding StopOrchestratorCommand}" Margin="0,6,0,0" Padding="8,2"
+                                Visibility="{Binding IsOrchestratorProblem, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding Agents}" SelectedItem="{Binding SelectedAgent}"
+                         AutomationProperties.Name="{loc:T Agents}" HorizontalContentAlignment="Stretch">
+                    <ListBox.ItemTemplate>
                         <DataTemplate>
                             <DockPanel Margin="0,3">
-                                <TextBlock DockPanel.Dock="Right" Text="{Binding StateText}" Foreground="#374151" />
-                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                <Button DockPanel.Dock="Right" Content="{loc:T CancelAgent}" Command="{Binding CancelCommand}"
+                                        Padding="6,0" Margin="6,0,0,0" VerticalAlignment="Center"
+                                        AutomationProperties.Name="{Binding Name}"
+                                        Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding StateText}" TextTrimming="CharacterEllipsis" ToolTip="{Binding DetailText}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="#374151" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsStalled}" Value="True">
+                                                        <Setter Property="Foreground" Value="#B91C1C" />
+                                                        <Setter Property="FontWeight" Value="Bold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
                             </DockPanel>
                         </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-
-            <!-- Chat/Plan (Platzhalter) und Ereignisse -->
-            <DockPanel Grid.Column="1" Margin="0,0,12,0">
-                <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatAndPlan}" Style="{StaticResource SectionHeader}" />
-                <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatPlaceholder}" TextWrapping="Wrap"
-                           Foreground="#4B5563" Margin="0,0,0,12" />
-
-                <!-- Toolchains: Registrierung als sichtbare, bestätigte Aktion -->
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                    <DockPanel DockPanel.Dock="Top">
-                        <Button DockPanel.Dock="Right" Content="{loc:T ScanToolchains}" Command="{Binding ScanToolchainsCommand}" Padding="8,2" />
-                        <TextBlock Text="{loc:T Toolchains}" Style="{StaticResource SectionHeader}" />
-                    </DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="{loc:T ToolchainsHint}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="11" />
-                    <TextBlock DockPanel.Dock="Top" Text="{Binding ToolchainsEmptyText}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,4,0,0"
-                               Visibility="{Binding ToolchainsEmptyText, Converter={StaticResource EmptyToCollapsed}}" />
-                    <ScrollViewer MaxHeight="240" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Toolchains}" Focusable="False">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderBrush="#E5E7EB" BorderThickness="1" Background="White" Padding="6" Margin="0,4,0,0">
-                                        <DockPanel>
-                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
-                                                <Button Content="{loc:T RegisterToolchain}" Command="{Binding RegisterCommand}" Padding="8,2" Margin="4,0,0,0" />
-                                                <Button Content="{loc:T UnregisterToolchain}" Command="{Binding UnregisterCommand}" Padding="8,2" Margin="4,0,0,0" />
-                                            </StackPanel>
-                                            <StackPanel>
-                                                <TextBlock Text="{Binding TitleText}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                <TextBlock Text="{Binding StatusText}" Foreground="#374151" TextWrapping="Wrap" />
-                                                <TextBox Text="{Binding DetailText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontSize="11" />
-                                                <TextBlock Text="{Binding ProblemsText}" Foreground="#B91C1C" TextWrapping="Wrap"
-                                                           Visibility="{Binding ProblemsText, Converter={StaticResource EmptyToCollapsed}}" />
-                                            </StackPanel>
-                                        </DockPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="{loc:T Events}" Style="{StaticResource SectionHeader}" />
-                <ListView ItemsSource="{Binding EventLog}"
-                          VirtualizingPanel.IsVirtualizing="True"
-                          VirtualizingPanel.VirtualizationMode="Recycling"
-                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListView.ItemTemplate>
-                        <DataTemplate>
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Foreground="#6B7280" Width="64" />
-                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
-                            </DockPanel>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
+                    </ListBox.ItemTemplate>
+                </ListBox>
             </DockPanel>
+
+            <!-- Chat, Live-Aktivität, Ereignisse, Toolchains -->
+            <TabControl Grid.Column="1" Margin="0,0,12,0" SelectedIndex="{Binding SelectedTab}">
+                <TabItem Header="{loc:T TabChat}">
+                    <DockPanel Margin="0,6,0,0">
+                        <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                            <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0">
+                                <Button Content="{loc:T SendChat}" Command="{Binding SendChatCommand}" Padding="14,6" FontWeight="SemiBold" />
+                                <Button Content="{loc:T CancelRun}" Command="{Binding CancelRunCommand}" Padding="14,4" Margin="0,6,0,0" />
+                            </StackPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatHint}" Foreground="#4B5563" FontSize="11" Margin="0,0,0,2" />
+                            <TextBox Text="{Binding ChatInput, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                                     MinHeight="56" MaxHeight="160" VerticalScrollBarVisibility="Auto"
+                                     AutomationProperties.Name="{loc:T ChatHint}">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SendChatCommand}" />
+                                </TextBox.InputBindings>
+                            </TextBox>
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatEmpty}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,0,0,8"
+                                   Visibility="{Binding HasChat, Converter={StaticResource InverseBoolToVis}}" />
+                        <ListBox ItemsSource="{Binding Chat}" loc:AutoScroll.ToEnd="True"
+                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.ScrollUnit="Pixel"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,4">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Sender}" FontWeight="Bold">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="#1F2937" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsUser}" Value="True">
+                                                                <Setter Property="Foreground" Value="#1D4ED8" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Time}" Foreground="#6B7280" Margin="8,0,0,0" />
+                                        </StackPanel>
+                                        <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabActivity}">
+                    <DockPanel Margin="0,6,0,0" DataContext="{Binding SelectedAgent}">
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Content="{loc:T CancelAgent}" Command="{Binding CancelCommand}" Padding="10,2"
+                                    VerticalAlignment="Top" AutomationProperties.Name="{Binding Name}" />
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding StateText}" Margin="12,3,0,0" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <TextBlock Text="{loc:T LabelCurrentTask}" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Text="{Binding TaskText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{loc:T LabelMetrics}" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Text="{Binding MetricText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding DetailText}" Foreground="#4B5563" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Bottom" Text="{loc:T ActivityHint}" Foreground="#6B7280" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="2*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" MinHeight="80" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="{loc:T LabelOutput}" Style="{StaticResource SectionHeader}" />
+                            <TextBox Grid.Row="1" Text="{Binding OutputText, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                                     TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" loc:AutoScroll.ToEnd="True"
+                                     AutomationProperties.Name="{loc:T LabelOutput}" />
+                            <Expander Grid.Row="2" Header="{loc:T LabelThinking}" Margin="0,6,0,0"
+                                      Visibility="{Binding HasThinking, Converter={StaticResource BoolToVis}}">
+                                <TextBox Text="{Binding ThinkingText, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                                         TextWrapping="Wrap" MaxHeight="200" VerticalScrollBarVisibility="Auto" loc:AutoScroll.ToEnd="True"
+                                         Foreground="#4B5563" AutomationProperties.Name="{loc:T LabelThinking}" />
+                            </Expander>
+                            <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="#E5E7EB" Margin="0,6,0,6" />
+                            <TextBlock Grid.Row="4" Text="{loc:T LabelFeed}" Style="{StaticResource SectionHeader}" />
+                            <ListView Grid.Row="5" ItemsSource="{Binding Entries}" loc:AutoScroll.ToEnd="True"
+                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Foreground="#6B7280" Width="60" />
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding Kind}" FontWeight="SemiBold" Width="80" />
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabEvents}">
+                        <ListView ItemsSource="{Binding EventLog}"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Foreground="#6B7280" Width="64" />
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabToolchains}">
+                        <!-- Toolchains: Registrierung als sichtbare, bestätigte Aktion -->
+                        <DockPanel Margin="0,6,0,0">
+                            <DockPanel DockPanel.Dock="Top">
+                                <Button DockPanel.Dock="Right" Content="{loc:T ScanToolchains}" Command="{Binding ScanToolchainsCommand}" Padding="8,2" />
+                                <TextBlock Text="{loc:T Toolchains}" Style="{StaticResource SectionHeader}" />
+                            </DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="{loc:T ToolchainsHint}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="11" />
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding ToolchainsEmptyText}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,4,0,0"
+                                       Visibility="{Binding ToolchainsEmptyText, Converter={StaticResource EmptyToCollapsed}}" />
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Toolchains}" Focusable="False">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="#E5E7EB" BorderThickness="1" Background="White" Padding="6" Margin="0,4,0,0">
+                                                <DockPanel>
+                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                                                        <Button Content="{loc:T RegisterToolchain}" Command="{Binding RegisterCommand}" Padding="8,2" Margin="4,0,0,0" />
+                                                        <Button Content="{loc:T UnregisterToolchain}" Command="{Binding UnregisterCommand}" Padding="8,2" Margin="4,0,0,0" />
+                                                    </StackPanel>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding TitleText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding StatusText}" Foreground="#374151" TextWrapping="Wrap" />
+                                                        <TextBox Text="{Binding DetailText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontSize="11" />
+                                                        <TextBlock Text="{Binding ProblemsText}" Foreground="#B91C1C" TextWrapping="Wrap"
+                                                                   Visibility="{Binding ProblemsText, Converter={StaticResource EmptyToCollapsed}}" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </DockPanel>
+                </TabItem>
+            </TabControl>
 
             <!-- Freigaben -->
             <DockPanel Grid.Column="2">

@@ -20,9 +20,12 @@ public interface IBrokerUiApi
     Task<IReadOnlyList<ToolchainInfo>> ScanToolchainsAsync(CancellationToken ct);
     Task RegisterToolchainAsync(string directory, string digest, CancellationToken ct);
     Task UnregisterToolchainAsync(string name, CancellationToken ct);
+    Task<string> ChatSendAsync(string text, CancellationToken ct);
+    Task AgentCancelAsync(string agent, CancellationToken ct);
+    Task RunCancelAsync(CancellationToken ct);
+    Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct);
+    Task OrchestratorStopAsync(CancellationToken ct);
 }
-
-public sealed record AgentItem(string Name, string StateText);
 
 public sealed record EventLine(string Time, string Text);
 
@@ -210,19 +213,194 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string? _sandboxDetail;
     private string? _toolchainsEmptyText;
     private Task? _eventLoop;
+    private Task? _activityLoop;
+    private readonly IBrokerUiApi? _activityApi;
+    private readonly ActivityBuffer _activityBuffer;
+    private long _lastActivitySeq;
+    private AgentViewModel? _selectedAgent;
+    private string _chatInput = string.Empty;
+    private int _selectedTab;
+    private string _orchestratorText = UiText.Get("OrchestratorIdle");
+    private bool _isOrchestratorProblem;
 
-    public MainViewModel(IBrokerUiApi api, IBrokerUiApi eventsApi, Action<Action> post, string sessionId, string sandboxMode = "test")
+    public MainViewModel(IBrokerUiApi api, IBrokerUiApi eventsApi, Action<Action> post, string sessionId, string sandboxMode = "test",
+        IBrokerUiApi? activityApi = null, bool throttle = true)
     {
         SandboxMode = sandboxMode;
         _api = api;
         _eventsApi = eventsApi;
+        // Eigene Verbindung nötig: zwei lange Abfragen auf einer Verbindung würden sich gegenseitig aufhalten.
+        _activityApi = activityApi;
         _post = post;
         StatusText = UiText.Format("Connected", sessionId[..8]);
-        Agents = new ObservableCollection<AgentItem>(Enum.GetValues<AgentRole>().Select(r => new AgentItem(r.ToString(), UiText.Get("AgentReady"))));
+        Agents = new ObservableCollection<AgentViewModel>(Enum.GetValues<AgentRole>().Select(r => new AgentViewModel(r.ToString(), CancelAgentAsync)));
+        Orchestrator = new AgentViewModel("Orchestrator");
+        _selectedAgent = Agents[0];
         StartFakeRunCommand = new RelayCommand(StartFakeRunAsync, () => !IsStopped);
         EmergencyStopCommand = new RelayCommand(EmergencyStopAsync);
         ReleaseCommand = new RelayCommand(ReleaseAsync, () => IsStopped);
         ScanToolchainsCommand = new RelayCommand(ScanToolchainsAsync);
+        SendChatCommand = new RelayCommand(SendChatAsync, () => CanSendChat);
+        CancelRunCommand = new RelayCommand(CancelRunAsync);
+        StopOrchestratorCommand = new RelayCommand(StopOrchestratorAsync);
+        _activityBuffer = new ActivityBuffer(ApplyActivity, post, useTimer: throttle);
+    }
+
+    // ------------------------------------------------------------------ Chat und Live-Aktivität (M3)
+
+    public ObservableCollection<ChatEntry> Chat { get; } = [];
+    public bool HasChat => Chat.Count > 0;
+    public AgentViewModel Orchestrator { get; }
+    public RelayCommand SendChatCommand { get; }
+    public RelayCommand CancelRunCommand { get; }
+    public RelayCommand StopOrchestratorCommand { get; }
+
+    /// <summary>Für Tests: gepufferte Aktivität sofort anwenden.</summary>
+    public ActivityBuffer ActivityBuffer => _activityBuffer;
+
+    public AgentViewModel? SelectedAgent
+    {
+        get => _selectedAgent;
+        set
+        {
+            if (Set(ref _selectedAgent, value) && value is not null)
+            {
+                SelectedTab = 1;
+            }
+        }
+    }
+
+    /// <summary>0 Chat, 1 Aktivität, 2 Ereignisse, 3 Toolchains.</summary>
+    public int SelectedTab
+    {
+        get => _selectedTab;
+        set => Set(ref _selectedTab, value);
+    }
+
+    public string ChatInput
+    {
+        get => _chatInput;
+        set
+        {
+            if (Set(ref _chatInput, value))
+            {
+                OnPropertyChanged(nameof(CanSendChat));
+                SendChatCommand.Refresh();
+            }
+        }
+    }
+
+    public bool CanSendChat => !IsStopped && !string.IsNullOrWhiteSpace(_chatInput) && _chatInput.Length <= 16_000;
+
+    public string OrchestratorText
+    {
+        get => _orchestratorText;
+        private set => Set(ref _orchestratorText, value);
+    }
+
+    /// <summary>Orchestrator hängt oder ist abgestürzt: Hinweis mit Knopf „Orchestrator beenden“.</summary>
+    public bool IsOrchestratorProblem
+    {
+        get => _isOrchestratorProblem;
+        private set => Set(ref _isOrchestratorProblem, value);
+    }
+
+    private Task SendChatAsync() => GuardAsync(async () =>
+    {
+        string text = string.Empty;
+        Post(() =>
+        {
+            text = ChatInput.Trim();
+            ChatInput = string.Empty;
+        });
+        if (text.Length == 0)
+        {
+            return;
+        }
+        await _api.ChatSendAsync(text, _shutdown.Token).ConfigureAwait(false);
+    });
+
+    private Task CancelAgentAsync(AgentViewModel agent) => GuardAsync(async () =>
+    {
+        await _api.AgentCancelAsync(agent.Name, _shutdown.Token).ConfigureAwait(false);
+        Post(() => InfoText = UiText.Format("AgentCancelledInfo", agent.Name));
+    });
+
+    private Task CancelRunAsync() => GuardAsync(async () =>
+    {
+        await _api.RunCancelAsync(_shutdown.Token).ConfigureAwait(false);
+        Post(() => InfoText = UiText.Get("RunCancelledInfo"));
+    });
+
+    private Task StopOrchestratorAsync() => GuardAsync(async () =>
+    {
+        await _api.OrchestratorStopAsync(_shutdown.Token).ConfigureAwait(false);
+        Post(() => InfoText = UiText.Get("OrchestratorStoppedInfo"));
+    });
+
+    private async Task ActivityLoopAsync()
+    {
+        while (!_shutdown.IsCancellationRequested)
+        {
+            IReadOnlyList<ActivityEvent> events;
+            try
+            {
+                events = await _activityApi!.WaitActivityAsync(_lastActivitySeq, 15_000, _shutdown.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Post(() => ErrorText = UiText.Format("ConnectFailed", ex.Message));
+                try
+                {
+                    await Task.Delay(2000, _shutdown.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                continue;
+            }
+            if (events.Count == 0)
+            {
+                continue;
+            }
+            _lastActivitySeq = events[^1].Seq;
+            _activityBuffer.Enqueue(events);
+        }
+    }
+
+    /// <summary>Wendet einen Stapel Aktivität an (UI-Thread). Texte werden nur einmal pro Stapel veröffentlicht.</summary>
+    internal void ApplyActivity(IReadOnlyList<ActivityEvent> events)
+    {
+        var touched = new HashSet<AgentViewModel>();
+        foreach (var e in events)
+        {
+            var time = ContractTime.Parse(e.At).ToLocalTime().ToString("HH:mm:ss", UiText.Culture);
+            if (e.Kind == ActivityKind.Chat && e.Text is not null)
+            {
+                Chat.Add(new ChatEntry(time, UiText.AgentName(e.Agent), e.Text, e.Agent == "User"));
+                while (Chat.Count > 1_000)
+                {
+                    Chat.RemoveAt(0);
+                }
+            }
+            var agent = e.Agent == "Orchestrator" ? Orchestrator : Agents.FirstOrDefault(a => a.Name == e.Agent);
+            if (agent is null)
+            {
+                continue;
+            }
+            agent.Apply(e, time);
+            touched.Add(agent);
+        }
+        foreach (var agent in touched)
+        {
+            agent.Publish();
+        }
+        OnPropertyChanged(nameof(HasChat));
     }
 
     public ObservableCollection<ToolchainItemViewModel> Toolchains { get; } = [];
@@ -272,7 +450,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await ScanToolchainsAsync().ConfigureAwait(false);
     }
 
-    public ObservableCollection<AgentItem> Agents { get; }
+    public ObservableCollection<AgentViewModel> Agents { get; }
     public ObservableCollection<ApprovalCardViewModel> Approvals { get; } = [];
     public ObservableCollection<EventLine> EventLog { get; } = [];
 
@@ -351,6 +529,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 StartFakeRunCommand.Refresh();
                 ReleaseCommand.Refresh();
+                OnPropertyChanged(nameof(CanSendChat));
+                SendChatCommand.Refresh();
                 foreach (var toolchain in Toolchains)
                 {
                     toolchain.RefreshCommands();
@@ -381,6 +561,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }).ConfigureAwait(false);
         await RefreshPendingAsync().ConfigureAwait(false);
         _eventLoop = Task.Run(EventLoopAsync);
+        if (_activityApi is not null)
+        {
+            _activityLoop = Task.Run(ActivityLoopAsync);
+        }
         // Hashes großer Toolchains zu berechnen dauert: im Hintergrund, die Oberfläche ist sofort bedienbar.
         _ = Task.Run(ScanToolchainsAsync);
     }
@@ -508,6 +692,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 IsStopped = true;
             }
+            else if (e.Type.StartsWith("orchestrator.", StringComparison.Ordinal) && e.Message is not null)
+            {
+                OrchestratorText = e.Message;
+                IsOrchestratorProblem = e.Type is "orchestrator.unresponsive"
+                    || (e.Type == "orchestrator.exited" && e.Message.Contains("unerwartet", StringComparison.Ordinal));
+            }
         }
         while (EventLog.Count > 500)
         {
@@ -563,12 +753,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _shutdown.CancelAsync().ConfigureAwait(false);
-        if (_eventLoop is not null)
+        _activityBuffer.Dispose();
+        foreach (var loop in new[] { _eventLoop, _activityLoop })
         {
+            if (loop is null)
+            {
+                continue;
+            }
             try
             {
                 // Begrenzt warten: eine hängende Pipe-Leseoperation darf das Beenden nicht blockieren.
-                await _eventLoop.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                await loop.WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
             {

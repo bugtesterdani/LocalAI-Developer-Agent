@@ -230,5 +230,11 @@ public sealed class ToolchainTests : IDisposable
             return Task.CompletedTask;
         }
         public Task UnregisterToolchainAsync(string name, CancellationToken ct) => Task.CompletedTask;
+        public Task<string> ChatSendAsync(string text, CancellationToken ct) => Task.FromResult("run");
+        public Task AgentCancelAsync(string agent, CancellationToken ct) => Task.CompletedTask;
+        public Task RunCancelAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ActivityEvent>>([]);
+        public Task OrchestratorStopAsync(CancellationToken ct) => Task.CompletedTask;
     }
 }

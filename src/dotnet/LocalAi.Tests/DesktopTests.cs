@@ -14,7 +14,7 @@ namespace LocalAi.Tests;
 public sealed partial class DesktopTests
 {
     private static readonly Type[] ViewModelTypes =
-        [typeof(MainViewModel), typeof(ApprovalCardViewModel), typeof(TargetItemViewModel), typeof(AgentItem), typeof(EventLine), typeof(ToolchainItemViewModel)];
+        [typeof(MainViewModel), typeof(ApprovalCardViewModel), typeof(TargetItemViewModel), typeof(AgentViewModel), typeof(ChatEntry), typeof(FeedEntry), typeof(EventLine), typeof(ToolchainItemViewModel)];
 
     private static string XamlPath() =>
         Path.Combine(ContractTests.RepoRoot(), "src", "dotnet", "LocalAi.Desktop", "MainWindow.xaml");
@@ -159,5 +159,21 @@ public sealed partial class DesktopTests
             return Task.CompletedTask;
         }
         public Task UnregisterToolchainAsync(string name, CancellationToken ct) => Task.CompletedTask;
+        public List<string> Sent { get; } = [];
+        public List<string> Cancelled { get; } = [];
+        public Task<string> ChatSendAsync(string text, CancellationToken ct)
+        {
+            Sent.Add(text);
+            return Task.FromResult("run-1");
+        }
+        public Task AgentCancelAsync(string agent, CancellationToken ct)
+        {
+            Cancelled.Add(agent);
+            return Task.CompletedTask;
+        }
+        public Task RunCancelAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ActivityEvent>>([]);
+        public Task OrchestratorStopAsync(CancellationToken ct) => Task.CompletedTask;
     }
 }

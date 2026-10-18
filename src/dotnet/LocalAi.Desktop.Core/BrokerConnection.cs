@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LocalAi.Contracts;
+using ActivityEvent = LocalAi.Contracts.ActivityEvent;
 using M = LocalAi.Contracts.PipeProtocol.Methods;
 
 namespace LocalAi.Desktop.Core;
@@ -201,6 +202,19 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
 
     public async Task<IReadOnlyList<FolderGrant>> GrantsAsync(CancellationToken ct) =>
         ContractJson.Deserialize<List<FolderGrant>>(await CallAsync(M.ProjectGrants, null, ct).ConfigureAwait(false));
+
+    public async Task<string> ChatSendAsync(string text, CancellationToken ct) =>
+        (await CallAsync(M.ChatSend, new { text }, ct).ConfigureAwait(false)).GetProperty("runId").GetString() ?? "";
+
+    public Task AgentCancelAsync(string agent, CancellationToken ct) => CallAsync(M.AgentCancel, new { agent }, ct);
+
+    public Task RunCancelAsync(CancellationToken ct) => CallAsync(M.RunCancel, null, ct);
+
+    public async Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct) =>
+        ContractJson.Deserialize<List<ActivityEvent>>(await CallAsync(M.ActivityWait,
+            new Dictionary<string, long> { ["afterSeq"] = afterSeq, ["timeoutMs"] = timeoutMs }, ct).ConfigureAwait(false));
+
+    public Task OrchestratorStopAsync(CancellationToken ct) => CallAsync(M.OrchestratorStop, null, ct);
 
     public async ValueTask DisposeAsync()
     {

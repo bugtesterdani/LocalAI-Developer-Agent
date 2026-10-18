@@ -44,7 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         return 4
     if args.ollama:
         config = dataclasses.replace(config, ollama_url=args.ollama)
-    print(f"Orchestrator: Python {sys.version.split()[0]}, Run {run_id}, Modelle aus {path}, Ollama {config.ollama_url}",
+    print(f"Orchestrator: PID {os.getpid()}, Python {sys.version.split()[0]}, Run {run_id}, Modelle aus {path}, "
+          f"Ollama {config.ollama_url}",
           flush=True)
     client = BrokerClient(pipe, token)
     inbox = BrokerClient(pipe, token, timeout=60)

@@ -8,6 +8,7 @@ public partial class App : Application
     private BrokerProcess? _broker;
     private BrokerConnection? _requests;
     private BrokerConnection? _events;
+    private BrokerConnection? _activity;
     private MainViewModel? _viewModel;
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -25,7 +26,9 @@ public partial class App : Application
             // Zwei Verbindungen: eine für Anfragen, eine für das Warten auf Ereignisse.
             _requests = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
             _events = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
-            _viewModel = new MainViewModel(_requests, _events, action => Dispatcher.BeginInvoke(action), hs.SessionId, hs.Mode);
+            // Dritte Verbindung nur für die Live-Aktivität: lange Abfragen blockieren weder Ereignisse noch Befehle.
+            _activity = await BrokerConnection.ConnectAsync(hs.Pipe, hs.UiToken, CancellationToken.None);
+            _viewModel = new MainViewModel(_requests, _events, action => Dispatcher.BeginInvoke(action), hs.SessionId, hs.Mode, _activity);
             _viewModel.ConfirmLicense = info => MessageBox.Show(window,
                 UiText.Format("ToolchainLicenseConfirm", info.DisplayName, info.LicenseNote ?? ""),
                 UiText.Get("ToolchainLicenseTitle"), MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
@@ -47,6 +50,10 @@ public partial class App : Application
         if (_events is not null)
         {
             await _events.DisposeAsync();
+        }
+        if (_activity is not null)
+        {
+            await _activity.DisposeAsync();
         }
         if (_requests is not null)
         {

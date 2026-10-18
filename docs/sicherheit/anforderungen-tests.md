@@ -1,4 +1,4 @@
-# Anforderungen → Tests (Stand M2c)
+# Anforderungen → Tests (Stand M3)
 
 Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. C#-Tests (xUnit, Trait `Pruefung`) laufen im selben Prozess mit einstellbarer Uhr, Python-Integrationstests gegen den echten Broker-Prozess über die Named Pipe.
 
@@ -31,6 +31,15 @@ Jede Sicherheitsanforderung ist mindestens einem automatischen Test zugeordnet. 
 | SEC-19 | veränderte, hinzugefügte oder fehlende Toolchain-Datei, Verknüpfungen → nicht registrierbar bzw. Aufbau abgebrochen; Gast prüft die Hashes ein zweites Mal | `ToolchainTests.Registrierung_haelt_Hashes_*`, `Erwartete_Hashes_*`, `Verknuepfungen_*` | `test_veraenderter_ordner_wird_nicht_registriert`; Gast: `Test-SandboxScripts.ps1` |
 | SEC-20 (Manifest) | nur deklarierte Binaries und Aktionen, Platzhalter nur als ganzes Argument, keine Steuerzeichen, gesperrte Umgebungsvariablen | `ToolchainTests.Manifeste_ohne_freie_Kommandos` | `test_ungueltiges_manifest_zeigt_probleme` |
 | SEC-24 (Toolchains) | nicht registrierte Projekt-Toolchain oder fehlende/fehlgeschlagene Toolchain im Bericht → gesperrt | `ToolchainTests.Projekt_Toolchain_ohne_Registrierung_*`, `Bericht_prueft_alle_Projekt_Toolchains` | echte VM: `test_hyperv_abnahme.py` mit `LOCALAI_HYPERV_TOOLCHAINS` |
+| SEC-16 / AC09 | Standardmodell zehnmal mit Zielkontext ohne OOM; VRAM-Reserve ≥ 2 GiB; Messwerte gespeichert; Profil nur nach stabiler Kalibrierung für dieses Modell (Digest) und diese Hardware | – | `test_orchestrator.py::test_kalibrierung_*`, `test_profilwahl_*`, `test_unkalibriertes_profil_*`; echt: `localai.orchestrator.calibrate` auf dem Rechner mit Ollama |
+| SEC-22 | Orchestrator abgestürzt: offene Vorschläge des Runs ungültig, Entscheidung unmöglich; hängt: Hinweis nach Zeitlimit, Beenden möglich; Not-Aus beendet ihn; Oberfläche bleibt bedienbar | `ActivityTests.Abbruch_eines_Agenten_*`, `Haengender_Orchestrator_wird_angezeigt_*` | `test_orchestrator_broker.py::test_sec22_*` |
+| R02 / SEC-17 (M3) | nur der UI-Token chattet, bricht ab, liest Aktivität; nur der Orchestrator meldet Aktivität, nur für seinen Run, nie als „User“; Broker setzt Reihenfolge und Zeit | `ActivityTests.Hub_*` | `test_rechte_der_neuen_methoden` |
+| AC02 / R03–R04 | fünf Rollen ab Runstart sichtbar; unabhängige Aufgaben überlappen; gleiche Schreibpfade serialisiert, unbekannte exklusiv; ein GPU-Request gleichzeitig, faire Vergabe | – | `test_orchestrator.py::test_run_mit_fuenf_rollen_*`, `test_schreibmengen_*`, `test_gpu_slot_*`; `test_chat_startet_run_mit_fuenf_rollen` |
+| AC13 / R14 | Live-Feed je Agent, gedrosseltes Rendering, Watchdog „hängt?“, Abbruch pro Agent und Run | `ActivityTests.Agentenansicht_*`, `Puffer_*`, `Chat_senden_*` | `test_abbruch_beendet_generierung_sofort`, `test_watchdog_*`, `test_abbruch_eines_agenten_*`, `test_abbruch_pro_agent_*` |
+| §5 Limits | 20 Modellschritte, 3 Reparaturversuche, 30 min aktive Zeit (Freigabewartezeit zählt nicht, keine automatische Fortsetzung) | – | `test_schrittlimit_*`, `test_aktive_laufzeit_*`, `test_run_mit_fuenf_rollen_*` |
+| AC15 / R05 (Agenten) | nur ausgeführte, nicht abgewählte Inhalte gelangen in den Kontext; abgelehnte nie; Evidenz als untrusted markiert und nicht ausbrechbar | – | `test_abgelehnter_lesezugriff_*`, `test_evidenz_kann_marker_nicht_schliessen` |
+| §9 Kontext | Aufteilung 12,5/12,5/44/25/6 %, Regeln nie gekürzt, Kürzungen sichtbar, Kontext pro Request, kein `latest`, nur Loopback-Ollama | – | `test_kontextaufteilung_*`, `test_regeln_*`, `test_modelltags_*`, `test_nur_loopback_erlaubt` |
+| AC16 (Prompts) | Prompts englisch, versioniert, im Regelbudget; Chat deutsch | – | `test_prompts_versioniert_*` |
 | E2E | Broker-Prozess + Worker (dev-local) + Python-Fake-Agent + Oberflächenlogik: Snapshot, Auflisten, Lesen mit Abwahl, Ablehnung | `EndToEndTests.*` | – |
 
-Noch nicht abgedeckt (folgt): SEC-07/-13/-20 (Aufrufe) und SEC-21 mit Toolchain-Aktionen (M4); die Hyper-V-Prüfungen laufen mit echter VM nur auf PC 123 (`test_hyperv_abnahme.py`), SEC-08 bis -11/-14 Web (M6), SEC-16/-22 Modell und Orchestrator (M3), SEC-20 Toolchains (M4).
+Noch nicht abgedeckt (folgt): SEC-07/-13/-20 (Aufrufe) und SEC-21 mit Toolchain-Aktionen (M4); die Hyper-V-Prüfungen laufen mit echter VM nur auf PC 123 (`test_hyperv_abnahme.py`), SEC-08 bis -11/-14 Web (M6), SEC-20 Toolchains (M4). SEC-16 mit echtem Modell und die Abnahme der fünf Rollen laufen auf dem Rechner mit Ollama (`docs/pruefung-M3.md`).

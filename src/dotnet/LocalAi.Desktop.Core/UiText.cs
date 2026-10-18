@@ -21,5 +21,10 @@ public static class UiText
 
     public static string State(ProposalState state) => Get($"State_{state}");
 
+    public static string AgentState(AgentState state) => Get($"AgentState_{state}");
+
+    /// <summary>Anzeigename eines Absenders im Chat (Rollennamen bleiben, Nutzer/Orchestrator deutsch).</summary>
+    public static string AgentName(string agent) => Exists($"Sender_{agent}") ? Get($"Sender_{agent}") : agent;
+
     public static string Event(string type) => Exists($"Event_{type}") ? Get($"Event_{type}") : type;
 }

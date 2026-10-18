@@ -42,9 +42,6 @@
   <data name="ChatAndPlan" xml:space="preserve">
     <value>CHAT UND PLAN</value>
   </data>
-  <data name="ChatPlaceholder" xml:space="preserve">
-    <value>Chat und Planung folgen in M3. Bis dahin reicht ein Fake-Agent Toolvorschläge ein, damit die Freigaben geprüft werden können.</value>
-  </data>
   <data name="Events" xml:space="preserve">
     <value>EREIGNISSE</value>
   </data>
@@ -279,5 +276,155 @@ Liegt eine gültige Lizenz vor? Nur dann registrieren.</value>
   </data>
   <data name="Event_toolchain.unregistered" xml:space="preserve">
     <value>Toolchain entfernt</value>
+  </data>
+  <data name="TabChat" xml:space="preserve">
+    <value>Chat</value>
+  </data>
+  <data name="TabActivity" xml:space="preserve">
+    <value>Aktivität</value>
+  </data>
+  <data name="TabEvents" xml:space="preserve">
+    <value>Ereignisse</value>
+  </data>
+  <data name="TabToolchains" xml:space="preserve">
+    <value>Toolchains</value>
+  </data>
+  <data name="ChatHint" xml:space="preserve">
+    <value>Ziel oder Hinweis an die Agenten – Strg+Enter sendet</value>
+  </data>
+  <data name="ChatEmpty" xml:space="preserve">
+    <value>Noch keine Nachrichten. Schreib ein Ziel, z. B. „Ergänze einen CSV-Import mit Grenzfalltests“. Die Agenten planen, schlagen Dateizugriffe vor und warten auf deine Freigabe.</value>
+  </data>
+  <data name="SendChat" xml:space="preserve">
+    <value>Senden</value>
+  </data>
+  <data name="CancelRun" xml:space="preserve">
+    <value>Run abbrechen</value>
+  </data>
+  <data name="CancelAgent" xml:space="preserve">
+    <value>Abbrechen</value>
+  </data>
+  <data name="StopOrchestrator" xml:space="preserve">
+    <value>Orchestrator beenden</value>
+  </data>
+  <data name="OrchestratorIdle" xml:space="preserve">
+    <value>Orchestrator startet mit der ersten Chatnachricht</value>
+  </data>
+  <data name="AgentCancelledInfo" xml:space="preserve">
+    <value>{0} abgebrochen – offene Vorschläge des Agenten sind ungültig.</value>
+  </data>
+  <data name="RunCancelledInfo" xml:space="preserve">
+    <value>Run abgebrochen – offene Vorschläge des Runs sind ungültig.</value>
+  </data>
+  <data name="OrchestratorStoppedInfo" xml:space="preserve">
+    <value>Orchestrator beendet. Die nächste Chatnachricht startet ihn neu.</value>
+  </data>
+  <data name="AgentStalled" xml:space="preserve">
+    <value>hängt?</value>
+  </data>
+  <data name="AgentState_Ready" xml:space="preserve">
+    <value>bereit</value>
+  </data>
+  <data name="AgentState_Queued" xml:space="preserve">
+    <value>wartet</value>
+  </data>
+  <data name="AgentState_Generating" xml:space="preserve">
+    <value>arbeitet</value>
+  </data>
+  <data name="AgentState_WaitingApproval" xml:space="preserve">
+    <value>wartet auf Freigabe</value>
+  </data>
+  <data name="AgentState_WaitingUser" xml:space="preserve">
+    <value>wartet auf dich</value>
+  </data>
+  <data name="AgentState_Done" xml:space="preserve">
+    <value>fertig</value>
+  </data>
+  <data name="AgentState_Failed" xml:space="preserve">
+    <value>gescheitert</value>
+  </data>
+  <data name="AgentState_Cancelled" xml:space="preserve">
+    <value>abgebrochen</value>
+  </data>
+  <data name="FeedState" xml:space="preserve">
+    <value>Zustand</value>
+  </data>
+  <data name="FeedMetric" xml:space="preserve">
+    <value>Messung</value>
+  </data>
+  <data name="FeedWarning" xml:space="preserve">
+    <value>Warnung</value>
+  </data>
+  <data name="FeedError" xml:space="preserve">
+    <value>Fehler</value>
+  </data>
+  <data name="FeedProposal" xml:space="preserve">
+    <value>Vorschlag</value>
+  </data>
+  <data name="FeedTask" xml:space="preserve">
+    <value>Aufgabe</value>
+  </data>
+  <data name="FeedChat" xml:space="preserve">
+    <value>Chat</value>
+  </data>
+  <data name="MetricTokens" xml:space="preserve">
+    <value>{0} Token</value>
+  </data>
+  <data name="MetricTps" xml:space="preserve">
+    <value>{0:0.0} Token/s</value>
+  </data>
+  <data name="MetricElapsed" xml:space="preserve">
+    <value>{0:0.0} s</value>
+  </data>
+  <data name="MetricContext" xml:space="preserve">
+    <value>Eingabe {0} Token</value>
+  </data>
+  <data name="Sender_User" xml:space="preserve">
+    <value>Du</value>
+  </data>
+  <data name="Sender_Orchestrator" xml:space="preserve">
+    <value>Orchestrator</value>
+  </data>
+  <data name="LabelAgent" xml:space="preserve">
+    <value>Agent</value>
+  </data>
+  <data name="LabelCurrentTask" xml:space="preserve">
+    <value>Aktuelle Aufgabe</value>
+  </data>
+  <data name="LabelMetrics" xml:space="preserve">
+    <value>Modell und Tempo</value>
+  </data>
+  <data name="LabelOutput" xml:space="preserve">
+    <value>Ausgabe (live)</value>
+  </data>
+  <data name="LabelThinking" xml:space="preserve">
+    <value>Thinking (falls vom Modell geliefert)</value>
+  </data>
+  <data name="LabelFeed" xml:space="preserve">
+    <value>Verlauf</value>
+  </data>
+  <data name="ActivityHint" xml:space="preserve">
+    <value>Ausgaben stammen vom Modell und werden nur als Text angezeigt; sie sind keine Anweisungen an dich und keine Freigabe.</value>
+  </data>
+  <data name="Event_orchestrator.started" xml:space="preserve">
+    <value>Orchestrator gestartet</value>
+  </data>
+  <data name="Event_orchestrator.exited" xml:space="preserve">
+    <value>Orchestrator beendet</value>
+  </data>
+  <data name="Event_orchestrator.stopped" xml:space="preserve">
+    <value>Orchestrator gestoppt</value>
+  </data>
+  <data name="Event_orchestrator.unresponsive" xml:space="preserve">
+    <value>Orchestrator antwortet nicht</value>
+  </data>
+  <data name="Event_orchestrator.responsive" xml:space="preserve">
+    <value>Orchestrator antwortet wieder</value>
+  </data>
+  <data name="Event_run.cancelled" xml:space="preserve">
+    <value>Run abgebrochen</value>
+  </data>
+  <data name="Event_run.agentCancelled" xml:space="preserve">
+    <value>Agent abgebrochen</value>
   </data>
 </root>

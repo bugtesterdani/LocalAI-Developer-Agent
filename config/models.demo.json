@@ -1,0 +1,8 @@
+{
+  "_hinweis": "Nur für die Vorführung ohne echtes Modell: als config/models.local.json kopieren und den simulierten Ollama-Server auf Port 11435 starten (docs/pruefung-M3.md, Abschnitt 2). Danach models.local.json wieder löschen.",
+  "ollama": { "url": "http://127.0.0.1:11435", "stallWarningSeconds": 45, "stallAbortSeconds": 900 },
+  "requireCalibration": false,
+  "profiles": [
+    { "name": "standard", "model": "qwen2.5-coder:14b", "contextTokens": 8192, "maxOutputTokens": 2048 }
+  ]
+}
