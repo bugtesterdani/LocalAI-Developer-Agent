@@ -33,6 +33,7 @@ from localai.orchestrator.models import (
 )
 
 GIB = hardware.GIB
+MAX_OFFLOAD = 0.05  # mehr CPU-Anteil nur in ausdrücklichen Offload-Profilen
 FILLER_UNITS = [
     "public static int Add{n}(int a, int b) => a + b + {n};",
     "def handle_{n}(items: list[int]) -> int:\n    return sum(i * {n} for i in items if i > 0)",
@@ -154,8 +155,11 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
             reasons.append(f"VRAM nicht messbar ({where}) – mit --ohne-vram-messung bewusst akzeptieren")
     elif reserve < min_reserve_gib * GIB:
         reasons.append(f"VRAM-Reserve {reserve / GIB:.1f} GiB < {min_reserve_gib:g} GiB")
-    if offload and offload > 0.05 and not target.offload:
-        log(f"    Hinweis: {offload:.0%} des Modells laufen auf der CPU (Offload) – langsamer, aber zulässig")
+    if offload is not None and offload > MAX_OFFLOAD and not target.offload:
+        # Modell passt nicht in den Grafikspeicher: dann ist auch keine VRAM-Reserve übrig (§9). Bewusst zulassen nur
+        # über ein Profil mit "offload": true.
+        reasons.append(f"{offload:.0%} des Modells auf der CPU – passt nicht in den Grafikspeicher "
+                       "(kleineres Modell oder Profil mit \"offload\": true)")
     stable = not reasons
     return Measurement(
         model=target.model, digest=digest, context_tokens=target.context_tokens, hardware=hw.fingerprint(), runs=runs,

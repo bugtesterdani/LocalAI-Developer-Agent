@@ -293,6 +293,9 @@ def choose_profiles(config: ModelsConfig, store: CalibrationStore, installed: di
                     stale.append("Hardware hat sich seit der Kalibrierung geändert")
                 if not m.stable:
                     stale.append(f"nicht stabil ({m.reason})")
+                elif m.offload_fraction is not None and m.offload_fraction > 0.05 and not profile.offload:
+                    # Auch für ältere Messungen: ohne Offload-Profil muss das Modell in den Grafikspeicher passen.
+                    stale.append(f"{m.offload_fraction:.0%} des Modells auf der CPU – passt nicht in den Grafikspeicher")
                 if stale and config.require_calibration:
                     problems.append(f"{profile.label()}: " + "; ".join(stale))
                     continue

@@ -115,7 +115,7 @@ Pro Lauf: Eingabetoken, Token/s, Zeit bis zur ersten Ausgabe, freier VRAM. Am En
 - [ ] `erweitert` (16K) und `gross` (32K): Ergebnis notieren. Freigegebene größere Profile werden automatisch bevorzugt (Reihenfolge in `roles` in `config/models.json`).
 - [ ] Bericht `kalibrierung-*.md` bitte an Claude schicken (Messwerte für die Doku).
 
-Gesperrt bleibt ein Profil bei Speichermangel, Fehlern, weniger als 10 Läufen, VRAM-Reserve < 2 GiB oder wenn VRAM nicht messbar ist (ohne `nvidia-smi`; bewusst übergehen mit `--ohne-vram-messung`). Wird ein Modell neu gezogen (anderer Digest) oder ändert sich die Hardware, ist eine neue Kalibrierung nötig.
+Gesperrt bleibt ein Profil, wenn mehr als 5 % des Modells auf der CPU laufen (passt nicht in den Grafikspeicher – dann ist auch keine Reserve übrig; bewusst zulassen nur über ein Profil mit `"offload": true`), bei Speichermangel, Fehlern, weniger als 10 Läufen, VRAM-Reserve < 2 GiB oder wenn VRAM nicht messbar ist (ohne `nvidia-smi`; bewusst übergehen mit `--ohne-vram-messung`). Wird ein Modell neu gezogen (anderer Digest) oder ändert sich die Hardware, ist eine neue Kalibrierung nötig.
 
 ## 4. Abnahme: fünf Rollen mit echtem Modell
 

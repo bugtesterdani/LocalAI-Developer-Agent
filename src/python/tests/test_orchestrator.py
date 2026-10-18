@@ -411,6 +411,30 @@ def test_kalibrierung_misst_und_gibt_nur_mit_reserve_frei(ollama):
     assert oom.oom and not oom.stable and "Speichermangel" in oom.reason
 
 
+def test_cpu_offload_sperrt_normale_profile(ollama, tmp_path):
+    ollama.vram_fraction = 0.5
+    gw = OllamaGateway(ollama.url)
+    hw = hardware.Hardware(0, None, None, [], "entfernt", remote_host="192.168.178.39:11434")
+    target = calibrate.Target("standard", "qwen2.5-coder:14b", 4096, None, False)
+    m = calibrate.measure(gw, target, 10, 32, 2.0, hw, "d", True, sampler_factory=calibrate.NoSampler, log=lambda *_: None)
+    assert not m.stable and m.offload_fraction == pytest.approx(0.5) and "CPU" in m.reason
+    offload = calibrate.measure(gw, calibrate.Target("offload", "qwen2.5-coder:14b", 4096, None, True), 10, 32, 2.0, hw, "d",
+                                True, sampler_factory=calibrate.NoSampler, log=lambda *_: None)
+    assert offload.stable
+    # Ältere, als stabil gespeicherte Messung mit 50 % Offload wird bei der Profilwahl trotzdem übergangen.
+    config = ModelsConfig.parse({"profiles": [
+        {"name": "standard", "model": "qwen2.5-coder:14b", "contextTokens": 8192, "maxOutputTokens": 2048},
+        {"name": "leicht", "model": "qwen2.5-coder:7b", "contextTokens": 8192, "maxOutputTokens": 2048}],
+        "roles": {r: ["standard", "leicht"] for r in ("Planner", "Coder", "Tester", "Debugger", "Reviewer")}})
+    store = CalibrationStore(tmp_path / "c.json")
+    old = _measurement()
+    old.offload_fraction = 0.502
+    store.put(old)
+    store.put(_measurement(model="qwen2.5-coder:7b", digest="d7"))
+    choice = choose_profiles(config, store, {"qwen2.5-coder:14b": "d1", "qwen2.5-coder:7b": "d7"}, "hw1")["Coder"]
+    assert choice.profile.name == "leicht" and "CPU" in choice.problems[0]
+
+
 def test_kalibrierung_ohne_vram_messung_nur_ausdruecklich(ollama):
     gw = OllamaGateway(ollama.url)
     hw = hardware.Hardware(8, None, None, [], "keine")
