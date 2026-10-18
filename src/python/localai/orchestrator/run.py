@@ -135,6 +135,11 @@ def check_verify(entries: list[dict[str, Any]], toolchains: list[dict[str, Any]]
             problems.append(f"{entry.get('toolchain')} {action}: nicht verfügbar")
             continue
         declared = (tc["actions"][action].get("parameters") or {})
+        params = dict(params)
+        for key, spec in declared.items():
+            # Fehlende Auswahlwerte (z. B. configuration) mit dem ersten erlaubten Wert ergänzen statt zu verwerfen.
+            if key not in params and spec.get("type") == "Choice" and spec.get("values"):
+                params[key] = spec["values"][0]
         if set(params) != set(declared):
             problems.append(f"{tc['name']} {action}: Parameter {sorted(params)} statt {sorted(declared)}")
             continue
@@ -144,6 +149,30 @@ def check_verify(entries: list[dict[str, Any]], toolchains: list[dict[str, Any]]
             continue
         steps.append(VerifyStep(tc["name"], action, dict(params)))
     return steps[:4], problems
+
+
+_WANTS_TESTS = re.compile(
+    r"\b(mit|inkl\.?|inklusive|samt|plus|und|with|and)\s+(passenden\s+|neuen\s+)?(unit-?)?tests?\b"
+    r"|\btests?\s+(schreiben|hinzufügen|ergänzen|anlegen|erstellen)|\btestf[aä]ll|\bunit-?tests?\b"
+    r"|\b(add|write)\s+(unit\s+)?tests\b", re.I)
+
+
+def ensure_tester_task(goal: str, tasks: list[dict[str, Any]], acceptance: list[str]) -> str | None:
+    """Verlangt das Ziel Tests, der Plan hat aber keine Tester-Aufgabe (kleine Modelle vergessen sie gern),
+    wird eine unabhängige Tester-Aufgabe ergänzt. Liefert ihre ID oder None."""
+    if not _WANTS_TESTS.search(goal) or any(t.get("role") == "Tester" for t in tasks) \
+            or not any(t.get("role") == "Coder" for t in tasks):
+        return None
+    ids = {str(t.get("id")) for t in tasks}
+    n = len(tasks) + 1
+    while f"T{n}" in ids:
+        n += 1
+    criteria = "; ".join(acceptance) or "the behaviour described in the user goal"
+    tasks.append({"id": f"T{n}", "role": "Tester", "title": "Tests für die Änderung",
+                  "description": ("Write tests for the requested behaviour in the existing test project or test folder "
+                                  f"(acceptance criteria: {criteria})."),
+                  "reads": [], "writes": [], "depends_on": []})
+    return f"T{n}"
 
 
 @dataclass
@@ -183,6 +212,7 @@ class Orchestrator:
         self.bridge: ToolBridge | None = None
         self.gpu = FairGate(config.limits.max_gpu_requests)
         self.listing: list[Evidence] = []
+        self.plan_evidence: list[Evidence] = []
         self.listing_snapshot: str | None = None
         self.projects: list[str] = []
         self.languages: dict[str, int] = {}
@@ -397,6 +427,7 @@ class Orchestrator:
             except (LimitReached, AgentFailed) as err:
                 self.reporter.chat("Planner", f"Kein Plan: {err}")
                 return None, []
+            added_tester = ensure_tester_task(state.goal, result.result["tasks"], result.result.get("acceptance") or [])
             try:
                 tasks = dag.build_plan(result.result["tasks"], self.bridge.snapshot_id or "", self.config.limits.max_tasks)
             except dag.PlanError as err:
@@ -404,12 +435,16 @@ class Orchestrator:
                 text += f"\n\n## Your previous plan was rejected\n{err} Fix the plan."
                 continue
             acceptance = result.result.get("acceptance", [])
+            # Ganze Dateien, die der Planner gelesen hat: bekommen die Aufgaben mit (solange der Stand gilt).
+            self.plan_evidence = [e for e in result.evidence if e.path]
             self._choose_verify(result.result.get("verify") or [])
             lines = [result.result["message_de"], "", "Plan:"]
             for t in tasks:
                 deps = f" (nach {', '.join(t.depends_on)})" if t.depends_on else ""
                 writes = ", ".join(t.writes) if t.writes else "unbekannt → exklusiv"
                 lines.append(f"{t.task_id} · {t.role} · {t.title}{deps} – ändert: {writes}")
+            if added_tester:
+                lines.append(f"(ergänzt: {added_tester} · Tester, weil du Tests möchtest)")
             if acceptance:
                 lines += ["", "Akzeptanzkriterien:"] + [f"- {a}" for a in acceptance]
             if self.verify_steps:
@@ -453,6 +488,16 @@ class Orchestrator:
                                          patch, pinned=True))
         return evidence
 
+    def _known_files(self, task: dag.Task) -> list[Evidence]:
+        """Vom Planner gelesene Dateien der Aufgabe, wenn sie auf dem aktuellen Stand noch gelten (spart Leserunden)."""
+        current = self.bridge.snapshot_id if self.bridge is not None else None
+        wanted = set(task.reads) | set(task.writes)
+        latest: dict[str, Evidence] = {}
+        for e in self.plan_evidence:
+            if e.path in wanted and e.snapshot_id == current:
+                latest[e.path] = e
+        return list(latest.values())
+
     def _run_task(self, state: GoalState, agent: Agent, task: dag.Task, tasks: list[dag.Task],
                   acceptance: list[str]) -> None:
         cancel = state.controls.token(task.role)
@@ -460,7 +505,8 @@ class Orchestrator:
         finisher = self._finisher(task.role, task.task_id, f"{task.task_id}: {task.title}", field_name, cancel)
         try:
             result = agent.run(Assignment(task.task_id, task.title, self._task_text(state, task, tasks, acceptance),
-                                          self.listing + self._dependency_evidence(task, tasks), finisher=finisher), cancel)
+                                          self.listing + self._dependency_evidence(task, tasks) + self._known_files(task),
+                                          finisher=finisher, files=list(task.writes)), cancel)
             task.result, task.steps, task.state = result.result, result.steps, dag.TaskState.DONE
             self._post_result(task)
         except Cancelled as err:

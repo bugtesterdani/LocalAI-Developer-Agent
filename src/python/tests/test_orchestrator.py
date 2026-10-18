@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 
@@ -87,7 +88,7 @@ def test_tokenschaetzung_konservativ():
 @pytest.mark.parametrize("role", ["Planner", "Coder", "Tester", "Debugger", "Reviewer"])
 def test_prompts_versioniert_englisch_und_im_regelbudget(role):
     text, loaded = prompts.system_prompt(role)
-    assert loaded[0].version == 2 and loaded[1].version >= 3
+    assert loaded[0].version == 3 and loaded[1].version >= 3
     assert f"You are the {role} agent" in text
     assert "message_de" in text and "German" in text
     assert estimate_tokens(text) <= Budget.split(8192, 2048).rules
@@ -799,8 +800,10 @@ def test_pruefLaeufe_aus_repo_map_und_plan():
                                  {"toolchain": "dotnet", "action": "test", "parameters": {"project": "a.csproj"}},
                                  {"toolchain": "dotnet", "action": "test", "parameters": {"project": "a", "configuration": "Fast"}},
                                  {"toolchain": "go", "action": "test", "parameters": {}}], toolchains)
-    assert [s.describe() for s in ok] == ["dotnet build (project=a.csproj, configuration=Release)"]
-    assert len(problems) == 3
+    # Fehlender Auswahlwert wird mit dem ersten erlaubten ergänzt (echter Lauf: Planner ließ configuration weg).
+    assert [s.describe() for s in ok] == ["dotnet build (project=a.csproj, configuration=Release)",
+                                          "dotnet test (project=a.csproj, configuration=Debug)"]
+    assert len(problems) == 2
 
 
 def test_grenzen_je_rolle_und_ablehnungen_einstellbar():
@@ -820,5 +823,142 @@ def test_nach_zu_vielen_ablehnungen_fragt_der_agent_nach(ollama, tmp_path):
     wait_for(lambda: any("Kein Plan" in c for c in broker.chats("Planner")), timeout=30)
     assert any("2 Vorschläge für Aufgabe P1 von dir abgelehnt" in c for c in broker.chats("Planner"))
     assert sum(1 for p in broker.proposals.values() if p.tool.startswith("File.Read")) == 2
+    orch.stop()
+    thread.join(5)
+
+
+# ---------------------------------------------------------------------- Effizienz kleiner Modelle (M4, echter Lauf)
+
+def test_diff_block_vor_json_wird_nicht_als_json_gelesen():
+    # Echter Lauf: ```diff … ``` gefolgt von ```json … ``` ergab „Expecting value at position 0“.
+    text = ("Patch:\n```diff\n--- a/src/a.cs\n+++ b/src/a.cs\n@@ -1 +1,2 @@\n x\n+y\n```\n"
+            '```json\n{"action": "finish", "result": {"message_de": "ok", "files": ["src/a.cs"]}}\n```')
+    action = protocol.parse(text)
+    assert action.kind == "finish" and action.diff_block.startswith("--- a/src/a.cs")
+    protocol.resolve_patch("Coder", action)
+    assert protocol.validate_result("Coder", action.result)["patch"].startswith("--- a/src/a.cs")
+
+
+@pytest.mark.parametrize("raw", [
+    "{\n    'action': 'read', 'files': [{'path': 'src/a.py'}]\n}",
+    '{\n    action: "read", files: [{path: "src/a.py"}],\n}',
+    '{"action": "read", // lesen\n "files": [{"path": "src/a.py"}]}',
+])
+def test_fast_json_kleiner_modelle_wird_gelesen(raw):
+    action = protocol.parse(f"```json\n{raw}\n```")
+    assert action.kind == "read" and action.files[0].path == "src/a.py"
+
+
+def test_zeilenumbruch_im_json_string_wird_akzeptiert():
+    action = protocol.parse('```json\n{"action": "finish", "result": {"message_de": "x", "patch": "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-a\n+b"}}\n```')
+    protocol.resolve_patch("Coder", action)
+    assert protocol.validate_result("Coder", action.result)["patch"].startswith("--- a/a.py\n+++ b/a.py")
+
+
+def test_diff_ohne_praefixe_oder_kopfzeilen_wird_normalisiert():
+    assert protocol.normalize_diff("--- src/a.cs\n+++ src/a.cs\n@@ -9,3 +9,8\n x\n+y\n").startswith(
+        "--- a/src/a.cs\n+++ b/src/a.cs\n@@ -9 +9 @@\n")
+    headless = "@@ -1,2 +1,3 @@\n x\n+y\n"
+    assert protocol.normalize_diff(headless, ["src/a.cs"]).startswith("--- a/src/a.cs\n+++ b/src/a.cs\n@@ -1,2")
+    with pytest.raises(protocol.ProtocolError, match="file headers"):
+        protocol.normalize_diff(headless, [])
+
+
+CS = ("namespace Rechner;\n\npublic static class Rechner\n{\n    public static int Addieren(int a, int b) => a + b;\n\n"
+      "    public static int Multiplizieren(int a, int b) => a * b;\n}\n")
+
+
+def test_search_replace_bloecke_werden_zum_diff_und_passen_in_der_sandbox():
+    from localai.worker import patching
+    text = ("Ich ergänze Teilen.\n\nsrc/Rechner/Rechner.cs\n```csharp\n<<<<<<< SEARCH\n"
+            "    public static int Multiplizieren(int a, int b) => a * b;\n=======\n"
+            "    public static int Multiplizieren(int a, int b) => a * b;\n\n"
+            "    public static int Teilen(int a, int b)\n    {\n        if (b == 0)\n"
+            "            throw new ArgumentException(\"Teilen durch 0 ist nicht erlaubt.\", nameof(b));\n"
+            "        return a / b;\n    }\n>>>>>>> REPLACE\n```\n\n"
+            '```json\n{"action": "finish", "result": {"message_de": "Teilen ergänzt", "files": ["src/Rechner/Rechner.cs"]}}\n```')
+    action = protocol.parse(text)
+    assert len(action.edits) == 1 and action.edits[0].path == "src/Rechner/Rechner.cs"
+    lines = CS.splitlines()
+    protocol.resolve_patch("Coder", action, [], lambda p: lines if p == "src/Rechner/Rechner.cs" else None)
+    patch = protocol.validate_result("Coder", action.result)["patch"]
+    assert patch.startswith("--- a/src/Rechner/Rechner.cs\n+++ b/src/Rechner/Rechner.cs\n@@ -7,1 +7,8 @@\n")
+    files = patching.parse(patch)
+    target = patching.TextFile.decode(CS.encode(), "x")
+    patching.apply_hunks(target, files[0].hunks, "x")
+    assert "public static int Teilen(int a, int b)" in target.encode().decode()
+    assert target.encode().decode().endswith("    }\n}\n")
+
+
+def test_search_replace_passt_nicht_rueckmeldung_ohne_freigaberunde():
+    blocks = protocol.parse_edit_blocks("src/a.cs\n<<<<<<< SEARCH\n    gibt es nicht\n=======\n    neu\n>>>>>>> REPLACE\n")
+    with pytest.raises(protocol.ProtocolError, match="do not occur"):
+        protocol.edits_to_diff(blocks, lookup=lambda p: CS.splitlines())
+    twice = protocol.parse_edit_blocks("src/a.cs\n<<<<<<< SEARCH\n\n=======\nx\n>>>>>>> REPLACE\n")
+    with pytest.raises(protocol.ProtocolError, match="already exists"):
+        protocol.edits_to_diff(twice, lookup=lambda p: CS.splitlines())
+    brace = protocol.parse_edit_blocks("src/a.cs\n<<<<<<< SEARCH\n{\n=======\n{ // x\n>>>>>>> REPLACE\n")
+    assert "@@ -4,1 +4,1 @@" in protocol.edits_to_diff(brace, lookup=lambda p: CS.splitlines())
+    # Ohne bekannten Inhalt: Pfad aus der Aufgabe, die Sandbox sucht die Stelle.
+    nameless = protocol.parse_edit_blocks("<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n")
+    assert protocol.edits_to_diff(nameless, ["src/b.py"]).startswith("--- a/src/b.py\n+++ b/src/b.py\n@@ -1,1 +1,1 @@\n-x\n+y")
+    with pytest.raises(protocol.ProtocolError, match="file path"):
+        protocol.edits_to_diff(nameless, [])
+    created = protocol.edits_to_diff(protocol.parse_edit_blocks(
+        "tests/test_neu.py\n<<<<<<< SEARCH\n=======\ndef test_x():\n    pass\n>>>>>>> REPLACE\n"))
+    assert created == "--- /dev/null\n+++ b/tests/test_neu.py\n@@ -0,0 +1,2 @@\n+def test_x():\n+    pass\n"
+    with pytest.raises(protocol.ProtocolError, match="incomplete"):
+        protocol.parse_edit_blocks("a.py\n<<<<<<< SEARCH\nx\n=======\ny\n")
+
+
+def test_tester_aufgabe_wird_ergaenzt_wenn_tests_gewuenscht():
+    from localai.orchestrator.run import ensure_tester_task
+    tasks = [{"id": "T1", "role": "Coder", "title": "a", "description": "b"}]
+    assert ensure_tester_task("Füge teilen hinzu. Mit Tests.", tasks, ["Teilen durch 0 wirft"]) == "T2"
+    assert tasks[1]["role"] == "Tester" and "Teilen durch 0 wirft" in tasks[1]["description"]
+    assert ensure_tester_task("Füge teilen hinzu. Mit Tests.", tasks, []) is None, "nur einmal"
+    assert ensure_tester_task("Führe die Tests aus", [{"id": "T1", "role": "Coder"}], []) is None
+
+
+def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
+    """Nachbau des echten Laufs (qwen2.5-coder:7b): Planner liest die Datei ganz, plant nur eine Coder-Aufgabe;
+    Coder will dieselbe Datei erneut lesen und liefert dann SEARCH/REPLACE-Blöcke."""
+    calls = {"Coder": 0}
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Planner":
+            if 'source="File.Read src/calc.py"' not in user:
+                return '```json\n{"action": "read", "files": [{"path": "src/calc.py"}]}\n```', ""
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": ["teilen(1, 0) wirft ValueError"], '
+                    '"tasks": [{"id": "T1", "role": "Coder", "title": "teilen", "description": "add teilen", '
+                    '"reads": ["src/calc.py"], "writes": ["src/calc.py"], "depends_on": []}]}}\n```'), ""
+        if role == "Coder":
+            calls["Coder"] += 1
+            if calls["Coder"] == 1:
+                return '```json\n{"action": "read", "files": [{"path": "src/calc.py"}]}\n```', ""
+            assert "not read again" in user
+            return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return a + b\n\n\ndef teilen(a, b):\n"
+                    "    if b == 0:\n        raise ValueError(\"Teilen durch 0\")\n    return a / b\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "teilen ergänzt"}}\n```'), ""
+        if role == "Tester":
+            return ("tests/test_teilen.py\n<<<<<<< SEARCH\n=======\nfrom src.calc import teilen\n\n\ndef test_null():\n"
+                    "    pass\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "Fall 0", "test_plan": [{"name": "test_null"}]}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Füge teilen(a, b) hinzu. Teilen durch 0 soll einen ValueError auslösen. Mit Tests.")
+    wait_for(lambda: finished(broker), timeout=60)
+    by_agent = [(p.agent.value, p.tool) for p in broker.proposals.values()]
+    assert ("Coder", "File.Read") not in by_agent, "Datei lag schon vor – kein zweiter Lesevorschlag"
+    patches = {p.agent.value: p.arguments["patch"] for p in broker.proposals.values() if p.tool == "Patch.Apply"}
+    assert patches["Coder"].startswith("--- a/src/calc.py\n+++ b/src/calc.py\n@@ -2,1 +2,7 @@\n     return a + b\n+\n")
+    assert patches["Tester"].startswith("--- /dev/null\n+++ b/tests/test_teilen.py\n")
+    assert any("ergänzt: T2 · Tester" in c for c in broker.chats("Planner"))
+    assert calls["Coder"] == 2
     orch.stop()
     thread.join(5)

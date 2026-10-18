@@ -98,6 +98,31 @@ In `config\localai.json` unter `sandbox.hyperv` (alle optional, Minuten):
 - `pauseOnNoAnswer: false` sperrt wie bisher sofort (Neuaufbau nötig). Netzwerkkarten oder ungültige Rückgaben sperren
   immer.
 
+## Weniger Modellschritte mit kleinen Modellen
+
+Im ersten echten Lauf (qwen2.5-coder:7b, Abschnitt 3) brauchte der Coder 19 von 20 Schritten: Er las dieselbe Datei
+fünfmal und scheiterte zehnmal am Antwortformat (Diff ohne passende Kopfzeilen, ```diff-Block vor dem JSON, fast-JSON).
+Seit „M4: Effizienz“ gilt:
+
+- **Änderungen als SEARCH/REPLACE-Blöcke** vor dem JSON (Coder, Tester, Debugger): Pfad, `<<<<<<< SEARCH`, die
+  aktuellen Zeilen, `=======`, die neuen Zeilen, `>>>>>>> REPLACE`. Der Orchestrator macht daraus einen Unified Diff;
+  die Freigabekarte zeigt wie bisher den Diff je Datei. Unified Diffs werden weiter angenommen und vereinheitlicht
+  (`a/`/`b/`-Präfixe, fehlende Kopfzeilen bei genau einer Datei der Aufgabe, ```diff-Block außerhalb des JSON).
+- **Passt SEARCH nicht** zur Datei, die schon im Kontext steht, bekommt das Modell das sofort zurück – ohne
+  Freigabekarte für einen Patch, der ohnehin nicht passen würde.
+- **Kein doppeltes Lesen:** Liegt der ganze Inhalt einer Datei auf dem aktuellen Stand schon vor, wird kein neuer
+  Lesevorschlag erstellt (Status „… liegt schon vor – nicht erneut gelesen“). Vom Planner gelesene Dateien bekommen
+  Coder und Tester gleich mit.
+- **Fast-JSON** (einfache Anführungszeichen, Schlüssel ohne Anführungszeichen, Kommentare, Komma am Ende, Zeilenumbrüche
+  in Strings) wird gelesen statt zurückgewiesen.
+- **„Mit Tests“:** Verlangt das Ziel Tests und der Plan hat keine Tester-Aufgabe, ergänzt der Orchestrator eine
+  („ergänzt: T2 · Tester …“ im Plan).
+- **Prüfläufe:** Fehlt im Plan ein Auswahlparameter (z. B. `configuration`), wird der erste erlaubte Wert eingesetzt.
+- Unbrauchbare Modellantworten stehen im Orchestrator-Log (`%LOCALAPPDATA%\LocalAi\broker\orchestrator.log`) – für die
+  Fehlersuche, bleibt lokal.
+
+Prompts: common v3, coder v5, tester v4, debugger v5, planner v4.
+
 ## Grenzen für Agenten einstellen
 
 In `config\models.local.json` (nur abweichende Werte; Vorlage `config\models.local.example.json`) unter `limits`:
@@ -155,6 +180,8 @@ Projekt `config/m4-csharp-project.json`, Modus `hyperv`, Ollama wie in M3. Warte
 Chat: „Füge Rechner.Teilen(a, b) hinzu. Teilen durch 0 soll eine ArgumentException mit deutscher Meldung werfen. Mit Tests.“
 
 - [ ] Freigabe **Planner · Repo.Index** (statt File.List); der Plan nennt unter „Prüfung in der Sandbox“ z. B. `dotnet test (project=tests/Rechner.Tests/Rechner.Tests.csproj, configuration=Debug)`.
+- [ ] Plan enthält eine Tester-Aufgabe (vom Planner oder „ergänzt: … · Tester“).
+- [ ] Coder schlägt `Rechner.cs` **nicht erneut** zum Lesen vor (vom Planner gelesen) und braucht nur wenige Schritte.
 - [ ] **Coder · Patch.Apply**: Karte zeigt unter „Änderungen“ den Diff je Datei, links „ändern“/„neu“; eine Datei abwählen → „Auswahl übernehmen“ erzeugt einen neuen Vorschlag, der abgewählte Teil bleibt unverändert („abgewählt (unverändert)“ im Chat).
 - [ ] Im Chat: „Patch – angewendet → Stand …“. Passt ein Patch nicht, steht im Verlauf „Patch nicht angewendet (…) – Agent korrigiert“ und der Agent liest die Datei erneut.
 - [ ] **Tester · Toolchain.Test**: Karte zeigt „Toolchain: dotnet · Aktion: test“ und den Hinweis auf Codeausführung in der VM.

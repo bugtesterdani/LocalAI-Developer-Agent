@@ -244,8 +244,9 @@ class ToolBridge:
                             if r.status == ResultStatus.Failed and r.message and r.target_id != "snapshot"]
                 text = "; ".join(problems)[:3000] or "unknown error"
                 return PatchOutcome(False, "not-applicable",
-                                    feedback=(f"Your patch was NOT applied: {text}. Read the affected files again (they may "
-                                              "already contain other changes) and send a corrected patch."),
+                                    feedback=(f"Your patch was NOT applied: {text}. Compare your SEARCH/context lines with the "
+                                              "current file content in the evidence (read the file only if it is not "
+                                              "there) and send a corrected patch."),
                                     note_de=f"passt nicht: {text}"[:600], files=list(paths.values()))
             state = outcome.state.value.lower()
             return PatchOutcome(False, state, note_de=STATE_TEXT.get(outcome.state, state), files=list(paths.values()))
@@ -307,7 +308,10 @@ class ToolBridge:
                 source = f"{request.tool} {_ref(path, target.line_start if target else None, target.line_end if target else None)}"
                 if request.tool in ("File.Search", "Repo.Index") and request.arguments.get("query"):
                     source += f" query={request.arguments.get('query')!r}"
-                evidence.append(Evidence(f"E{next(self._evidence_ids)}", source, r.text or "(empty)"))
+                whole = (request.tool in ("File.Read", "File.ReadMany") and target is not None and target.line_start is None
+                         and target.line_end is None and "gekürzt" not in (r.message or "") and not outcome.result.truncated)
+                evidence.append(Evidence(f"E{next(self._evidence_ids)}", source, r.text or "(empty)",
+                                         path=path if whole else "", snapshot_id=request.snapshot_id if whole else ""))
             else:
                 notes.append(f"{path}: {r.status.value} {r.message or ''}".strip())
         for skipped in outcome.result.skipped_target_ids or []:

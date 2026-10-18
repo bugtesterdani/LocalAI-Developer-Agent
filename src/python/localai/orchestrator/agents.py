@@ -6,6 +6,7 @@ ggf. Toolvorschlag beim Broker (wartet auf Nutzerentscheidung) → Evidenz über
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,6 +43,8 @@ class Assignment:
     # Nach einem gültigen Ergebnis aufgerufen (z. B. Patch anwenden). Rückgabe None = fertig, sonst eine
     # englische Rückmeldung an das Modell, das dann weiterarbeitet (z. B. Patch passt nicht).
     finisher: Callable[[dict[str, Any]], str | None] | None = None
+    # Dateien, die die Aufgabe ändern darf (Pfad für SEARCH/REPLACE-Blöcke bzw. Diffs ohne Kopfzeilen).
+    files: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,6 +102,7 @@ class Agent:
                 self.clock.wait_for_user(cancel)
                 self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
             parts = assemble(self.system, self._task_text(assignment), history, evidence, self.budget, self.chars_per_token)
+            dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence}
             request = ChatRequest(
                 model=self.profile.model,
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
@@ -140,6 +144,7 @@ class Agent:
             try:
                 action = protocol.parse(result.content)
                 if action.kind == "finish":
+                    protocol.resolve_patch(role, action, assignment.files, lambda p: self._file_lines(evidence, p))
                     final = protocol.validate_result(role, action.result)
                     feedback = assignment.finisher(final) if assignment.finisher else None
                     if feedback is not None:
@@ -150,11 +155,26 @@ class Agent:
                     return AgentResult(final, step, evidence)
             except protocol.ProtocolError as err:
                 self.reporter.event(role, ActivityKind.Warning, f"Antwort nicht verwertbar: {err}", task_id=task_id)
+                # Für die Fehlersuche im Orchestrator-Log (bleibt lokal): was das Modell tatsächlich geschrieben hat.
+                print(f"[{role}] {task_id} Schritt {step} – unbrauchbare Antwort ({len(result.content)} Zeichen):\n"
+                      f"{result.content[:2500]}\n[Ende der Antwort]", file=sys.stderr, flush=True)
                 history.append(f"Step {step}: invalid answer – {err}")
                 invalid += 1
                 if self.limits.max_invalid_answers and invalid >= self.limits.max_invalid_answers:
                     raise LimitReached(f"{invalid} unbrauchbare Antworten für Aufgabe {task_id} (limits.maxInvalidAnswersPerTask)")
                 continue
+            if action.kind == "read":
+                known = self._known_reads(action, evidence, dropped)
+                if known:
+                    action.files = [f for f in action.files if f.path not in known]
+                    note = (f"read {', '.join(sorted(known))}: not read again – the current content (same snapshot) is "
+                            f"already in the evidence ({', '.join(known[p] for p in sorted(known))}). Use it.")
+                    if not action.files:
+                        self.reporter.state(role, AgentState.Generating, f"{', '.join(sorted(known))} liegt schon vor – "
+                                            "nicht erneut gelesen", task_id)
+                        history.append(f"Step {step}: {note} Continue with your task now.")
+                        continue
+                    history.append(f"Step {step}: {note}")
             outcome = self.bridge.execute(role, task_id, action, cancel)
             if outcome.denied:
                 denials += 1
@@ -164,6 +184,32 @@ class Agent:
             history.append(f"Step {step}: {outcome.summary}")
             self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: weiter nach Schritt {step}", task_id)
         raise LimitReached(f"{max_steps} Modellschritte für Aufgabe {task_id} erreicht")
+
+    def _current_snapshot(self) -> str:
+        return getattr(self.bridge, "snapshot_id", None) or ""
+
+    def _file_lines(self, evidence: list[Evidence], path: str) -> list[str] | None:
+        """Ganzer Dateiinhalt auf dem aktuellen Stand, falls im Kontext (neueste Evidenz zuerst)."""
+        snapshot = self._current_snapshot()
+        if not snapshot:
+            return None
+        for item in reversed(evidence):
+            if item.path == path and item.snapshot_id == snapshot:
+                return [] if item.text == "(empty)" else item.text.splitlines()
+        return None
+
+    def _known_reads(self, action: protocol.Action, evidence: list[Evidence], dropped: set[str]) -> dict[str, str]:
+        """Pfade der Leseanfrage, deren ganzer Inhalt auf dem aktuellen Stand schon im Prompt steht → Evidenz-ID."""
+        snapshot = self._current_snapshot()
+        known: dict[str, str] = {}
+        if not snapshot:
+            return known
+        for ref in action.files:
+            for item in reversed(evidence):
+                if item.path == ref.path and item.snapshot_id == snapshot and item.evidence_id not in dropped:
+                    known[ref.path] = item.evidence_id
+                    break
+        return known
 
     def _callbacks(self, task_id: str) -> StreamCallbacks:
         role, reporter, model = self.role, self.reporter, self.profile.model

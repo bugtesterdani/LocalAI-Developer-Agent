@@ -61,6 +61,9 @@ class Evidence:
     source: str
     text: str
     pinned: bool = False
+    # Für ganze, ungekürzte Dateiinhalte (File.Read ohne Zeilenbereich): Pfad und Stand, auf dem gelesen wurde.
+    path: str = ""
+    snapshot_id: str = ""
 
     def render(self, text: str | None = None) -> str:
         body = neutralize(self.text if text is None else text)
