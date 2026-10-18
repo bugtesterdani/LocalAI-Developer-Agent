@@ -60,7 +60,7 @@
                     <TextBlock Text=": " Foreground="#D1D5DB" />
                     <TextBlock Text="{Binding ProjectText}" Foreground="#D1D5DB" />
                     <TextBlock Text="  |  " Foreground="#9CA3AF" />
-                    <TextBlock Text="{Binding SandboxText}">
+                    <TextBlock Text="{Binding SandboxText}" ToolTip="{Binding SandboxText}" MaxWidth="560" TextTrimming="CharacterEllipsis">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Foreground" Value="#FCD34D" />
@@ -194,7 +194,8 @@
                 </ListBox>
 
                 <!-- Freigabekarte -->
-                <ContentControl Content="{Binding SelectedApproval}" Focusable="False">
+                <ContentControl Content="{Binding SelectedApproval}" Focusable="False"
+                                Visibility="{Binding SelectedApproval, Converter={StaticResource EmptyToCollapsed}}">
                     <ContentControl.ContentTemplate>
                         <DataTemplate>
                             <Border Background="White" BorderBrush="#D1D5DB" BorderThickness="1" Padding="12">
