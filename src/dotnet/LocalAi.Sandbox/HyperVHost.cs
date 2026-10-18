@@ -378,7 +378,7 @@ public static class SandboxFingerprint
         {
             "v1",
             $"image|{settings.ImagePath}|{Facts(settings.ImagePath)}|{settings.ImageName}|{settings.ImageIndex}",
-            $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.ProductKey is not null}",
+            $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.ProductKey is not null}|low={settings.LowIntegrityTools}",
             $"python|{sources.PythonHome}|{Facts(Path.Combine(sources.PythonHome, "python.exe"))}",
         };
         IEnumerable<string?> entries = Directory.Exists(sources.SitePackages)
@@ -435,7 +435,7 @@ public static class GuestPayloadBuilder
     private static readonly string[] SkipDirectories = ["__pycache__", "test", "tests", "idlelib", "tkinter", "turtledemo", "ensurepip"];
 
     public static void Build(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, long transferDiskBytes,
-        IReadOnlyList<string>? toolchains = null)
+        IReadOnlyList<string>? toolchains = null, bool lowIntegrityTools = true)
     {
         if (!File.Exists(Path.Combine(sources.PythonHome, "python.exe")))
         {
@@ -478,7 +478,7 @@ public static class GuestPayloadBuilder
 
         File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
         File.WriteAllText(Path.Combine(root, "guest-config.json"),
-            JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [] }), new UTF8Encoding(false));
+            JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [], lowIntegrityTools }), new UTF8Encoding(false));
         foreach (var file in new[] { "provision.ps1", "LocalAiGuest.psm1" })
         {
             File.Copy(Path.Combine(sources.GuestScripts, file), Path.Combine(root, file));

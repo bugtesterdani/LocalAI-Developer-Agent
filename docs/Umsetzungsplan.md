@@ -2,7 +2,7 @@
 
 Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.3 · Plan v4 · Stand: 16.10.2026
 
-**Umsetzungsstand:** M1 und M2 (M2a–M2c) abgenommen. **M3** (Orchestrator, Model Gateway, Kalibrierung, fünf Rollen mit DAG und Limits, Live-Aktivität mit Chat in der Oberfläche) implementiert; Prüfung mit echtem Modell auf dem Rechner mit Ollama offen (`docs/pruefung-M3.md`). Danach M4.
+**Umsetzungsstand:** M1 und M2 (M2a–M2c) abgenommen. **M3** (Orchestrator, Model Gateway, Kalibrierung, fünf Rollen mit DAG und Limits, Live-Aktivität mit Chat in der Oberfläche) abgenommen am 18.10.2026 (echter Lauf mit `qwen2.5-coder:7b` über Ollama im LAN, SEC-22 bestätigt). **M4** in Arbeit.
 
 ## Entscheidungen
 
@@ -92,6 +92,8 @@ Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 →
 **Abnahme:** fünf Rollen mit echtem Modell; Live-Ansicht flüssig unter 32K/Offload; SEC-16, SEC-22 grün.
 
 **Umgesetzt (Stand 18.10.2026):** `localai.orchestrator` (Gateway mit Streaming/Abbruch/Watchdog, Hardwareerkennung, Kalibrierung mit Bericht, Rollen mit Prompts in `prompts/*.md`, DAG mit Schreibmengen-Locks, fairer GPU-Slot, Limits); Broker: Aktivitätsstrom, Aufträge an den Orchestrator, Überwachung (Absturz/Hänger, Not-Aus); Oberfläche: Chat, Aktivität je Agent, Abbruch pro Agent/Run. Patches bleiben bis M4 Vorschläge, Tests werden als nicht ausgeführt gekennzeichnet; der Debugger arbeitet bis dahin auf Review-Befunden.
+
+**Abgenommen (18.10.2026):** fünf Rollen mit echtem Modell (7B, 8K, 0 % CPU-Offload, ~40 Token/s), SEC-16 und SEC-22 bestätigt. 32K/Offload auf der RTX 2060 (6 GB) nicht stabil kalibrierbar – Profile bleiben gesperrt, bis Hardware sie trägt.
 
 ## M4 – Build/Test & große Repos
 

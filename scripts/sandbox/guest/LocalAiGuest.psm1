@@ -219,4 +219,20 @@ function Install-Toolchain([string]$Name, [string]$SourceRoot) {
     return $result
 }
 
+function Publish-ToolchainForJobs([string]$Name, [string]$SourceRoot, [string]$Target) {
+    # toolchain.json und die Offline-Paketquelle (packageSource.path) nach C:\LocalAi\toolchains\<name>; der Worker
+    # liest dort die erlaubten Aktionen. Ohne Paketquelle bleibt ein leerer Ordner (Restore nur aus dem Projekt selbst).
+    $src = Join-Path $SourceRoot $Name
+    $dest = Join-Path $Target $Name
+    New-Item -ItemType Directory -Force -Path (Join-Path $dest 'packages') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $src 'toolchain.json') -Destination (Join-Path $dest 'toolchain.json') -Force
+    $manifest = Get-Content -LiteralPath (Join-Path $src 'toolchain.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($manifest.PSObject.Properties['packageSource'] -and $manifest.packageSource -and $manifest.packageSource.PSObject.Properties['path'] -and $manifest.packageSource.path) {
+        $packages = Join-Path $src (([string]$manifest.packageSource.path) -replace '/', '\')
+        if (Test-Path -LiteralPath $packages -PathType Container) {
+            Get-ChildItem -LiteralPath $packages -Force | Copy-Item -Destination (Join-Path $dest 'packages') -Recurse -Force
+        }
+    }
+}
+
 Export-ModuleMember -Function *

@@ -226,6 +226,7 @@ public sealed record HostOptions
             ProductKey = Str("productKey"),
             KeepVmOnExit = e.TryGetProperty("keepVmOnExit", out var keep) && keep.ValueKind == JsonValueKind.True,
             ReuseVm = e.TryGetProperty("reuseVm", out var reuse) && reuse.ValueKind == JsonValueKind.True,
+            LowIntegrityTools = !(e.TryGetProperty("lowIntegrityTools", out var low) && low.ValueKind == JsonValueKind.False),
         };
     }
 

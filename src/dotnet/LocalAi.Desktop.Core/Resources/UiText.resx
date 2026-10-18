@@ -141,6 +141,39 @@
   <data name="LinesAll" xml:space="preserve">
     <value>ganze Datei</value>
   </data>
+  <data name="PatchCreate" xml:space="preserve">
+    <value>neu</value>
+  </data>
+  <data name="PatchModify" xml:space="preserve">
+    <value>ändern</value>
+  </data>
+  <data name="PatchDelete" xml:space="preserve">
+    <value>löschen</value>
+  </data>
+  <data name="LabelPatch" xml:space="preserve">
+    <value>Änderungen (vollständiger Patch je Datei)</value>
+  </data>
+  <data name="PatchDeselected" xml:space="preserve">
+    <value>(abgewählt – bleibt unverändert)</value>
+  </data>
+  <data name="LabelCommand" xml:space="preserve">
+    <value>Aufruf in der Offline-VM</value>
+  </data>
+  <data name="CommandToolchain" xml:space="preserve">
+    <value>Toolchain: {0} · Aktion: {1}</value>
+  </data>
+  <data name="CommandNoParameters" xml:space="preserve">
+    <value>keine Parameter</value>
+  </data>
+  <data name="SideEffectsPatch" xml:space="preserve">
+    <value>Wendet die ausgewählten Dateien des Patches auf eine Kopie in der Sandbox an und erzeugt daraus einen neuen Snapshot. Der Originalordner auf diesem PC wird nicht verändert (Übernahme erst später, ausdrücklich).</value>
+  </data>
+  <data name="SideEffectsToolchain" xml:space="preserve">
+    <value>Startet in der Offline-VM das im Toolchain-Manifest festgelegte Programm auf einer frischen Kopie des Snapshots. Achtung: Build-Skripte, NuGet-/MSBuild-Targets und Tests können dabei beliebigen Code ausführen – nur in der VM, ohne Netzwerk, nicht auf diesem PC.</value>
+  </data>
+  <data name="SideEffectsIndex" xml:space="preserve">
+    <value>Liest den Snapshot in der Sandbox und erstellt einen Symbolindex (Repo-Map). Nichts wird verändert.</value>
+  </data>
   <data name="NoExpectedHash" xml:space="preserve">
     <value>kein erwarteter Hash</value>
   </data>

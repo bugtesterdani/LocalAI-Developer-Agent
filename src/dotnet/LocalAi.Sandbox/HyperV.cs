@@ -45,6 +45,12 @@ public sealed record HyperVSettings
     /// </summary>
     public bool ReuseVm { get; init; }
 
+    /// <summary>
+    /// Werkzeugprozesse im Gast mit eingeschränktem Token auf niedriger Integritätsstufe starten (SEC-21, Standard).
+    /// Nur zur Fehlersuche abschaltbar – dann kann bösartiger Build-/Testcode den Worker in der VM verändern.
+    /// </summary>
+    public bool LowIntegrityTools { get; init; } = true;
+
     public long TransferDiskBytes => TransferDiskMB * 1024L * 1024L;
 
     private static readonly Regex VmNamePattern = new("^[A-Za-z0-9-]{1,40}$");

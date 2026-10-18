@@ -42,17 +42,34 @@ public static class JobSigner
 public sealed class SnapshotRegistry
 {
     private readonly ConcurrentDictionary<string, string> _snapshots = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _parents = new(StringComparer.Ordinal);
 
     public void Add(string snapshotId, string grantId) => _snapshots[snapshotId] = grantId;
+
+    /// <summary>Abgeleiteter Snapshot (Patch.Apply in der Sandbox) – gehört zum selben Grant wie die Basis.</summary>
+    public bool AddDerived(string snapshotId, string parentId, string grantId)
+    {
+        if (!Contains(parentId, grantId) || (_snapshots.TryGetValue(snapshotId, out var g) && g != grantId))
+        {
+            return false;
+        }
+        _snapshots[snapshotId] = grantId;
+        _parents.TryAdd(snapshotId, parentId);
+        return true;
+    }
+
+    public string? ParentOf(string snapshotId) => _parents.TryGetValue(snapshotId, out var p) ? p : null;
 
     public bool Contains(string snapshotId, string grantId) =>
         _snapshots.TryGetValue(snapshotId, out var g) && g == grantId;
 }
 
 /// <summary>Ordnerrechte aus der Projektkonfiguration plus Snapshots dieser Sitzung.</summary>
-public sealed class ProjectPolicyContext(ProjectConfig project, SnapshotRegistry snapshots) : IPolicyContext
+public sealed class ProjectPolicyContext(ProjectConfig project, SnapshotRegistry snapshots, IToolchainCatalog? toolchains = null) : IPolicyContext
 {
     public IReadOnlyList<FolderGrant> Grants { get; } = project.Grants;
+
+    public IToolchainCatalog? Toolchains => toolchains;
 
     public FolderGrant? FindGrant(string grantId) => project.Grants.FirstOrDefault(g => g.GrantId == grantId);
 
@@ -73,9 +90,9 @@ public static class ProjectLoader
             {
                 throw new InvalidDataException($"grantId doppelt: {grant.GrantId}");
             }
-            if (grant.Rights.Any(r => r is FolderRight.Delete or FolderRight.Execute))
+            if (grant.Rights.Distinct().Count() != grant.Rights.Count)
             {
-                throw new InvalidDataException($"Grant {grant.GrantId}: Delete und Execute sind in M2 nicht vorgesehen");
+                throw new InvalidDataException($"Grant {grant.GrantId}: Recht doppelt angegeben");
             }
             var root = Path.GetFullPath(Path.Combine(baseDirectory, grant.Root));
             if (!Directory.Exists(root))
@@ -189,8 +206,8 @@ public static class ResultValidator
             return Failed(job, "Antwort der Sandbox gehört nicht zu diesem Job");
         }
         var allowed = job.Proposal.Targets.Select(t => t.TargetId).ToHashSet(StringComparer.Ordinal);
-        allowed.Add("*");
-        allowed.Add("snapshot");
+        // Feste Ergebnisziele: Snapshot-ID (Import/Patch), Log und Testbericht (Toolchain.*), Repo-Map (Repo.Index).
+        allowed.UnionWith(["*", "snapshot", "log", "tests", "map"]);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         long chars = 0;
         foreach (var target in result.TargetResults)
@@ -230,10 +247,36 @@ public sealed class SandboxToolAdapter(
 
     public TimeSpan SnapshotTimeout { get; init; } = TimeSpan.FromMinutes(30);
 
+    /// <summary>Zuschlag auf die Zeitgrenze einer Toolchain-Aktion (Kopie des Snapshots, Übertragung).</summary>
+    public TimeSpan ExecutionMargin { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Wartezeit des Hosts: Toolchain-Aktionen nach Manifest (Standard 120 s) plus Zuschlag.</summary>
+    public TimeSpan TimeoutFor(ToolProposal proposal)
+    {
+        if (proposal.Tool == "Workspace.Snapshot")
+        {
+            return SnapshotTimeout;
+        }
+        if (ToolchainTools.Actions.ContainsKey(proposal.Tool) && policy.Toolchains is { } catalog
+            && proposal.Arguments.TryGetProperty("toolchain", out var name) && name.ValueKind == JsonValueKind.String
+            && catalog.Find(name.GetString()!) is { } manifest)
+        {
+            try
+            {
+                var (_, action) = ToolchainTools.Resolve(manifest, proposal.Tool);
+                return TimeSpan.FromSeconds(Math.Clamp(action.TimeoutSeconds ?? 120, 1, 3600)) + ExecutionMargin;
+            }
+            catch (BrokerException)
+            {
+            }
+        }
+        return JobTimeout;
+    }
+
     public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, string invocationId, CancellationToken cancellationToken)
     {
         var isSnapshot = proposal.Tool == "Workspace.Snapshot";
-        var timeout = isSnapshot ? SnapshotTimeout : JobTimeout;
+        var timeout = TimeoutFor(proposal);
         var now = clock.UtcNow;
         var job = new SandboxJob(
             SchemaVersion: ContractJson.SchemaVersion,
@@ -281,6 +324,16 @@ public sealed class SandboxToolAdapter(
                     return ResultValidator.Failed(job, "Sandbox meldet einen anderen Snapshot als übertragen");
                 }
                 snapshots.Add(id, job.Snapshot.GrantId);
+            }
+            if (proposal.Tool == "Patch.Apply" && result.Status == ResultStatus.Succeeded)
+            {
+                var derived = result.TargetResults.FirstOrDefault(t => t.TargetId == "snapshot")?.Text;
+                var grantId = proposal.Arguments.GetProperty("grantId").GetString()!;
+                if (derived is null || !ProposalHashing.IsSha256Hex(derived)
+                    || (derived != proposal.SnapshotId && !snapshots.AddDerived(derived, proposal.SnapshotId, grantId)))
+                {
+                    return ResultValidator.Failed(job, "Sandbox meldet keinen gültigen abgeleiteten Snapshot");
+                }
             }
             return result;
         }

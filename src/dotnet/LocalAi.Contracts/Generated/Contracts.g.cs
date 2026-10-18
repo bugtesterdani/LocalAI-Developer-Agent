@@ -399,3 +399,22 @@ public sealed partial record OrchestratorCommand(
     [property: JsonPropertyName("kind")] OrchestratorCommandKind Kind,
     [property: JsonPropertyName("agent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Agent = null,
     [property: JsonPropertyName("text"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text = null);
+
+/// <summary>Ein fehlgeschlagener Testfall (aus Trx/JUnit, untrusted).</summary>
+public sealed partial record TestCaseFailure(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("message"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message = null,
+    [property: JsonPropertyName("stackTrace"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StackTrace = null);
+
+/// <summary>Einheitliches Testergebnis eines Toolchain-Laufs (Spezifikation §8, B08). Inhalte untrusted.</summary>
+public sealed partial record TestReport(
+    [property: JsonPropertyName("format")] TestResultFormat Format,
+    [property: JsonPropertyName("exitCode")] long ExitCode,
+    [property: JsonPropertyName("timedOut")] bool TimedOut,
+    [property: JsonPropertyName("total")] long Total,
+    [property: JsonPropertyName("passed")] long Passed,
+    [property: JsonPropertyName("failed")] long Failed,
+    [property: JsonPropertyName("skipped")] long Skipped,
+    [property: JsonPropertyName("failures")] IReadOnlyList<TestCaseFailure> Failures,
+    [property: JsonPropertyName("resultFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ResultFiles = null,
+    [property: JsonPropertyName("problems"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Problems = null);

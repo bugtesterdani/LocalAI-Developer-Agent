@@ -89,6 +89,48 @@ public sealed partial class DesktopTests
         Assert.True(card.CanApprove, "alle wieder ausgewählt");
     }
 
+    [Fact, Trait("Pruefung", "B08")]
+    public void Patch_Karte_zeigt_Diff_je_Datei_und_markiert_Abwahl()
+    {
+        var api = new FakeApi();
+        var main = new MainViewModel(api, api, a => a(), Guid.NewGuid().ToString("D"), "hyperv");
+        const string patch = "--- a/src/A.cs\n+++ b/src/A.cs\n@@ -1 +1 @@\n-alt\n+neu\n--- /dev/null\n+++ b/src/B.cs\n@@ -0,0 +1 @@\n+class B {}\n";
+        var now = DateTimeOffset.UtcNow;
+        var proposal = new ToolProposal(1, Guid.NewGuid().ToString("D"), "run", "task", AgentRole.Coder, "Patch.Apply", "1", "Test",
+            JsonSerializer.SerializeToElement(new { grantId = "g", patch }),
+            [new ToolTarget("t1", "src/A.cs"), new ToolTarget("t2", "src/B.cs")],
+            "snap", 1, "sbx", ContractTime.ToContract(now), ContractTime.ToContract(now.AddMinutes(5)));
+        var card = new ApprovalCardViewModel(new ProposalView(proposal, ProposalHashing.Sha256(proposal), ProposalState.AwaitingApproval), main);
+
+        Assert.True(card.IsBatch && card.HasPatch && !card.IsToolchain);
+        Assert.Equal(["ändern", "neu"], card.Targets.Select(t => t.LinesText).ToArray());
+        Assert.Contains("+neu", card.PatchText, StringComparison.Ordinal);
+        Assert.Contains("+class B {}", card.PatchText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\n", card.ArgumentsText, StringComparison.Ordinal);
+        Assert.Contains("siehe Änderungen", card.ArgumentsText, StringComparison.Ordinal);
+
+        card.Targets[1].IsSelected = false;
+        Assert.DoesNotContain("+class B {}", card.PatchText, StringComparison.Ordinal);
+        Assert.Contains("src/B.cs (abgewählt", card.PatchText, StringComparison.Ordinal);
+        Assert.Contains("Originalordner", card.SideEffectsText, StringComparison.Ordinal);
+    }
+
+    [Fact, Trait("Pruefung", "SEC-20")]
+    public void Toolchain_Karte_zeigt_Aufruf_und_Hinweis_auf_Codeausfuehrung()
+    {
+        var api = new FakeApi();
+        var main = new MainViewModel(api, api, a => a(), Guid.NewGuid().ToString("D"), "hyperv");
+        var now = DateTimeOffset.UtcNow;
+        var proposal = new ToolProposal(1, Guid.NewGuid().ToString("D"), "run", "task", AgentRole.Tester, "Toolchain.Test", "1", "Tests",
+            JsonSerializer.SerializeToElement(new { grantId = "g", toolchain = "dotnet", parameters = new { project = "Demo.sln", configuration = "Debug" } }),
+            [], "snap", 1, "sbx", ContractTime.ToContract(now), ContractTime.ToContract(now.AddMinutes(5)));
+        var card = new ApprovalCardViewModel(new ProposalView(proposal, ProposalHashing.Sha256(proposal), ProposalState.AwaitingApproval), main);
+        Assert.True(card.IsToolchain && !card.IsBatch);
+        Assert.Contains("Toolchain: dotnet · Aktion: test", card.CommandText, StringComparison.Ordinal);
+        Assert.Contains("project = Demo.sln", card.CommandText, StringComparison.Ordinal);
+        Assert.Contains("beliebigen Code", card.SideEffectsText, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Einzelaufruf_hat_keine_Abwahl()
     {

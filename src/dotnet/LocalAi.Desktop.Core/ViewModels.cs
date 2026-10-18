@@ -30,7 +30,7 @@ public interface IBrokerUiApi
 
 public sealed record EventLine(string Time, string Text);
 
-public sealed class TargetItemViewModel(ToolTarget target, Action selectionChanged) : ObservableObject
+public sealed class TargetItemViewModel(ToolTarget target, Action selectionChanged, PatchFileKind? patchKind = null) : ObservableObject
 {
     private bool _isSelected = true;
 
@@ -38,9 +38,17 @@ public sealed class TargetItemViewModel(ToolTarget target, Action selectionChang
     public string TargetId => Target.TargetId;
     public string Path => Target.Path;
 
-    public string LinesText => Target.LineStart is null && Target.LineEnd is null
-        ? UiText.Get("LinesAll")
-        : UiText.Format("Lines", Target.LineStart ?? 1, Target.LineEnd?.ToString(CultureInfo.InvariantCulture) ?? "Ende");
+    /// <summary>Bei Patch.Apply: neu/ändern/löschen statt Zeilenbereich.</summary>
+    public string LinesText => patchKind is { } kind
+        ? UiText.Get(kind switch
+        {
+            PatchFileKind.Create => "PatchCreate",
+            PatchFileKind.Delete => "PatchDelete",
+            _ => "PatchModify",
+        })
+        : Target.LineStart is null && Target.LineEnd is null
+            ? UiText.Get("LinesAll")
+            : UiText.Format("Lines", Target.LineStart ?? 1, Target.LineEnd?.ToString(CultureInfo.InvariantCulture) ?? "Ende");
 
     public string HashText => Target.ExpectedSha256 is { } h ? h[..12] + "…" : UiText.Get("NoExpectedHash");
 
@@ -63,6 +71,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
     private static readonly HashSet<string> NarrowableTools = new(StringComparer.Ordinal) { "File.ReadMany", "Patch.Apply" };
 
     private readonly MainViewModel _owner;
+    private readonly string? _patch;
     private string _filterText = string.Empty;
     private bool _busy;
 
@@ -70,7 +79,25 @@ public sealed class ApprovalCardViewModel : ObservableObject
     {
         View = view;
         _owner = owner;
-        Targets = view.Proposal.Targets.Select(t => new TargetItemViewModel(t, OnSelectionChanged)).ToList();
+        _patch = Proposal.Tool == "Patch.Apply" && Proposal.Arguments.ValueKind == JsonValueKind.Object
+                 && Proposal.Arguments.TryGetProperty("patch", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+        var kinds = new Dictionary<string, PatchFileKind>(StringComparer.Ordinal);
+        if (_patch is not null)
+        {
+            try
+            {
+                foreach (var file in PatchHeaders.Parse(_patch))
+                {
+                    kinds[file.Path] = file.Kind;
+                }
+            }
+            catch (PatchFormatException)
+            {
+                // Anzeige bleibt ohne Art; der Broker hat den Patch bereits geprüft.
+            }
+        }
+        Targets = view.Proposal.Targets
+            .Select(t => new TargetItemViewModel(t, OnSelectionChanged, kinds.TryGetValue(t.Path, out var k) ? k : null)).ToList();
         VisibleTargets = new ObservableCollection<TargetItemViewModel>(Targets);
         ApproveCommand = new RelayCommand(() => RunBusy(() => _owner.DecideAsync(this, approve: true)), () => CanApprove);
         DenyCommand = new RelayCommand(() => RunBusy(() => _owner.DecideAsync(this, approve: false)), () => !_busy);
@@ -98,16 +125,86 @@ public sealed class ApprovalCardViewModel : ObservableObject
     public bool HasParent => Proposal.ParentProposalId is not null;
     public string SideEffectsText => _owner.SandboxMode == "test"
         ? UiText.Get("SideEffectsTest")
-        : UiText.Get(Proposal.Tool == "Workspace.Snapshot" ? "SideEffectsSnapshot" : "SideEffectsRead");
+        : UiText.Get(Proposal.Tool switch
+        {
+            "Workspace.Snapshot" => "SideEffectsSnapshot",
+            "Patch.Apply" => "SideEffectsPatch",
+            "Repo.Index" => "SideEffectsIndex",
+            _ when IsToolchain => "SideEffectsToolchain",
+            _ => "SideEffectsRead",
+        });
+
+    public bool IsToolchain => Proposal.Tool.StartsWith("Toolchain.", StringComparison.Ordinal);
+
+    public bool HasPatch => _patch is not null;
+
+    /// <summary>Vollständiger Patch je Datei, lesbar; abgewählte Dateien sind gekennzeichnet.</summary>
+    public string PatchText
+    {
+        get
+        {
+            if (_patch is null)
+            {
+                return string.Empty;
+            }
+            var parts = new List<string>();
+            foreach (var target in Targets)
+            {
+                var section = PatchHeaders.Section(_patch, target.Path);
+                parts.Add(target.IsSelected ? section : $"{target.Path} {UiText.Get("PatchDeselected")}");
+            }
+            return string.Join("\n\n", parts);
+        }
+    }
+
+    /// <summary>Toolchain-Aufruf in Klartext: Toolchain, Aktion und jeder typisierte Parameter einzeln.</summary>
+    public string CommandText
+    {
+        get
+        {
+            if (!IsToolchain || Proposal.Arguments.ValueKind != JsonValueKind.Object)
+            {
+                return string.Empty;
+            }
+            var args = Proposal.Arguments;
+            var toolchain = args.TryGetProperty("toolchain", out var t) ? t.ToString() : "?";
+            var lines = new List<string> { UiText.Format("CommandToolchain", toolchain, Proposal.Tool["Toolchain.".Length..].ToLowerInvariant()) };
+            if (args.TryGetProperty("parameters", out var parameters) && parameters.ValueKind == JsonValueKind.Object
+                && parameters.EnumerateObject().Any())
+            {
+                lines.AddRange(parameters.EnumerateObject().Select(p => $"  {p.Name} = {p.Value}"));
+            }
+            else
+            {
+                lines.Add("  " + UiText.Get("CommandNoParameters"));
+            }
+            return string.Join("\n", lines);
+        }
+    }
 
     public string ValidUntilText =>
         ContractTime.Parse(Proposal.ExpiresAt).ToLocalTime().ToString("HH:mm:ss", UiText.Culture);
 
-    public string ArgumentsText => JsonSerializer.Serialize(Proposal.Arguments, new JsonSerializerOptions
+    public string ArgumentsText => JsonSerializer.Serialize(ArgumentsWithoutPatch(), new JsonSerializerOptions
     {
         WriteIndented = true,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     });
+
+    /// <summary>Der Patch steht lesbar im eigenen Abschnitt; in den Parametern nur ein Verweis.</summary>
+    private object ArgumentsWithoutPatch()
+    {
+        if (_patch is null)
+        {
+            return Proposal.Arguments;
+        }
+        var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var p in Proposal.Arguments.EnumerateObject())
+        {
+            copy[p.Name] = p.Name == "patch" ? $"({_patch.Length} Zeichen – siehe Änderungen)" : p.Value;
+        }
+        return copy;
+    }
 
     public bool IsBatch => NarrowableTools.Contains(Proposal.Tool) && Targets.Count > 1;
 
@@ -155,6 +252,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
 
     private void OnSelectionChanged()
     {
+        OnPropertyChanged(nameof(PatchText));
         OnPropertyChanged(nameof(SelectedCount));
         OnPropertyChanged(nameof(CountText));
         OnPropertyChanged(nameof(SelectionChanged));

@@ -434,3 +434,26 @@ class OrchestratorCommand(Contract):
     kind: OrchestratorCommandKind = Field(alias="kind")
     agent: str | None = Field(default=None, alias="agent")
     text: str | None = Field(default=None, alias="text")
+
+
+class TestCaseFailure(Contract):
+    """Ein fehlgeschlagener Testfall (aus Trx/JUnit, untrusted)."""
+
+    name: str = Field(alias="name")
+    message: str | None = Field(default=None, alias="message")
+    stack_trace: str | None = Field(default=None, alias="stackTrace")
+
+
+class TestReport(Contract):
+    """Einheitliches Testergebnis eines Toolchain-Laufs (Spezifikation §8, B08). Inhalte untrusted."""
+
+    format: TestResultFormat = Field(alias="format")
+    exit_code: StrictInt = Field(alias="exitCode")
+    timed_out: StrictBool = Field(alias="timedOut")
+    total: StrictInt = Field(alias="total")
+    passed: StrictInt = Field(alias="passed")
+    failed: StrictInt = Field(alias="failed")
+    skipped: StrictInt = Field(alias="skipped")
+    failures: list[TestCaseFailure] = Field(alias="failures")
+    result_files: list[str] | None = Field(default=None, alias="resultFiles")
+    problems: list[str] | None = Field(default=None, alias="problems")

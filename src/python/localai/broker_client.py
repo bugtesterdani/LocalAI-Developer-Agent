@@ -114,6 +114,10 @@ class BrokerClient:
     def toolchains_unregister(self, name: str) -> dict[str, Any]:
         return self.pipe.call("toolchains.unregister", {"name": name})
 
+    def toolchains_available(self) -> dict[str, Any]:
+        """In der Sandbox ausführbare Toolchains mit Aktionen und Parametern (Orchestrator und UI)."""
+        return self.pipe.call("toolchains.available", {})
+
     def emergency_stop(self) -> None:
         self.pipe.call("run.emergencyStop")
 

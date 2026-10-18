@@ -17,7 +17,9 @@ import zipfile
 from dataclasses import dataclass
 
 from localai import canonical
-from localai.contracts import SnapshotManifest
+import datetime as dt
+
+from localai.contracts import SnapshotFile, SnapshotManifest
 from localai.pathrules import PathRuleError, normalize_relative
 
 MAX_FILES = 50_000
@@ -101,7 +103,7 @@ class SnapshotStore:
             return self.get(manifest.snapshot_id, manifest.grant_id)
         partial = self.base / f"{manifest.snapshot_id}.partial"
         if partial.exists():
-            shutil.rmtree(partial)
+            _remove_tree(partial)
         partial.mkdir()
         try:
             self._extract(archive, partial, expected)
@@ -113,6 +115,53 @@ class SnapshotStore:
             shutil.rmtree(partial, ignore_errors=True)
             raise
         (self.base / f"{manifest.snapshot_id}.manifest.json").write_text(
+            json.dumps(manifest.to_json_obj(), ensure_ascii=False), encoding="utf-8")
+        return self._load(manifest)
+
+    def derive(self, base: SnapshotIndex, changes: dict[str, bytes | None]) -> SnapshotIndex:
+        """Abgeleiteter, ebenfalls unveränderlicher Snapshot: ``base`` plus geänderte/neue Dateien, ``None`` = gelöscht.
+
+        Unveränderte Dateien werden – wenn möglich – als harte Verknüpfung übernommen (gleicher Inhalt, kein Platz).
+        """
+        files = dict(base.files)
+        for path, data in changes.items():
+            if data is None:
+                files.pop(path, None)
+            else:
+                files[path] = (len(data), hashlib.sha256(data).hexdigest())
+        if len(files) > MAX_FILES:
+            raise SnapshotError("Zu viele Dateien im Snapshot")
+        entries = [{"path": p, "size": size, "sha256": sha} for p, (size, sha) in sorted(files.items())]
+        new_id = snapshot_id(base.grant_id, entries)
+        if (self.base / new_id).exists() and (self.base / f"{new_id}.manifest.json").exists():
+            return self.get(new_id, base.grant_id)
+        partial = self.base / f"{new_id}.partial"
+        if partial.exists():
+            _remove_tree(partial)
+        partial.mkdir()
+        try:
+            for path in files:
+                dest = partial.joinpath(*path.split("/"))
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if path in changes:
+                    dest.write_bytes(changes[path])  # type: ignore[arg-type]
+                else:
+                    src = base.resolve(path)
+                    try:
+                        os.link(src, dest)
+                    except OSError:
+                        shutil.copyfile(src, dest)
+                if not dest.is_symlink():
+                    dest.chmod(stat.S_IREAD)
+            partial.replace(self.base / new_id)
+        except BaseException:
+            _remove_tree(partial)
+            raise
+        manifest = SnapshotManifest(
+            schema_version=1, snapshot_id=new_id, grant_id=base.grant_id,
+            created_at=dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            files=[SnapshotFile(path=e["path"], size=e["size"], sha256=e["sha256"]) for e in entries])
+        (self.base / f"{new_id}.manifest.json").write_text(
             json.dumps(manifest.to_json_obj(), ensure_ascii=False), encoding="utf-8")
         return self._load(manifest)
 
@@ -152,3 +201,11 @@ class SnapshotStore:
             raise SnapshotError(f"Archiv unvollständig, es fehlen {len(missing)} Datei(en), z. B. {sorted(missing)[0]}")
         if os.name != "nt" and any(p.is_symlink() for p in target.rglob("*")):
             raise SnapshotError("Verknüpfung im entpackten Snapshot gefunden")
+
+
+def _remove_tree(path: pathlib.Path) -> None:
+    """Löscht einen Ordner mit schreibgeschützten Dateien (Windows)."""
+    def onerror(func, p, _exc):  # noqa: ANN001
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+    shutil.rmtree(path, onexc=onerror)

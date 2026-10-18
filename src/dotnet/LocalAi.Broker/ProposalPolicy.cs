@@ -23,6 +23,9 @@ public interface IPolicyContext
     bool HasSnapshot(string snapshotId, string grantId);
 
     IReadOnlyList<FolderGrant> Grants { get; }
+
+    /// <summary>Installierte Toolchains der Sandbox; null = Toolchain-Aktionen gesperrt (alles außer hyperv).</summary>
+    IToolchainCatalog? Toolchains => null;
 }
 
 /// <summary>
@@ -67,7 +70,19 @@ public sealed class ProposalPolicy
                 new HashSet<string> { "grantId", "maxBytes" }, read),
             ["File.Search"] = new("File.Search", "1", 1, 50, true, new HashSet<string> { "grantId", "query", "maxResults" },
                 read, AllowRootTarget: true),
+            // Schreibt nur in einen abgeleiteten Snapshot in der Sandbox (Arbeitskopie), nie in den Hostordner.
+            // Benötigte Rechte (Create/Modify/Delete) hängen von den Dateien im Patch ab.
+            ["Patch.Apply"] = new("Patch.Apply", "1", 1, options.MaxTargetsPerProposal, true,
+                new HashSet<string> { "grantId", "patch" }, read),
+            ["Repo.Index"] = new("Repo.Index", "1", 0, 0, false, new HashSet<string> { "grantId", "query", "maxChars" },
+                [FolderRight.List, FolderRight.Read]),
         };
+        foreach (var name in ToolchainTools.Actions.Keys)
+        {
+            // Ausführende Tools bleiben Einzelaufrufe ohne Ziele (Spezifikation §5 Sammelfreigabe).
+            _tools[name] = new(name, "1", 0, 0, false, new HashSet<string> { "grantId", "toolchain", "parameters" },
+                [FolderRight.Read, FolderRight.Execute]);
+        }
     }
 
     public IReadOnlyList<FolderGrant> Grants => _context.Grants;
@@ -142,7 +157,51 @@ public sealed class ProposalPolicy
             }
             normalized.Add(target with { Path = path });
         }
+        if (tool.Name == "Patch.Apply")
+        {
+            ValidatePatch(request.Arguments, grant, normalized);
+        }
+        else if (ToolchainTools.Actions.ContainsKey(tool.Name))
+        {
+            ToolchainTools.Validate(tool.Name, request.Arguments, _context.Toolchains);
+        }
         return normalized;
+    }
+
+    /// <summary>Ziele = genau die Dateien des Patches; Rechte je Änderungsart (SEC-05).</summary>
+    private static void ValidatePatch(JsonElement arguments, FolderGrant grant, IReadOnlyList<ToolTarget> targets)
+    {
+        var patch = arguments.TryGetProperty("patch", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString()! : null;
+        if (string.IsNullOrWhiteSpace(patch))
+        {
+            throw Invalid("Patch.Apply benötigt das Argument patch (Unified Diff)");
+        }
+        var files = PatchFiles.Parse(patch);
+        var paths = targets.Select(t => t.Path).ToHashSet(StringComparer.Ordinal);
+        var inPatch = files.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
+        if (!paths.SetEquals(inPatch) || paths.Count != targets.Count)
+        {
+            throw Invalid("Ziele müssen genau die Dateien des Patches sein (je Datei ein Ziel): "
+                          + string.Join(", ", inPatch.Order(StringComparer.Ordinal)));
+        }
+        foreach (var file in files)
+        {
+            var right = file.Kind switch
+            {
+                PatchFileKind.Create => FolderRight.Create,
+                PatchFileKind.Delete => FolderRight.Delete,
+                _ => FolderRight.Modify,
+            };
+            if (!grant.Rights.Contains(right))
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden,
+                    $"Grant {grant.GrantId} hat nicht das Recht {right} für {file.Path} – in der Projektdatei freigeben");
+            }
+            if (!grant.Recursive && file.Path.Contains('/'))
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden, $"Grant {grant.GrantId} ist nicht rekursiv: {file.Path}");
+            }
+        }
     }
 
     private FolderGrant ValidateGrant(ProposalRequest request, ToolDefinition tool)
@@ -198,6 +257,7 @@ public sealed class ProposalPolicy
         }
         RequireIntRange(arguments, "depth", 0, 10);
         RequireIntRange(arguments, "maxResults", 1, 2000);
+        RequireIntRange(arguments, "maxChars", 1000, 60_000);
         if (arguments.TryGetProperty("query", out var query)
             && (query.ValueKind != JsonValueKind.String || query.GetString() is not { Length: >= 1 and <= 200 } q || q.Any(char.IsControl)))
         {

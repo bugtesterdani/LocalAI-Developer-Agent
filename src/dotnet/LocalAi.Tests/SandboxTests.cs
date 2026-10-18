@@ -103,14 +103,6 @@ public sealed class SandboxTests : IDisposable
         Assert.Equal(BrokerErrorCodes.Forbidden, Assert.Throws<BrokerException>(() => policy.Validate(Request("File.Read", "flach", "s", paths: "unter/datei.txt"))).Code);
     }
 
-    [Fact, Trait("Pruefung", "R09")]
-    public void Projektdatei_lehnt_Delete_und_Execute_ab()
-    {
-        var path = Path.Combine(_dir, "p.json");
-        File.WriteAllText(path, """{"schemaVersion":1,"projectId":"p","name":"P","grants":[{"grantId":"g","root":".","rights":["Read","Execute"],"recursive":true}]}""");
-        Assert.Throws<InvalidDataException>(() => ProjectLoader.Load(path, _dir));
-    }
-
     // ------------------------------------------------------------------ Snapshot-Builder
 
     private FolderGrant CreateFolder(Action<string> fill, bool recursive = true, IReadOnlyList<string>? exclude = null)

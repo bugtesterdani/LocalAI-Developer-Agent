@@ -30,7 +30,9 @@ import sys
 import time
 
 from localai.contracts import ResultEnvelope
+from localai.worker.execution import Executor, ToolchainCatalog
 from localai.worker.jobs import JobRejected, WorkerState, verify_job, verify_payload
+from localai.worker.repoindex import RepoIndexer
 from localai.worker.snapshot import SnapshotStore
 from localai.worker.tools import ToolRunner
 from localai.worker.transfer import Signal, TransferDisk, TransferError, TransferKind
@@ -110,11 +112,11 @@ def pending_jobs(inbox: pathlib.Path, require_ready: bool) -> list[pathlib.Path]
 
 
 def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, poll: float,
-        require_ready: bool = False) -> None:
+        require_ready: bool = False, executor: Executor | None = None) -> None:
     for d in (inbox, work):
         d.mkdir(parents=True, exist_ok=True)
     state = WorkerState.load(work / "state.json")
-    runner = ToolRunner(SnapshotStore(work))
+    runner = ToolRunner(SnapshotStore(work), executor, RepoIndexer(work))
     print(f"[Worker] bereit, Eingang {inbox}", flush=True)
     while True:
         for job_file in pending_jobs(inbox, require_ready):
@@ -141,6 +143,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=pathlib.Path, help="Bericht der Provisionierung zurückgeben und beenden")
     parser.add_argument("--once", action="store_true", help="vorhandene Jobs verarbeiten und beenden (Tests)")
     parser.add_argument("--poll-ms", type=int, default=100)
+    parser.add_argument("--toolchains", type=pathlib.Path,
+                        help="nur VM: Manifeste/Paketquellen der installierten Toolchains – schaltet Toolchain.* frei")
+    parser.add_argument("--toolchain-root", type=pathlib.Path, help="nur Tests: Installationsort statt C:\\Toolchains")
+    parser.add_argument("--no-low-integrity", action="store_true",
+                        help="Werkzeugprozesse ohne niedrige Integritätsstufe starten (schwächer, nur zur Fehlersuche)")
     args = parser.parse_args(argv)
 
     transfer = None
@@ -165,7 +172,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Schlüssel zu kurz", file=sys.stderr)
         return 2
     sink = transfer if transfer is not None else DirectorySink(args.outbox)
-    run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready)
+    executor = None
+    if args.toolchains:
+        executor = Executor(ToolchainCatalog(args.toolchains, args.toolchain_root), args.work / "jobs",
+                            low_integrity=not args.no_low_integrity)
+    run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor)
     return 0
 
 

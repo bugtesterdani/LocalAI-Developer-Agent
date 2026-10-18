@@ -32,6 +32,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.ToolchainsScan] = [CallerRole.Ui],
         [M.ToolchainsRegister] = [CallerRole.Ui],
         [M.ToolchainsUnregister] = [CallerRole.Ui],
+        [M.ToolchainsAvailable] = [CallerRole.Ui, CallerRole.Orchestrator],
         [M.ChatSend] = [CallerRole.Ui],
         [M.AgentCancel] = [CallerRole.Ui],
         [M.RunCancel] = [CallerRole.Ui],
@@ -53,6 +54,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
 
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
+
+    /// <summary>In der Sandbox ausführbare Toolchains (nur hyperv); sonst null.</summary>
+    public IToolchainCatalog? ToolchainCatalog { get; init; }
 
     /// <summary>Live-Aktivität (Anzeige) und Aufträge an den Orchestrator.</summary>
     public required ActivityHub Activity { get; init; }
@@ -253,6 +257,38 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                     broker.PublishInfo("toolchain.unregistered", $"{name} entfernt");
                 }
                 return new JsonObject { ["removed"] = removed };
+            }
+            case M.ToolchainsAvailable:
+            {
+                // Nur Aktionen und Parameter – keine Pfade des Hosts.
+                var list = new JsonArray();
+                foreach (var manifest in ToolchainCatalog?.Available ?? [])
+                {
+                    var actions = new JsonObject();
+                    foreach (var (name, action) in manifest.Actions)
+                    {
+                        var parameters = new JsonObject();
+                        foreach (var (pname, spec) in action.Parameters ?? new Dictionary<string, ToolchainParameter>())
+                        {
+                            parameters[pname] = JsonSerializer.SerializeToNode(spec, ContractJson.Options);
+                        }
+                        actions[name] = new JsonObject { ["parameters"] = parameters, ["timeoutSeconds"] = action.TimeoutSeconds ?? 120 };
+                    }
+                    list.Add(new JsonObject
+                    {
+                        ["name"] = manifest.Name,
+                        ["displayName"] = manifest.DisplayName,
+                        ["version"] = manifest.Version,
+                        ["testResultFormat"] = manifest.TestResultFormat.ToString(),
+                        ["actions"] = actions,
+                    });
+                }
+                return new JsonObject
+                {
+                    ["enabled"] = ToolchainCatalog is not null,
+                    ["reason"] = ToolchainCatalog is null ? "Toolchain-Aktionen nur in der Betriebsart hyperv" : null,
+                    ["toolchains"] = list,
+                };
             }
             case M.ChatSend:
             {

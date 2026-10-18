@@ -17,7 +17,7 @@ public static class ToolchainValidator
 
     /// <summary>Platzhalter, die der Host bzw. die Provisionierung selbst einsetzt.</summary>
     public static readonly IReadOnlySet<string> FixedPlaceholders =
-        new HashSet<string>(StringComparer.Ordinal) { "guest", "source", "selftest", "work", "results" };
+        new HashSet<string>(StringComparer.Ordinal) { "guest", "source", "selftest", "work", "results", "packages" };
 
     public static readonly IReadOnlySet<string> ActionNames =
         new HashSet<string>(StringComparer.Ordinal) { "restore", "build", "test", "run", "lint", "format" };
@@ -490,5 +490,58 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
         var tmp = registryPath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(list, new JsonSerializerOptions(ContractJson.Options) { WriteIndented = true }), new UTF8Encoding(false));
         File.Move(tmp, registryPath, overwrite: true);
+    }
+}
+
+/// <summary>
+/// Toolchains, die für das Projekt registriert sind und beim VM-Aufbau installiert wurden (nur hyperv).
+/// Das Manifest wird aus dem registrierten Ordner gelesen und gegen den bei der Registrierung festgehaltenen
+/// Hash geprüft; abweichende Manifeste sind nicht verfügbar (die VM enthält dann ohnehin einen anderen Stand).
+/// </summary>
+public sealed class RegisteredToolchainCatalog(ToolchainRegistry registry) : IToolchainCatalog
+{
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, ToolchainManifest> _cache = new(StringComparer.Ordinal);
+
+    public IReadOnlyList<ToolchainManifest> Available =>
+        registry.ProjectToolchains.Select(Find).OfType<ToolchainManifest>().ToList();
+
+    public ToolchainManifest? Find(string name)
+    {
+        if (!registry.ProjectToolchains.Contains(name))
+        {
+            return null;
+        }
+        var registration = registry.Registrations.FirstOrDefault(r => r.Name == name);
+        if (registration is null)
+        {
+            return null;
+        }
+        lock (_gate)
+        {
+            if (_cache.TryGetValue(registration.ManifestSha256, out var cached))
+            {
+                return cached;
+            }
+            try
+            {
+                var bytes = File.ReadAllBytes(Path.Combine(registration.Directory, ToolchainValidator.ManifestFile));
+                if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != registration.ManifestSha256)
+                {
+                    return null;
+                }
+                var manifest = ToolchainValidator.Parse(Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF'));
+                if (manifest.Name != name)
+                {
+                    return null;
+                }
+                _cache[registration.ManifestSha256] = manifest;
+                return manifest;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                return null;
+            }
+        }
     }
 }

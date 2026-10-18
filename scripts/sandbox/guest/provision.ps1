@@ -99,6 +99,11 @@ try {
         Write-Host "Toolchain $name wird installiert …"
         $entry = Install-Toolchain -Name ([string]$name) -SourceRoot $sourceRoot
         Write-Host ("Toolchain {0}: installiert={1} Selbsttest={2} {3}" -f $entry.name, $entry.installed, $entry.selfTest, $entry.error)
+        if ($entry.installed) {
+            # Manifest und Offline-Paketquelle für Toolchain-Aktionen behalten (nur lesbar für Jobs).
+            try { Publish-ToolchainForJobs -Name ([string]$name) -SourceRoot $sourceRoot -Target (Join-Path $root 'toolchains') }
+            catch { $entry.error = "Bereitstellung für Jobs: $($_.Exception.Message -replace '[\r\n]+', ' ')"; $entry.installed = $false }
+        }
         $toolchains += $entry
         if ($entry.error) { $errors.Add("Toolchain $($entry.name): $($entry.error)") }
     }
@@ -115,7 +120,10 @@ try {
     $version = & $python -I -c "import sys, pydantic, localai.worker; print(sys.version.split()[0])"
     if ($LASTEXITCODE -ne 0) { throw "Python oder Worker im Gast nicht lauffähig (Exitcode $LASTEXITCODE)" }
     $report.worker.python = ([string]$version).Trim()
-    $cmd = "@echo off`r`n`"$python`" -I -m localai.worker --inbox $root\inbox --work $root\work --key-file $root\session.key --transfer-disk auto --transfer-size $size --require-ready >> $root\logs\worker.log 2>&1`r`n"
+    # Toolchain-Aktionen nur mit installierten Toolchains; Werkzeugprozesse standardmäßig mit niedriger Integrität (SEC-21).
+    $execArgs = "--toolchains $root\toolchains"
+    if ($config.PSObject.Properties['lowIntegrityTools'] -and $config.lowIntegrityTools -eq $false) { $execArgs += ' --no-low-integrity' }
+    $cmd = "@echo off`r`n`"$python`" -I -m localai.worker --inbox $root\inbox --work $root\work --key-file $root\session.key --transfer-disk auto --transfer-size $size --require-ready $execArgs >> $root\logs\worker.log 2>&1`r`n"
     [System.IO.File]::WriteAllText((Join-Path $root 'worker.cmd'), $cmd, [System.Text.Encoding]::ASCII)
     $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$root\worker.cmd`"" -WorkingDirectory $root
     $trigger = New-ScheduledTaskTrigger -AtStartup

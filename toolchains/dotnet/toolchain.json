@@ -37,13 +37,13 @@
   "actions": {
     "restore": {
       "binary": "dotnet",
-      "arguments": ["restore", "{project}"],
+      "arguments": ["restore", "{project}", "-p:RestoreSources={packages}"],
       "parameters": { "project": { "type": "Path" } },
       "timeoutSeconds": 300
     },
     "build": {
       "binary": "dotnet",
-      "arguments": ["build", "{project}", "--no-restore", "-c", "{configuration}", "--nologo"],
+      "arguments": ["build", "{project}", "-c", "{configuration}", "--nologo", "-p:RestoreSources={packages}"],
       "parameters": {
         "project": { "type": "Path" },
         "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
@@ -52,7 +52,7 @@
     },
     "test": {
       "binary": "dotnet",
-      "arguments": ["test", "{project}", "--no-restore", "-c", "{configuration}", "--logger", "trx", "--results-directory", "{results}"],
+      "arguments": ["test", "{project}", "-c", "{configuration}", "--nologo", "-p:RestoreSources={packages}", "--logger", "trx", "--results-directory", "{results}"],
       "parameters": {
         "project": { "type": "Path" },
         "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
@@ -61,7 +61,7 @@
     },
     "run": {
       "binary": "dotnet",
-      "arguments": ["run", "--project", "{project}", "--no-restore", "-c", "{configuration}"],
+      "arguments": ["run", "--project", "{project}", "-c", "{configuration}", "-p:RestoreSources={packages}"],
       "parameters": {
         "project": { "type": "Path" },
         "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
@@ -70,7 +70,7 @@
     },
     "format": {
       "binary": "dotnet",
-      "arguments": ["format", "{project}", "--verify-no-changes", "--no-restore"],
+      "arguments": ["format", "{project}", "--verify-no-changes"],
       "parameters": { "project": { "type": "Path" } },
       "timeoutSeconds": 300
     }
