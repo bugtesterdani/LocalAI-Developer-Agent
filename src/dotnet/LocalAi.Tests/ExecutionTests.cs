@@ -200,6 +200,19 @@ public sealed class ExecutionTests : IAsyncLifetime
         Assert.True(Directory.Exists(root));
     }
 
+    [Theory, Trait("Pruefung", "M4-E2E")]
+    [InlineData("m4-csharp-project.json")]
+    [InlineData("m4-python-project.json")]
+    public void Beispielprojekte_fuer_M4_sind_gueltig(string file)
+    {
+        var project = ProjectLoader.Load(Path.Combine(ContractTests.RepoRoot(), "config", file), ContractTests.RepoRoot());
+        var grant = Assert.Single(project.Grants);
+        Assert.Contains(FolderRight.Execute, grant.Rights);
+        Assert.Contains(FolderRight.Modify, grant.Rights);
+        Assert.DoesNotContain(FolderRight.Delete, grant.Rights);
+        Assert.Equal(["dotnet", "python"], project.Toolchains!);
+    }
+
     [Fact, Trait("Pruefung", "B08")]
     public void Abgeleiteter_Snapshot_nur_zum_bekannten_Basissnapshot_desselben_Grants()
     {

@@ -29,19 +29,22 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 |---|---|
 | `test` | Testadapter zählt nur, nichts wird gelesen |
 | `none` | keine Sandbox – jede Ausführung wird abgelehnt |
-| `dev-local-unsafe` | Worker läuft **ohne VM** als normaler Prozess auf diesem PC; nur zum Entwickeln, in der Oberfläche rot |
+| `dev-local-unsafe` | Worker läuft **ohne VM** als normaler Prozess auf diesem PC; nur zum Entwickeln, in der Oberfläche rot. Build/Test (`Toolchain.*`) sind hier immer gesperrt |
 | `hyperv` | Offline-VM; einmalig `scripts\sandbox\Enable-LocalAiHyperV.ps1` als Administrator, ISO in `sandbox.hyperv.imagePath` |
 
 ## Struktur
 
 ```text
 contracts/            JSON Schema (einzige Quelle der Verträge) und Testvektoren
-config/               localai.json (Modus, Worker, Fake-Agent), demo-project.json (Ordner + Rechte)
+config/               localai.json (Modus, Worker, Fake-Agent), demo-project.json (Ordner + Rechte), m4-*-project.json
 samples/demo-csv/     kleines Demo-Projekt für den Testlauf
+samples/m4-*/         M4: Rechner in C# und Python (Build/Test in der VM), Sicherheitsprobe SEC-13
 toolchains/           Vorlagen für Toolchain-Ordner (dotnet, python) mit Anleitung
 docs/                 Spezifikation, Plan, Prüfanleitungen
 scripts/              test.ps1 / start.ps1 (Windows), test.sh (Linux)
   sandbox/              Hyper-V: Aufbau, Copy-VMFile, Laufwerkswechsel, KVP-Signal, Gast-Provisionierung
+  toolchains/           Offline-NuGet-Quelle für die dotnet-Toolchain
+  samples/              großes Beispiel-Repository (> 2.000 Dateien) erzeugen
 src/dotnet/           LocalAi.slnx
   LocalAi.Contracts     generierte Records, kanonisches JSON, Pipe-Protokoll
   LocalAi.Broker        Approval Broker, Policy, Audit-Journal, Testadapter
@@ -50,7 +53,7 @@ src/dotnet/           LocalAi.slnx
   LocalAi.Desktop.Core  ViewModels, Broker-Client, deutsche Texte (UiText.resx)
   LocalAi.Desktop       WPF-Oberfläche
   LocalAi.Tests         xUnit-Tests (Filter z. B. `dotnet test --filter Pruefung=SEC-23`)
-src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge, Sandbox-Worker), Tests
+src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge, Sandbox-Worker mit Patch/Toolchain/Repo-Index, Orchestrator), Tests
 tests/integration/    pytest gegen den echten Broker-Prozess
 tools/codegen/        Generatoren für Verträge, Testvektoren, Oberflächentexte
 ```

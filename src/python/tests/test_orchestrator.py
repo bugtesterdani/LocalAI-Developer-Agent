@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from localai.contracts import ActivityKind, AgentState, OrchestratorCommandKind, ProposalState
+from localai.contracts import ActivityKind, AgentState, FolderRight, OrchestratorCommandKind, ProposalState
 from localai.orchestrator import calibrate, dag, hardware, prompts, protocol
 from localai.orchestrator.activity import ActivityReporter
 from localai.orchestrator.context import Budget, Evidence, assemble, estimate_tokens
@@ -87,7 +87,7 @@ def test_tokenschaetzung_konservativ():
 @pytest.mark.parametrize("role", ["Planner", "Coder", "Tester", "Debugger", "Reviewer"])
 def test_prompts_versioniert_englisch_und_im_regelbudget(role):
     text, loaded = prompts.system_prompt(role)
-    assert loaded[0].version == 1 and loaded[1].version >= 2
+    assert loaded[0].version == 2 and loaded[1].version >= 3
     assert f"You are the {role} agent" in text
     assert "message_de" in text and "German" in text
     assert estimate_tokens(text) <= Budget.split(8192, 2048).rules
@@ -135,7 +135,7 @@ def test_ungueltige_antworten(text):
 
 def test_ergebnispruefung_je_rolle():
     tester = protocol.validate_result("Tester", {"message_de": "x", "test_plan": [{"name": "t"}], "executed": True})
-    assert tester["executed"] is False, "nicht ausgeführte Tests dürfen nie als ausgeführt gelten"
+    assert "executed" not in tester, "ob Tests liefen, entscheidet nur der Lauf in der Sandbox, nie das Modell"
     review = protocol.validate_result("Reviewer", {"message_de": "x", "verdict": "ready_for_user_review",
                                                    "findings": [{"severity": "high", "finding": "bug"}]})
     assert review["verdict"] == "changes_needed"
@@ -596,13 +596,28 @@ def test_run_mit_fuenf_rollen_parallel_und_reparaturschleife(ollama, tmp_path):
     t1 = [e for e in broker.of("Coder") if e.task_id == "T1"]
     t2 = [e for e in broker.of("Tester") if e.task_id == "T2"]
     assert t1 and t2 and t2[0].at < t1[-1].at and t1[0].at < t2[-1].at
+    # Testlauf 1 schlägt fehl → Debugger repariert (Patch angewendet) → Testlauf 2 grün → Review ohne Befund.
+    assert "angewendet" in broker.chats("Debugger")[0]
     review_chats = broker.chats("Reviewer")
-    assert len(review_chats) == 2 and "keine Freigabe" in review_chats[0], "Review → Debugger → erneutes Review"
-    assert "nicht angewendet" in broker.chats("Debugger")[0]
-    summary = broker.chats("Orchestrator")[-1]
-    assert "T1 (Coder)" in summary and "erledigt" in summary and "nicht ausgeführt" in summary
+    assert len(review_chats) == 1 and "keine Freigabe" in review_chats[0]
+    orchestrator_chats = broker.chats("Orchestrator")
+    assert any("python test (path=.): fehlgeschlagen (Exitcode 1)" in c for c in orchestrator_chats)
+    assert any("python test (path=.): ok" in c for c in orchestrator_chats)
+    summary = orchestrator_chats[-1]
+    assert "T1 (Coder)" in summary and "erledigt" in summary
+    assert "Build/Tests in der Sandbox: bestanden" in summary and "3 Patch(es) angewendet" in summary
+    assert "Projektordner ist unverändert" in summary
     tools = [p.tool for p in broker.proposals.values()]
-    assert tools[:2] == ["Workspace.Snapshot", "File.List"] and "File.Read" in tools
+    assert tools[:2] == ["Workspace.Snapshot", "Repo.Index"] and "File.Read" in tools
+    assert tools.count("Patch.Apply") == 3 and tools.count("Toolchain.Test") == 2
+    # Patches bauen aufeinander auf: jeder auf dem Stand des vorigen.
+    bases = [p.snapshot_id for p in broker.proposals.values() if p.tool == "Patch.Apply"]
+    assert sorted(bases) == ["snap-1", "snap-2", "snap-3"]
+    tests_on = [p.snapshot_id for p in broker.proposals.values() if p.tool == "Toolchain.Test"]
+    assert tests_on == ["snap-3", "snap-4"]
+    # Der Debugger bekommt die echte Fehlermeldung aus der Sandbox.
+    debugger_prompts = [r["messages"][-1]["content"] for r in ollama.requests if "Debugger agent" in r["messages"][0]["content"]]
+    assert any("TypeError: unsupported operand" in c for c in debugger_prompts)
     assert all(p.run_id == "run-t" for p in broker.proposals.values())
     # Jede Toolaktion lief über einen Vorschlag; nichts wurde ohne Entscheidung ausgeführt.
     assert {e.agent for e in broker.events if e.kind == ActivityKind.Proposal} >= {"Planner", "Coder"}
@@ -630,7 +645,7 @@ def test_abgelehnter_lesezugriff_liefert_keinen_inhalt(ollama, tmp_path):
 
 def test_abbruch_eines_agenten_laesst_den_rest_weiterlaufen(ollama, tmp_path):
     # Coder-Lesevorschläge bleiben offen (keine Entscheidung) → Coder wird abgebrochen.
-    broker = FakeBroker(decide=lambda r: None if r.agent.value == "Coder" else ProposalState.Succeeded)
+    broker = FakeBroker(decide=lambda r: None if r.agent.value == "Coder" else ProposalState.Succeeded, toolchains=[])
     orch, thread = start(broker, ollama, tmp_path)
     broker.send(OrchestratorCommandKind.Chat, "Ziel")
     wait_for(lambda: any(e.agent == "Coder" and e.state == AgentState.WaitingApproval for e in broker.events), timeout=30)
@@ -718,3 +733,71 @@ def test_unkalibriertes_profil_wird_nicht_benutzt(ollama, tmp_path):
     assert not ollama.requests
     orch.stop()
     thread.join(5)
+
+
+def test_patch_passt_nicht_agent_korrigiert(ollama, tmp_path):
+    broker = FakeBroker(patch_failures=1, test_runs=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: finished(broker), timeout=60)
+    patches = [p for p in broker.proposals.values() if p.tool == "Patch.Apply"]
+    assert len(patches) == 4, "ein Fehlversuch + Coder + Tester + Debugger (nach Review-Befund)"
+    assert any("Agent korrigiert" in (e.text or "") for e in broker.events if e.kind == ActivityKind.Warning)
+    prompts = [r["messages"][-1]["content"] for r in ollama.requests]
+    assert any("was NOT applied" in c and "Hunk 1 passt nicht" in c for c in prompts)
+    assert "Build/Tests in der Sandbox: bestanden" in broker.chats("Orchestrator")[-1]
+    orch.stop()
+    thread.join(5)
+
+
+def test_ohne_schreibrecht_und_toolchain_nur_vorschlaege(ollama, tmp_path):
+    broker = FakeBroker(rights=(FolderRight.List, FolderRight.Read), toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: finished(broker), timeout=60)
+    tools = {p.tool for p in broker.proposals.values()}
+    assert "Patch.Apply" not in tools and not any(t.startswith("Toolchain.") for t in tools)
+    chats = broker.chats("Orchestrator")
+    assert any("Rechte Modify, Create" in c for c in chats) and any("nur in der Offline-VM" in c for c in chats)
+    assert "nicht angewendet" in broker.chats("Coder")[0]
+    summary = chats[-1]
+    assert "Build/Tests in der Sandbox: nicht ausgeführt" in summary and "keine Änderung angewendet" in summary
+    reviewer = [r["messages"][-1]["content"] for r in ollama.requests if "Reviewer agent" in r["messages"][0]["content"]]
+    assert reviewer and "NOT EXECUTED" in reviewer[0]
+    orch.stop()
+    thread.join(5)
+
+
+def test_abgelehnter_testlauf_gilt_als_nicht_ausgefuehrt(ollama, tmp_path):
+    broker = FakeBroker(decide=lambda r: ProposalState.Denied if r.tool.startswith("Toolchain.") else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: finished(broker), timeout=60)
+    assert any("nicht ausgeführt (abgelehnt)" in c for c in broker.chats("Orchestrator"))
+    assert "Build/Tests in der Sandbox: nicht ausgeführt" in broker.chats("Orchestrator")[-1]
+    orch.stop()
+    thread.join(5)
+
+
+def test_pruefLaeufe_aus_repo_map_und_plan():
+    from localai.orchestrator.run import check_verify, default_verify, repo_facts
+    text = ("Repo map of snapshot abc – 2104 files, C# 2100, Python 3\n"
+            "Project/build files: src/App/App.csproj, Demo.sln, tests/App.Tests/App.Tests.csproj (+2 more)\n")
+    projects, languages = repo_facts(text)
+    assert projects == ["src/App/App.csproj", "Demo.sln", "tests/App.Tests/App.Tests.csproj"]
+    assert languages == {"C#": 2100, "Python": 3}
+    toolchains = [
+        {"name": "dotnet", "actions": {"build": {"parameters": {"project": {"type": "Path"}, "configuration": {"type": "Choice", "values": ["Debug", "Release"]}}},
+                                       "test": {"parameters": {"project": {"type": "Path"}, "configuration": {"type": "Choice", "values": ["Debug", "Release"]}}}}},
+        {"name": "python", "actions": {"test": {"parameters": {"path": {"type": "Path"}}}}},
+        {"name": "cpp", "actions": {"test": {"parameters": {"preset": {"type": "Text"}}}}},
+    ]
+    steps = default_verify(toolchains, projects, languages)
+    assert [(s.toolchain, s.action, s.parameters) for s in steps] == [
+        ("dotnet", "test", {"project": "Demo.sln", "configuration": "Debug"}), ("python", "test", {"path": "."})]
+    ok, problems = check_verify([{"toolchain": "dotnet", "action": "build", "parameters": {"project": "a.csproj", "configuration": "Release"}},
+                                 {"toolchain": "dotnet", "action": "test", "parameters": {"project": "a.csproj"}},
+                                 {"toolchain": "dotnet", "action": "test", "parameters": {"project": "a", "configuration": "Fast"}},
+                                 {"toolchain": "go", "action": "test", "parameters": {}}], toolchains)
+    assert [s.describe() for s in ok] == ["dotnet build (project=a.csproj, configuration=Release)"]
+    assert len(problems) == 3

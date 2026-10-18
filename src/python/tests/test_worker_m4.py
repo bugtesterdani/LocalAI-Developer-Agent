@@ -363,3 +363,18 @@ def test_repo_index_nutzt_cache_fuer_abgeleitete_snapshots(tmp_path, store):
     assert any(i.path == "src/neu.py" for i in infos)
     text = build_map(derived, infos, 4000)
     assert "src/neu.py" in text and derived.snapshot_id[:12] in text
+
+
+def test_einrueckung_im_kontext_falsch_wird_toleriert_und_datei_bleibt_exakt():
+    file = patching.TextFile.decode(b"def f():\n    x = 1\n    return x\n", "f.py")
+    # Modell hat die Kontextzeilen mit einem Leerzeichen zu wenig eingerückt
+    patch = patching.parse("--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,4 @@\n def f():\n    x = 1\n+    y = 2\n    return x\n")
+    patching.apply_hunks(file, patch[0].hunks, "f.py")
+    assert file.encode() == b"def f():\n    x = 1\n    y = 2\n    return x\n"
+
+
+def test_kontextzeile_ohne_praefix_von_kleinen_modellen():
+    file = patching.TextFile.decode(b"def f():\n\n    return 1\n", "f.py")
+    patch = patching.parse("--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,4 @@\ndef f():\n\n+    # neu\n     return 1\nDieser Patch ergänzt einen Kommentar.\n")
+    patching.apply_hunks(file, patch[0].hunks, "f.py")
+    assert file.encode() == b"def f():\n\n    # neu\n    return 1\n"

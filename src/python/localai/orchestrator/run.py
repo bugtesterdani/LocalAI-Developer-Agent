@@ -1,11 +1,13 @@
-"""Ablauf eines Runs: Snapshot → Planner (DAG) → Coder/Tester parallel → Reviewer ↔ Debugger → Zusammenfassung.
+"""Ablauf eines Runs (M4):
+
+Snapshot → Repo-Map → Planner (DAG, Prüfläufe) → Coder/Tester parallel, Patches nach Freigabe in der Sandbox
+angewendet → Build/Test in der Sandbox → Debugger auf echten Fehlern (höchstens N Reparaturen, jeweils erneut
+geprüft) → Reviewer mit echtem Testbericht ↔ Debugger → Zusammenfassung.
 
 Alle fünf Rollen sind ab Runstart sichtbar (AC02). Mehrere Aufgaben laufen gleichzeitig, sofern Rollen und
 Schreibmengen es erlauben; GPU-Requests werden über einen fairen Slot vergeben, Toolvorschläge warten
-unabhängig davon auf die Nutzerentscheidung. Chatantworten an den Nutzer sind deutsch.
-
-M3-Hinweis: Build/Test-Tools und Patch.Apply folgen in M4. Patches bleiben hier Vorschläge, Tests werden als
-nicht ausgeführt gekennzeichnet; der Debugger arbeitet auf Review-Befunden (ab M4 auch auf Testfehlern).
+unabhängig davon auf die Nutzerentscheidung. Patches werden nacheinander angewendet (jeder auf den Stand des
+vorigen). Chatantworten an den Nutzer sind deutsch. Der Projektordner auf dem Host wird nie verändert.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
-from localai.contracts import ActivityKind, AgentState, OrchestratorCommand, OrchestratorCommandKind
+from localai.contracts import ActivityKind, AgentState, FolderRight, OrchestratorCommand, OrchestratorCommandKind
 from localai.orchestrator import dag, hardware
 from localai.orchestrator.activity import ActivityReporter
 from localai.orchestrator.agents import Agent, AgentFailed, Assignment
@@ -29,13 +31,120 @@ from localai.orchestrator.gateway import Cancelled, GatewayError, OllamaGateway
 from localai.orchestrator.models import ROLES, CalibrationStore, ConfigError, ModelsConfig, ProfileChoice, choose_profiles
 from localai.orchestrator.protocol import Action
 from localai.orchestrator.runtime import PRIORITY_REVIEW, PRIORITY_USER, AgentControls, FairGate, LimitReached, RunClock
-from localai.orchestrator.tools import ToolBridge
+from localai.orchestrator.tools import PatchOutcome, ToolBridge, ToolchainOutcome
 
 SEVERITY_DE = {"high": "hoch", "medium": "mittel", "low": "niedrig"}
 STATE_DE = {dag.TaskState.DONE: "erledigt", dag.TaskState.FAILED: "gescheitert", dag.TaskState.CANCELLED: "abgebrochen",
             dag.TaskState.SKIPPED: "übersprungen", dag.TaskState.PENDING: "offen", dag.TaskState.RUNNING: "läuft"}
 MAX_CHAT = 15_000
 NOT_EXECUTED = re.compile(r"not\s+executed|nicht\s+ausgef(ü|ue)hrt|not\s+been\s+(run|executed)", re.I)
+MAX_APPLY_RETRIES = 3
+_MAP_PROJECTS = re.compile(r"^Project/build files: (.*?)(?: \(\+\d+ more\))?$", re.M)
+_MAP_HEADER = re.compile(r"^Repo map of snapshot \S+ – \d+ files, (.*)$", re.M)
+
+
+@dataclass
+class VerifyStep:
+    toolchain: str
+    action: str
+    parameters: dict[str, Any]
+
+    def describe(self) -> str:
+        shown = ", ".join(f"{k}={v}" for k, v in self.parameters.items())
+        return f"{self.toolchain} {self.action}" + (f" ({shown})" if shown else "")
+
+
+@dataclass
+class Verification:
+    ran: bool
+    ok: bool
+    text_en: str  # Evidenz für Debugger/Reviewer
+    summary_de: str  # Chat
+    snapshot_id: str | None = None
+
+
+@dataclass
+class AppliedPatch:
+    label: str
+    patch: str
+    files: list[str]
+
+
+def repo_facts(map_text: str) -> tuple[list[str], dict[str, int]]:
+    """Projektdateien und Sprachen aus der Repo-Map (Format aus localai.worker.repoindex.build_map)."""
+    projects: list[str] = []
+    match = _MAP_PROJECTS.search(map_text)
+    if match:
+        projects = [p.strip() for p in match.group(1).split(",") if p.strip()]
+    languages: dict[str, int] = {}
+    header = _MAP_HEADER.search(map_text)
+    if header:
+        for part in header.group(1).split(","):
+            name, _, count = part.strip().rpartition(" ")
+            if name and count.isdigit():
+                languages[name] = int(count)
+    return projects, languages
+
+
+def _depth(path: str) -> int:
+    return path.count("/")
+
+
+def default_verify(toolchains: list[dict[str, Any]], projects: list[str], languages: dict[str, int]) -> list[VerifyStep]:
+    """Standard-Prüflauf je passender Toolchain: test (sonst build); Parameter aus Projektdateien und Auswahlwerten."""
+    steps: list[VerifyStep] = []
+    for tc in toolchains:
+        name = tc.get("name", "")
+        actions = tc.get("actions") or {}
+        action = "test" if "test" in actions else "build" if "build" in actions else None
+        if action is None:
+            continue
+        guess: str | None = None
+        if name == "dotnet":
+            solutions = sorted((p for p in projects if p.lower().endswith((".sln", ".slnx"))), key=lambda p: (_depth(p), p))
+            csproj = sorted((p for p in projects if p.lower().endswith(".csproj")), key=lambda p: ("test" not in p.lower(), _depth(p), p))
+            guess = (solutions or csproj or [None])[0]
+        elif name.startswith("python") and languages.get("Python"):
+            guess = "."
+        if guess is None:
+            continue
+        params: dict[str, Any] = {}
+        usable = True
+        for pname, spec in (actions[action].get("parameters") or {}).items():
+            kind = spec.get("type")
+            if kind == "Choice" and spec.get("values"):
+                params[pname] = spec["values"][0]
+            elif kind == "Path":
+                params[pname] = guess
+            else:
+                usable = False
+        if usable:
+            steps.append(VerifyStep(name, action, params))
+    return steps
+
+
+def check_verify(entries: list[dict[str, Any]], toolchains: list[dict[str, Any]]) -> tuple[list[VerifyStep], list[str]]:
+    """Prüfläufe aus dem Plan gegen die verfügbaren Toolchains (Broker und Sandbox prüfen erneut)."""
+    by_name = {tc.get("name"): tc for tc in toolchains}
+    steps: list[VerifyStep] = []
+    problems: list[str] = []
+    for entry in entries:
+        tc = by_name.get(entry.get("toolchain"))
+        action = str(entry.get("action", "")).lower()
+        params = entry.get("parameters") or {}
+        if tc is None or action not in (tc.get("actions") or {}):
+            problems.append(f"{entry.get('toolchain')} {action}: nicht verfügbar")
+            continue
+        declared = (tc["actions"][action].get("parameters") or {})
+        if set(params) != set(declared):
+            problems.append(f"{tc['name']} {action}: Parameter {sorted(params)} statt {sorted(declared)}")
+            continue
+        bad = [k for k, spec in declared.items() if spec.get("type") == "Choice" and params[k] not in (spec.get("values") or [])]
+        if bad:
+            problems.append(f"{tc['name']} {action}: ungültiger Wert für {', '.join(bad)}")
+            continue
+        steps.append(VerifyStep(tc["name"], action, dict(params)))
+    return steps[:4], problems
 
 
 @dataclass
@@ -75,6 +184,12 @@ class Orchestrator:
         self.bridge: ToolBridge | None = None
         self.gpu = FairGate(config.limits.max_gpu_requests)
         self.listing: list[Evidence] = []
+        self.listing_snapshot: str | None = None
+        self.projects: list[str] = []
+        self.languages: dict[str, int] = {}
+        self.verify_steps: list[VerifyStep] = []
+        self.applied: list[AppliedPatch] = []
+        self._applied_lock = threading.Lock()
 
     # ------------------------------------------------------------------ Aufträge der Oberfläche
     def handle(self, command: OrchestratorCommand) -> None:
@@ -211,24 +326,65 @@ class Orchestrator:
                 reporter.chat("Orchestrator", "Ohne Snapshot kann ich nicht arbeiten. Schreib mir erneut, wenn du den "
                               "Snapshot freigeben möchtest.")
                 return
-        if not self.listing:
-            try:
-                listing = bridge.execute("Planner", "T0", Action("list", "", path=".", depth=4,
-                                                                   reason="Dateiliste des Projekts als Startkontext"),
-                                         planner_cancel)
-                self.listing = [Evidence(e.evidence_id, e.source, e.text, pinned=True) for e in listing.evidence]
-            except Cancelled:
-                state.controls.run.raise_if_cancelled()
+        self.applied = []
+        if not self.listing or self.listing_snapshot != bridge.snapshot_id:
+            self._start_evidence(state, bridge, agents["Planner"])
+        self._announce_capabilities(bridge)
         plan_tasks, acceptance = self._plan(state, agents["Planner"])
         if plan_tasks is None:
             return
         self._execute(state, agents, plan_tasks, acceptance)
+
+    def _start_evidence(self, state: GoalState, bridge: ToolBridge, planner: Agent) -> None:
+        """Repo-Map als angeheftete Startevidenz; ohne Index (abgelehnt/fehlgeschlagen) die Dateiliste."""
+        cancel = state.controls.token("Planner")
+        max_chars = max(3000, min(30_000, int(planner.budget.evidence * planner.chars_per_token * 0.45)))
+        try:
+            outcome = bridge.repo_map("Planner", "T0", cancel, max_chars)
+            if not outcome.evidence:
+                outcome = bridge.execute("Planner", "T0", Action("list", "", path=".", depth=4,
+                                                                 reason="Dateiliste des Projekts als Startkontext"), cancel)
+            else:
+                self.projects, self.languages = repo_facts(outcome.evidence[0].text)
+        except Cancelled:
+            state.controls.run.raise_if_cancelled()
+            return
+        self.listing = [Evidence(e.evidence_id, e.source, e.text, pinned=True) for e in outcome.evidence]
+        self.listing_snapshot = bridge.snapshot_id
+
+    def _announce_capabilities(self, bridge: ToolBridge) -> None:
+        notes = []
+        rights = bridge.rights()
+        missing = [r.value for r in (FolderRight.Modify, FolderRight.Create) if r not in rights]
+        if missing:
+            notes.append(f"Patches können nicht angewendet werden: der Projektfreigabe fehlen die Rechte {', '.join(missing)} "
+                         "(in der Projektdatei unter rights ergänzen). Die Agenten liefern dann nur Vorschläge.")
+        if not bridge.toolchains():
+            notes.append("Builds und Tests laufen nur in der Offline-VM (Betriebsart hyperv) mit registrierten Toolchains und "
+                         "dem Recht Execute – in dieser Sitzung werden Tests nicht ausgeführt.")
+        elif FolderRight.Execute not in rights:
+            notes.append("Builds und Tests sind gesperrt: der Projektfreigabe fehlt das Recht Execute.")
+        if notes:
+            self.reporter.chat("Orchestrator", "\n".join(notes))
+
+    def _toolchain_text(self, bridge: ToolBridge) -> str:
+        lines = []
+        for tc in bridge.toolchains():
+            for action, spec in (tc.get("actions") or {}).items():
+                params = []
+                for pname, p in (spec.get("parameters") or {}).items():
+                    kind = p.get("type")
+                    params.append(f"{pname}: one of {p.get('values')}" if kind == "Choice" else f"{pname}: {kind}")
+                lines.append(f"- {tc['name']} {action}(" + ", ".join(params) + ")")
+        return "\n".join(lines) if lines else "- none (builds and tests cannot run in this session)"
 
     # ------------------------------------------------------------------ Planner
     def _plan(self, state: GoalState, planner: Agent) -> tuple[list[dag.Task] | None, list[str]]:
         text = f"## User goal (German)\n{state.goal}"
         if self.previous_summary:
             text += f"\n\n## Summary of the previous run\n{self.previous_summary}"
+        if self.bridge is not None:
+            text += f"\n\n## Available toolchains (for verify)\n{self._toolchain_text(self.bridge)}"
         for attempt in (1, 2):
             try:
                 result = planner.run(Assignment("P1", "Plan erstellen", text, list(self.listing), PRIORITY_USER),
@@ -248,6 +404,7 @@ class Orchestrator:
                 text += f"\n\n## Your previous plan was rejected\n{err} Fix the plan."
                 continue
             acceptance = result.result.get("acceptance", [])
+            self._choose_verify(result.result.get("verify") or [])
             lines = [result.result["message_de"], "", "Plan:"]
             for t in tasks:
                 deps = f" (nach {', '.join(t.depends_on)})" if t.depends_on else ""
@@ -255,6 +412,8 @@ class Orchestrator:
                 lines.append(f"{t.task_id} · {t.role} · {t.title}{deps} – ändert: {writes}")
             if acceptance:
                 lines += ["", "Akzeptanzkriterien:"] + [f"- {a}" for a in acceptance]
+            if self.verify_steps:
+                lines += ["", "Prüfung in der Sandbox:"] + [f"- {v.describe()}" for v in self.verify_steps]
             self.reporter.chat("Planner", "\n".join(lines))
             for t in tasks:
                 self.reporter.event(t.role, ActivityKind.Task, f"{t.task_id}: {t.title}", task_id=t.task_id,
@@ -262,6 +421,13 @@ class Orchestrator:
             return tasks, acceptance
         self.reporter.chat("Planner", "Ich konnte keinen gültigen Plan erstellen (zweimal ungültig). Bitte formuliere das Ziel genauer.")
         return None, []
+
+    def _choose_verify(self, entries: list[dict[str, Any]]) -> None:
+        toolchains = self.bridge.toolchains() if self.bridge else []
+        steps, problems = check_verify(entries, toolchains)
+        if problems:
+            self.reporter.event("Planner", ActivityKind.Warning, "Prüfläufe aus dem Plan verworfen: " + "; ".join(problems))
+        self.verify_steps = steps or default_verify(toolchains, self.projects, self.languages)
 
     # ------------------------------------------------------------------ Coder/Tester-Aufgaben
     def _task_text(self, state: GoalState, task: dag.Task, tasks: list[dag.Task], acceptance: list[str]) -> str:
@@ -282,15 +448,19 @@ class Orchestrator:
             result = by_id[dep].result or {}
             patch = result.get("patch") or result.get("test_patch")
             if patch:
-                evidence.append(Evidence(f"D{dep}", f"proposed patch of task {dep} (not applied)", patch, pinned=True))
+                applied = isinstance(result.get("apply"), PatchOutcome) and result["apply"].applied
+                evidence.append(Evidence(f"D{dep}", f"patch of task {dep} ({'applied – files already contain it' if applied else 'NOT applied'})",
+                                         patch, pinned=True))
         return evidence
 
     def _run_task(self, state: GoalState, agent: Agent, task: dag.Task, tasks: list[dag.Task],
                   acceptance: list[str]) -> None:
         cancel = state.controls.token(task.role)
+        field_name = "patch" if task.role == "Coder" else "test_patch"
+        finisher = self._finisher(task.role, task.task_id, f"{task.task_id}: {task.title}", field_name, cancel)
         try:
             result = agent.run(Assignment(task.task_id, task.title, self._task_text(state, task, tasks, acceptance),
-                                          self.listing + self._dependency_evidence(task, tasks)), cancel)
+                                          self.listing + self._dependency_evidence(task, tasks), finisher=finisher), cancel)
             task.result, task.steps, task.state = result.result, result.steps, dag.TaskState.DONE
             self._post_result(task)
         except Cancelled as err:
@@ -306,16 +476,56 @@ class Orchestrator:
             self.reporter.state(task.role, AgentState.Failed, str(err), task.task_id)
             self.reporter.chat(task.role, f"{task.task_id} gescheitert: {err}")
 
+    def _finisher(self, role: str, task_id: str, label: str, field_name: str, cancel):  # noqa: ANN001, ANN202
+        """Wendet den Patch des Ergebnisses an; passt er nicht, bekommt der Agent den Grund und korrigiert (≤ 3×)."""
+        retries = {"n": 0}
+
+        def finish(result: dict[str, Any]) -> str | None:
+            patch = (result.get(field_name) or "").strip()
+            if not patch or self.bridge is None:
+                result["apply"] = None
+                return None
+            if FolderRight.Modify not in self.bridge.rights() and FolderRight.Create not in self.bridge.rights():
+                result["apply"] = PatchOutcome(False, "no-rights", note_de="nicht angewendet (Recht Modify/Create fehlt)")
+                return None
+            outcome = self.bridge.apply_patch(role, task_id, patch + "\n", label, cancel)
+            result["apply"] = outcome
+            if outcome.applied:
+                with self._applied_lock:
+                    self.applied.append(AppliedPatch(label, patch, outcome.files))
+                return None
+            if outcome.feedback and retries["n"] < MAX_APPLY_RETRIES:
+                retries["n"] += 1
+                self.reporter.event(role, ActivityKind.Warning, f"{task_id}: Patch nicht angewendet ({outcome.note_de}) – "
+                                    f"Agent korrigiert (Versuch {retries['n']}/{MAX_APPLY_RETRIES})", task_id=task_id)
+                return outcome.feedback
+            return None
+
+        return finish
+
+    @staticmethod
+    def _apply_text(r: dict[str, Any]) -> str:
+        outcome = r.get("apply")
+        if not isinstance(outcome, PatchOutcome):
+            return "nicht angewendet"
+        if outcome.applied:
+            text = f"angewendet → Stand {(outcome.snapshot_id or '?')[:12]}"
+            if outcome.deselected:
+                text += f"; abgewählt (unverändert): {', '.join(outcome.deselected)}"
+            return text
+        return f"nicht angewendet ({outcome.note_de or outcome.state})"
+
     def _post_result(self, task: dag.Task) -> None:
         r = task.result or {}
         if task.role == "Coder":
-            text = f"{task.task_id} · {task.title}\n{r['message_de']}\n\nPatch-Vorschlag (nicht angewendet):\n```diff\n{r['patch']}\n```"
+            text = (f"{task.task_id} · {task.title}\n{r['message_de']}\n\nPatch – {self._apply_text(r)}:\n"
+                    f"```diff\n{r['patch']}\n```")
         else:
             cases = "\n".join(f"- {c.get('name', '?')}: {c.get('purpose', '')}" for c in r.get("test_plan", [])
                               if isinstance(c, dict))
-            text = (f"{task.task_id} · {task.title}\n{r['message_de']}\n\nTestfälle (NICHT ausgeführt):\n{cases}")
+            text = f"{task.task_id} · {task.title}\n{r['message_de']}\n\nTestfälle:\n{cases}"
             if r.get("test_patch"):
-                text += f"\n\nTest-Patch (nicht angewendet):\n```diff\n{r['test_patch']}\n```"
+                text += f"\n\nTest-Patch – {self._apply_text(r)}:\n```diff\n{r['test_patch']}\n```"
         self.reporter.chat(task.role, text[:MAX_CHAT])
 
     def _execute(self, state: GoalState, agents: dict[str, Agent], tasks: list[dag.Task], acceptance: list[str]) -> None:
@@ -352,22 +562,186 @@ class Orchestrator:
                     busy.pop(t.role, None)
         self._review(state, agents, tasks, acceptance)
 
-    # ------------------------------------------------------------------ Review ↔ Debugger
-    def _patches(self, tasks: list[dag.Task], fixes: list[dict[str, Any]]) -> list[Evidence]:
-        evidence = []
-        for t in tasks:
-            r = t.result or {}
-            if t.state == dag.TaskState.DONE and r.get("patch"):
-                evidence.append(Evidence(f"P{t.task_id}", f"patch of {t.task_id} by Coder (not applied)", r["patch"], pinned=True))
-            if t.state == dag.TaskState.DONE and r.get("test_patch"):
-                evidence.append(Evidence(f"P{t.task_id}", f"test patch of {t.task_id} by Tester (not applied, not executed)",
-                                         r["test_patch"], pinned=True))
-        for n, fix in enumerate(fixes, start=1):
-            evidence.append(Evidence(f"F{n}", f"Debugger fix attempt {n} (replaces affected hunks; not applied)",
-                                     fix["fix_patch"], pinned=True))
-        return evidence
+    # ------------------------------------------------------------------ Build/Test in der Sandbox
+    def _verify(self, state: GoalState, role: str, task_id: str) -> Verification:
+        bridge = self.bridge
+        assert bridge is not None
+        head = bridge.snapshot_id
+        if not self.verify_steps:
+            reason = ("no toolchain available in this session" if not bridge.toolchains()
+                      else "no build/test run could be derived for this repository")
+            return Verification(False, False, f"Build/test: NOT EXECUTED ({reason}).",
+                                "Tests nicht ausgeführt: " + ("keine Toolchain in dieser Sitzung (nur Offline-VM)."
+                                                              if not bridge.toolchains() else "kein passender Prüflauf gefunden."), head)
+        if FolderRight.Execute not in bridge.rights():
+            return Verification(False, False, "Build/test: NOT EXECUTED (the project grant lacks the Execute right).",
+                                "Tests nicht ausgeführt: der Projektfreigabe fehlt das Recht Execute.", head)
+        cancel = state.controls.token(role)
+        results: list[tuple[VerifyStep, ToolchainOutcome]] = []
+        for step in self.verify_steps:
+            self.reporter.state(role, AgentState.WaitingApproval, f"Prüflauf {step.describe()}", task_id)
+            try:
+                outcome = bridge.run_toolchain(role, task_id, step.toolchain, step.action, step.parameters,
+                                               f"Prüflauf {step.describe()} auf Stand {(head or '?')[:12]}", cancel)
+            except Cancelled:
+                state.controls.run.raise_if_cancelled()
+                outcome = ToolchainOutcome(False, "cancelled")
+            results.append((step, outcome))
+            if not outcome.ran:
+                break
+        ran = any(o.ran for _, o in results)
+        ok = bool(results) and all(o.ok for _, o in results)
+        en = [f"## Sandbox build/test results (snapshot {(head or '?')[:12]})"]
+        de = [f"Prüfung in der Sandbox (Stand {(head or '?')[:12]}):"]
+        for step, o in results:
+            r = o.report
+            if not o.ran or r is None:
+                en.append(f"- {step.describe()}: NOT EXECUTED ({o.state}{': ' + o.message if o.message else ''})")
+                de.append(f"- {step.describe()}: nicht ausgeführt ({STATE_RUN_DE.get(o.state, o.state)})")
+                continue
+            status = "TIMEOUT" if r.timed_out else f"exit code {r.exit_code}"
+            en.append(f"- {step.describe()}: {status}, tests {r.total}, passed {r.passed}, failed {r.failed}, skipped {r.skipped}")
+            line = f"- {step.describe()}: " + ("Zeitüberschreitung" if r.timed_out else
+                                               "ok" if o.ok else f"fehlgeschlagen (Exitcode {r.exit_code})")
+            if r.total:
+                line += f" · {r.total} Tests, {r.passed} bestanden, {r.failed} fehlgeschlagen"
+            de.append(line)
+            for f in r.failures[:8]:
+                en.append(f"  FAILED {f.name}: {(f.message or '').strip()[:500]}")
+                if f.stack_trace:
+                    en.append("    " + "\n    ".join(f.stack_trace.strip().splitlines()[:6]))
+                de.append(f"  - {f.name}: {(f.message or '').strip().splitlines()[0][:200] if f.message else ''}")
+            if not o.ok:
+                en.append("  Log excerpt:\n" + "\n".join("  " + ln for ln in o.log[-6000:].splitlines()))
+        return Verification(ran, ok, "\n".join(en), "\n".join(de), head)
 
-    def _test_report(self, tasks: list[dag.Task]) -> str:
+    # ------------------------------------------------------------------ Review ↔ Debugger
+    def _change_evidence(self) -> list[Evidence]:
+        with self._applied_lock:
+            applied = list(self.applied)
+        return [Evidence(f"A{n}", f"applied patch {n}: {a.label} (already part of the current files)", a.patch, pinned=True)
+                for n, a in enumerate(applied, start=1)]
+
+    def _repair(self, state: GoalState, agents: dict[str, Agent], attempt: int, problem_en: str,
+                evidence: list[Evidence]) -> tuple[bool, str]:
+        """Ein Debugger-Durchlauf; True, wenn ein Fix angewendet wurde."""
+        task_id = f"D{attempt}"
+        cancel = state.controls.token("Debugger")
+        text = f"## User goal (German)\n{state.goal}\n\n## Problem to fix (repair attempt {attempt})\n{problem_en}"
+        finisher = self._finisher("Debugger", task_id, f"Reparatur {attempt}", "fix_patch", cancel)
+        try:
+            fix = agents["Debugger"].run(Assignment(task_id, f"Reparatur {attempt}", text, evidence, finisher=finisher), cancel)
+        except Cancelled:
+            state.controls.run.raise_if_cancelled()
+            return False, "Reparatur abgebrochen"
+        except (LimitReached, AgentFailed) as err:
+            self.reporter.chat("Debugger", f"Reparatur nicht abgeschlossen: {err}")
+            return False, "Reparatur gescheitert"
+        if not fix.result.get("fix_patch", "").strip():
+            self.reporter.chat("Debugger", f"Reparatur {attempt}: keine Codeänderung – {fix.result['message_de']}")
+            return False, "keine Codekorrektur möglich – bitte selbst prüfen"
+        self.reporter.chat("Debugger", (f"Reparatur {attempt}: {fix.result['message_de']}\nHypothese: {fix.result['hypothesis']}"
+                                        f"\n\nKorrektur – {self._apply_text(fix.result)}:\n```diff\n{fix.result['fix_patch']}\n```")[:MAX_CHAT])
+        outcome = fix.result.get("apply")
+        if not (isinstance(outcome, PatchOutcome) and outcome.applied):
+            return False, "Korrektur nicht angewendet"
+        return True, ""
+
+    def _review(self, state: GoalState, agents: dict[str, Agent], tasks: list[dag.Task], acceptance: list[str]) -> None:
+        attempt = 0
+        verdict = "nicht durchgeführt"
+        verification: Verification | None = None
+        max_attempts = self.config.limits.max_repair_attempts
+        if not any(t.state == dag.TaskState.DONE and t.role in ("Coder", "Tester") for t in tasks):
+            self.reporter.state("Reviewer", AgentState.Ready, "keine Änderung zu prüfen")
+            self.reporter.state("Debugger", AgentState.Ready, "nicht benötigt")
+            self._summary(state, tasks, verdict, None, 0)
+            return
+        verification = self._run_verification(state, "Tester", "V1")
+        while True:
+            state.controls.run.raise_if_cancelled()
+            # 1. Echte Build-/Testfehler zuerst reparieren.
+            if verification.ran and not verification.ok:
+                if attempt >= max_attempts:
+                    verdict = f"Tests nach {attempt} Reparaturversuchen weiterhin fehlerhaft"
+                    self.reporter.chat("Orchestrator", f"Nach {attempt} Reparaturversuchen schlagen Build/Tests weiterhin fehl. "
+                                       "Ich höre hier auf – bitte entscheide, wie es weitergeht.")
+                    break
+                attempt += 1
+                fixed, why = self._repair(state, agents, attempt, verification.text_en,
+                                          self._change_evidence() + [self._verification_evidence(verification)])
+                if not fixed:
+                    verdict = why
+                    break
+                verification = self._run_verification(state, "Debugger", f"V{attempt + 1}")
+                continue
+            # 2. Review mit echtem Testbericht.
+            text = (f"## User goal (German)\n{state.goal}\n\n## Acceptance criteria\n"
+                    + ("\n".join(f"- {a}" for a in acceptance) or "- none given")
+                    + f"\n\n## Test report\n{verification.text_en if verification.ran else self._planned_tests(tasks)}"
+                    + (f"\n\n## Repair attempt {attempt} of {max_attempts}: check whether earlier findings are resolved."
+                       if attempt else ""))
+            try:
+                review = agents["Reviewer"].run(Assignment(f"R{attempt + 1}", "Review", text,
+                                                           self._change_evidence() + [self._verification_evidence(verification)],
+                                                           PRIORITY_REVIEW), state.controls.token("Reviewer"))
+            except Cancelled:
+                state.controls.run.raise_if_cancelled()
+                verdict = "abgebrochen"
+                break
+            except (LimitReached, AgentFailed) as err:
+                self.reporter.chat("Reviewer", f"Review nicht abgeschlossen: {err}")
+                verdict = "gescheitert"
+                break
+            findings = review.result.get("findings", [])
+            if not verification.ran:
+                # Ohne Testlauf ist „nicht ausgeführt“ kein Befund für den Debugger.
+                findings = [f for f in findings if not NOT_EXECUTED.search(f"{f.get('finding', '')} {f.get('evidence', '')}")]
+            if review.result["verdict"] == "changes_needed" and not any(f["severity"] in ("high", "medium") for f in findings):
+                review.result["verdict"] = "ready_for_user_review"
+            lines = [f"Review {attempt + 1} (keine Freigabe – die Entscheidung liegt bei dir): {review.result['message_de']}"]
+            for f in findings:
+                where = f.get("file") or "?"
+                if f.get("line"):
+                    where += f":{f['line']}"
+                lines.append(f"- [{SEVERITY_DE.get(f['severity'], f['severity'])}] {where}: {f['finding']}")
+            self.reporter.chat("Reviewer", "\n".join(lines)[:MAX_CHAT])
+            if review.result["verdict"] == "ready_for_user_review":
+                verdict = "ohne wesentliche Befunde"
+                break
+            if attempt >= max_attempts:
+                verdict = f"nach {attempt} Reparaturversuchen weiterhin Befunde"
+                self.reporter.chat("Orchestrator", f"Nach {attempt} Reparaturversuchen gibt es weiterhin Befunde. "
+                                   "Ich höre hier auf – bitte entscheide, wie es weitergeht.")
+                break
+            attempt += 1
+            problem = "Review findings:\n" + "\n".join(
+                f"- [{f['severity']}] {f.get('file', '?')}:{f.get('line', '?')}: {f['finding']} Evidence: {f.get('evidence', '')}"
+                for f in findings)
+            fixed, why = self._repair(state, agents, attempt, problem,
+                                      self._change_evidence() + [self._verification_evidence(verification)])
+            if not fixed:
+                verdict = why
+                break
+            verification = self._run_verification(state, "Debugger", f"V{attempt + 1}")
+        self._summary(state, tasks, verdict, verification, attempt)
+
+    def _run_verification(self, state: GoalState, role: str, task_id: str) -> Verification:
+        bridge = self.bridge
+        if bridge is not None and self.verify_steps and bridge.snapshot_id == bridge.base_snapshot_id and not self.applied:
+            # Nichts angewendet: ein Testlauf zeigte nur den Ausgangsstand.
+            return Verification(False, False, "Build/test: NOT EXECUTED (no change was applied).",
+                                "Tests nicht ausgeführt: keine Änderung angewendet.", bridge.snapshot_id)
+        verification = self._verify(state, role, task_id)
+        self.reporter.chat("Orchestrator", verification.summary_de[:MAX_CHAT])
+        return verification
+
+    @staticmethod
+    def _verification_evidence(v: Verification) -> Evidence:
+        return Evidence("V", "build/test run in the sandbox (tool output, untrusted)", v.text_en, pinned=True)
+
+    @staticmethod
+    def _planned_tests(tasks: list[dag.Task]) -> str:
         lines = []
         for t in tasks:
             if t.role == "Tester" and t.state == dag.TaskState.DONE:
@@ -376,86 +750,30 @@ class Orchestrator:
                         lines.append(f"- {c.get('name')}: NOT EXECUTED ({c.get('purpose', '')})")
         return "\n".join(lines) or "- no tests were written"
 
-    def _review(self, state: GoalState, agents: dict[str, Agent], tasks: list[dag.Task], acceptance: list[str]) -> None:
-        fixes: list[dict[str, Any]] = []
-        verdict = "nicht durchgeführt"
-        if not any(t.state == dag.TaskState.DONE and t.role == "Coder" for t in tasks):
-            self.reporter.state("Reviewer", AgentState.Ready, "kein Patch zu prüfen")
-            self.reporter.state("Debugger", AgentState.Ready, "nicht benötigt")
-        else:
-            attempt = 0
-            while True:
-                state.controls.run.raise_if_cancelled()
-                text = (f"## User goal (German)\n{state.goal}\n\n## Acceptance criteria\n"
-                        + ("\n".join(f"- {a}" for a in acceptance) or "- none given")
-                        + f"\n\n## Test report\n{self._test_report(tasks)}"
-                        + (f"\n\n## Repair attempt {attempt} of {self.config.limits.max_repair_attempts}: check whether the "
-                           "earlier findings are resolved by the Debugger fixes." if attempt else ""))
-                try:
-                    review = agents["Reviewer"].run(Assignment(f"R{attempt + 1}", "Review", text,
-                                                               self._patches(tasks, fixes), PRIORITY_REVIEW),
-                                                    state.controls.token("Reviewer"))
-                except Cancelled:
-                    state.controls.run.raise_if_cancelled()
-                    verdict = "abgebrochen"
-                    break
-                except (LimitReached, AgentFailed) as err:
-                    self.reporter.chat("Reviewer", f"Review nicht abgeschlossen: {err}")
-                    verdict = "gescheitert"
-                    break
-                # Nicht ausgeführte Tests sind in M3 erwartet und kein Befund für den Debugger.
-                findings = [f for f in review.result.get("findings", []) if not NOT_EXECUTED.search(
-                    f"{f.get('finding', '')} {f.get('evidence', '')}")]
-                if review.result["verdict"] == "changes_needed" and not any(f["severity"] in ("high", "medium") for f in findings):
-                    review.result["verdict"] = "ready_for_user_review"
-                lines = [f"Review {attempt + 1} (keine Freigabe – die Entscheidung liegt bei dir): {review.result['message_de']}"]
-                for f in findings:
-                    where = f.get("file") or "?"
-                    if f.get("line"):
-                        where += f":{f['line']}"
-                    lines.append(f"- [{SEVERITY_DE.get(f['severity'], f['severity'])}] {where}: {f['finding']}")
-                self.reporter.chat("Reviewer", "\n".join(lines)[:MAX_CHAT])
-                if review.result["verdict"] == "ready_for_user_review":
-                    verdict = "ohne wesentliche Befunde"
-                    break
-                if attempt >= self.config.limits.max_repair_attempts:
-                    verdict = f"nach {attempt} Reparaturversuchen weiterhin Befunde"
-                    self.reporter.chat("Orchestrator", f"Nach {attempt} Reparaturversuchen gibt es weiterhin Befunde. "
-                                       "Ich höre hier auf – bitte entscheide, wie es weitergeht.")
-                    break
-                attempt += 1
-                debug_text = (f"## User goal (German)\n{state.goal}\n\n## Review findings to fix (attempt {attempt})\n"
-                              + "\n".join(f"- [{f['severity']}] {f.get('file', '?')}:{f.get('line', '?')}: {f['finding']}"
-                                          f" Evidence: {f.get('evidence', '')}" for f in findings))
-                try:
-                    fix = agents["Debugger"].run(Assignment(f"D{attempt}", f"Reparatur {attempt}", debug_text,
-                                                            self._patches(tasks, fixes)), state.controls.token("Debugger"))
-                except Cancelled:
-                    state.controls.run.raise_if_cancelled()
-                    verdict = "Reparatur abgebrochen"
-                    break
-                except (LimitReached, AgentFailed) as err:
-                    self.reporter.chat("Debugger", f"Reparatur nicht abgeschlossen: {err}")
-                    verdict = "Reparatur gescheitert"
-                    break
-                if not fix.result.get("fix_patch", "").strip():
-                    self.reporter.chat("Debugger", f"Reparatur {attempt}: keine Codeänderung – {fix.result['message_de']}")
-                    verdict = "Befunde ohne Codekorrektur – bitte selbst prüfen"
-                    break
-                fixes.append(fix.result)
-                self.reporter.chat("Debugger", (f"Reparatur {attempt}: {fix.result['message_de']}\nHypothese: "
-                                                f"{fix.result['hypothesis']}\n\nKorrektur (nicht angewendet):\n```diff\n"
-                                                f"{fix.result['fix_patch']}\n```")[:MAX_CHAT])
-        self._summary(state, tasks, verdict, len(fixes))
-
-    def _summary(self, state: GoalState, tasks: list[dag.Task], verdict: str, fixes: int) -> None:
+    def _summary(self, state: GoalState, tasks: list[dag.Task], verdict: str, verification: Verification | None,
+                 repairs: int) -> None:
         lines = ["Zusammenfassung:"]
         for t in tasks:
             extra = f" – {t.error}" if t.error and t.state != dag.TaskState.DONE else ""
             lines.append(f"- {t.task_id} ({t.role}) {t.title}: {STATE_DE[t.state]}{extra}")
-        lines.append(f"- Review: {verdict}" + (f", {fixes} Korrektur(en) vom Debugger" if fixes else ""))
-        lines.append("Patches sind Vorschläge und wurden nicht angewendet; Tests wurden nicht ausgeführt "
-                     "(Build/Test und Übernahme folgen mit M4).")
+        tests = ("nicht ausgeführt" if verification is None or not verification.ran
+                 else "bestanden" if verification.ok else "fehlgeschlagen")
+        lines.append(f"- Build/Tests in der Sandbox: {tests}")
+        lines.append(f"- Review: {verdict}" + (f", {repairs} Reparaturversuch(e)" if repairs else ""))
+        bridge = self.bridge
+        with self._applied_lock:
+            applied = list(self.applied)
+        if applied and bridge is not None:
+            files = sorted({f for a in applied for f in a.files})
+            lines.append(f"- {len(applied)} Patch(es) angewendet ({len(files)} Datei(en): {', '.join(files[:12])}"
+                         f"{' …' if len(files) > 12 else ''}) → Stand {(bridge.snapshot_id or '?')[:12]} in der Sandbox")
+            lines.append("Dein Projektordner ist unverändert. Die Übernahme der Änderungen (Workspace.ExportPatch) folgt mit M6.")
+        else:
+            lines.append("Es wurde keine Änderung angewendet; dein Projektordner ist unverändert.")
         self.reporter.chat("Orchestrator", "\n".join(lines))
         self.previous_summary = "\n".join(lines)[:3000]
         self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")
+
+
+STATE_RUN_DE = {"denied": "abgelehnt", "expired": "abgelaufen", "rejected": "vom Broker abgewiesen", "cancelled": "abgebrochen",
+                "failed": "fehlgeschlagen", "invalidated": "ungültig", "outcomeunknown": "Ergebnis unklar"}

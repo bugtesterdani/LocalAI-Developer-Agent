@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "projectId": "m4-csharp",
+  "name": "M4: Rechner (C#)",
+  "grants": [
+    {
+      "grantId": "rechner",
+      "root": "samples/m4-csharp",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": ["dotnet", "python"]
+}

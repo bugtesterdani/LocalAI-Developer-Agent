@@ -2,7 +2,7 @@
 
 Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.3 · Plan v4 · Stand: 16.10.2026
 
-**Umsetzungsstand:** M1 und M2 (M2a–M2c) abgenommen. **M3** (Orchestrator, Model Gateway, Kalibrierung, fünf Rollen mit DAG und Limits, Live-Aktivität mit Chat in der Oberfläche) abgenommen am 18.10.2026 (echter Lauf mit `qwen2.5-coder:7b` über Ollama im LAN, SEC-22 bestätigt). **M4** in Arbeit.
+**Umsetzungsstand:** M1 und M2 (M2a–M2c) abgenommen. **M3** (Orchestrator, Model Gateway, Kalibrierung, fünf Rollen mit DAG und Limits, Live-Aktivität mit Chat in der Oberfläche) abgenommen am 18.10.2026 (echter Lauf mit `qwen2.5-coder:7b` über Ollama im LAN, SEC-22 bestätigt). **M4** (Patch.Apply, Toolchain-Aktionen in der VM, Repo.Index, Verify-/Reparaturschleife) implementiert; Prüfung mit echter VM offen (`docs/pruefung-M4.md`).
 
 ## Entscheidungen
 
@@ -101,6 +101,8 @@ Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 →
 - **B12:** `Repo.Index` (tree-sitter, Roslyn, FTS5, `.hdev`-XML), Repo-Map, gezieltes Nachladen über `File.ReadMany`.
 
 **Abnahme:** E2E in C# und Python; Repo mit > 2.000 Dateien; SEC-13, SEC-20 grün.
+
+**Umgesetzt (Stand 18.10.2026):** `Patch.Apply` im Worker (toleranter Unified-Diff-Applier, abgeleitete unveränderliche Snapshots, alles oder nichts, Abwahl pro Datei; Broker: Ziele = Dateien des Patches, Rechte `Modify`/`Create`/`Delete` je Änderungsart); `Toolchain.Restore/Build/Test/Run/Lint` nur mit VM-Katalog (Betriebsart hyperv) und Recht `Execute`, Parameter typisiert im Broker und im Gast geprüft (SEC-20), frische Jobkopie, eingeschränktes Token mit niedriger Integrität + Job Object (SEC-21, abschaltbar nur zur Fehlersuche), Trx/JUnit/NUnit → `TestReport`; Offline-NuGet-Quelle über `{packages}` (Skript `scripts/toolchains/Get-NuGetOfflinePackages.ps1`); `Repo.Index` mit Standardbibliothek (Python `ast`, Muster für C#/C++/PowerShell/Batch, `.hdev`-XML) statt tree-sitter/Roslyn, Symbolcache je Inhalt, FTS5, Repo-Map nach Referenzen; Orchestrator: Repo-Map als Startevidenz, Patches nach Freigabe angewendet (Rückmeldung bei Nichtpassen), Prüfläufe aus Plan oder automatisch, Debugger auf echten Testfehlern, Reviewer mit echtem Bericht; Oberfläche: Diff je Datei und Toolchain-Aufruf in der Freigabekarte. Abnahme-Skript `tests/integration/test_m4_abnahme.py` (C#/Python E2E, SEC-13/-20/-21, 2.213 Dateien).
 
 ## M5 – Alle Sprachen
 

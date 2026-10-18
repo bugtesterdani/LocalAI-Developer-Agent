@@ -39,6 +39,9 @@ class Assignment:
     text: str
     evidence: list[Evidence] = field(default_factory=list)
     priority: int = PRIORITY_NORMAL
+    # Nach einem gültigen Ergebnis aufgerufen (z. B. Patch anwenden). Rückgabe None = fertig, sonst eine
+    # englische Rückmeldung an das Modell, das dann weiterarbeitet (z. B. Patch passt nicht).
+    finisher: Callable[[dict[str, Any]], str | None] | None = None
 
 
 @dataclass
@@ -135,6 +138,11 @@ class Agent:
                 action = protocol.parse(result.content)
                 if action.kind == "finish":
                     final = protocol.validate_result(role, action.result)
+                    feedback = assignment.finisher(final) if assignment.finisher else None
+                    if feedback is not None:
+                        history.append(f"Step {step}: {feedback}")
+                        self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: Rückmeldung nach Schritt {step}", task_id)
+                        continue
                     self.reporter.state(role, AgentState.Done, f"Aufgabe {task_id} abgeschlossen ({step} Schritte)", task_id)
                     return AgentResult(final, step, evidence)
             except protocol.ProtocolError as err:

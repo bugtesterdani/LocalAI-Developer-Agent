@@ -26,7 +26,7 @@ class FileRef:
 
 @dataclass
 class Action:
-    kind: str  # list | read | search | finish
+    kind: str  # list | read | search | symbols | finish
     reasoning: str
     path: str = "."
     depth: int = 3
@@ -124,12 +124,17 @@ def parse(text: str) -> Action:
             raise ProtocolError("search needs a non-empty query of at most 200 characters.")
         return Action("search", reasoning, path=_clean_path(data.get("path", ".")), query=query.strip(),
                       reason=str(data.get("reason", "")))
+    if kind == "symbols":
+        query = data.get("query")
+        if not isinstance(query, str) or not query.strip() or len(query) > 200:
+            raise ProtocolError("symbols needs a non-empty query (a class, function or method name).")
+        return Action("symbols", reasoning, query=query.strip(), reason=str(data.get("reason", "")))
     if kind == "finish":
         result = data.get("result")
         if not isinstance(result, dict):
             raise ProtocolError('finish needs "result": { ... } as described for your role.')
         return Action("finish", reasoning, result=result)
-    raise ProtocolError('Unknown action. Use "list", "read", "search" or "finish". A final result must be wrapped: '
+    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols" or "finish". A final result must be wrapped: '
                         '{"action": "finish", "result": { ... }}.')
 
 
@@ -154,7 +159,7 @@ _HUNK = re.compile(r"^@@ -\d+(,\d+)? \+\d+(,\d+)? @@", re.M)
 
 
 def check_diff(text: str, field: str) -> None:
-    """Grobe Formprüfung eines Unified Diffs (Patch.Apply in M4 prüft streng)."""
+    """Grobe Formprüfung eines Unified Diffs (Patch.Apply in der Sandbox prüft und wendet an)."""
     if not re.search(r"^--- (a/|/dev/null)", text, re.M) or not re.search(r"^\+\+\+ b/", text, re.M) or not _HUNK.search(text):
         raise ProtocolError(f"result.{field} must be a unified diff with file headers: '--- a/<path>' (or '--- /dev/null' "
                             "for a new file), '+++ b/<path>', then hunks starting with '@@ -start,count +start,count @@'.")
@@ -178,6 +183,12 @@ def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
             t["writes"] = _str_list(t.get("writes"), "task.writes")
             t["depends_on"] = _str_list(t.get("depends_on"), "task.depends_on")
         result["acceptance"] = _str_list(result.get("acceptance"), "result.acceptance")
+        verify = result.get("verify") or []
+        if not isinstance(verify, list) or not all(
+                isinstance(v, dict) and isinstance(v.get("toolchain"), str) and isinstance(v.get("action"), str)
+                and isinstance(v.get("parameters", {}), dict) for v in verify):
+            raise ProtocolError('result.verify must be a list of {"toolchain": "...", "action": "test", "parameters": {...}}.')
+        result["verify"] = verify
     elif role == "Coder":
         check_diff(_str(result, "patch"), "patch")
         result["files"] = _str_list(result.get("files"), "result.files")
@@ -187,8 +198,8 @@ def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
             raise ProtocolError("result.test_plan must be a non-empty list.")
         if _str(result, "test_patch", required=False).strip():
             check_diff(result["test_patch"], "test_patch")
-        # Tests wurden nicht ausgeführt – unabhängig davon, was das Modell behauptet.
-        result["executed"] = False
+        # Ob Tests liefen, entscheidet allein der Testlauf in der Sandbox – Behauptungen des Modells zählen nicht.
+        result.pop("executed", None)
     elif role == "Debugger":
         _str(result, "hypothesis")
         # Leer erlaubt: der Befund ist mit einer Codeänderung nicht zu beheben (Reparaturschleife endet dann).

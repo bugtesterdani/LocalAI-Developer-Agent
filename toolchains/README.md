@@ -27,8 +27,13 @@ Wird nach der Registrierung eine Datei verändert, hinzugefügt oder entfernt, b
 
 - Datei: **Binaries** des SDK als ZIP für Windows x64, z. B. `dotnet-sdk-9.0.306-win-x64.zip`
   (Download-Seite von .NET → SDK → Windows → Binaries x64). Kein Installer nötig.
-- Offline-NuGet-Pakete (für spätere Projekte): Ordner `packages\` im Toolchain-Ordner (`.nupkg`-Dateien). Für das
-  Hallo-Welt-Beispiel wird keines gebraucht.
+- Offline-NuGet-Pakete: Ordner `packages\` im Toolchain-Ordner (`.nupkg`-Dateien, flach). Restore, Build und Test
+  holen Pakete ausschließlich von dort (`-p:RestoreSources={packages}`). Testframeworks (xUnit, Test-SDK) einmal mit
+  Internet laden:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\toolchains\Get-NuGetOfflinePackages.ps1 -ToolchainDirectory D:\Agent\Toolchains\dotnet-9.0.306
+  ```
+  Weitere Projekte mit eigenen Paketen: `-Project C:\Pfad\Projekt.csproj`. Danach neu registrieren.
 
 ## Python (`python`)
 
@@ -49,10 +54,17 @@ Wird nach der Registrierung eine Datei verändert, hinzugefügt oder entfernt, b
 | `install` | `kind`: `Archive` (ZIP nach `guestPath` entpacken), `Installer` (.exe/.msi mit `arguments`), `None`; `expectedMinutes`; `check` (Prüfbefehl, `expectOutput`) |
 | `postInstall` | optionale Befehle nach der Installation (z. B. pip aus `wheels`) |
 | `selfTest` | Ordner mit Beispiel, Schritte, erwartete Ausgabe |
-| `actions` | Vorlagen für `restore`, `build`, `test`, `run`, `lint`, `format` (ab M4): Argumente sind Literale oder genau ein `{parameter}`; Parameter typisiert (`Path`, `Choice`, `Text`, `Integer`) |
+| `actions` | Vorlagen für `restore`, `build`, `test`, `run`, `lint`, `format`: Argumente sind Literale oder genau ein `{parameter}`; Parameter typisiert (`Path` = Pfad im Snapshot, `Choice` mit `values`, `Text` mit optionalem `pattern`, `Integer`). Erreichbar über `Toolchain.Restore/Build/Test/Run/Lint` (Lint nutzt `lint`, sonst `format`) – nur in der Offline-VM |
 | `environment` | feste Umgebungsvariablen (PATH u. ä. nicht erlaubt) |
 | `packageSource` | Offline-Paketquelle (`NuGet`/`Pip`) als Ordner im Toolchain-Ordner |
 | `files` | optional: erwartete SHA-256 je Datei; Abweichung → nicht registrierbar |
 
 Platzhalter, die das System selbst einsetzt: `{guest}` (Installationsordner), `{source}` (Kopie des
-Toolchain-Ordners in der VM), `{selftest}`, `{work}`, `{results}`. Freie Shell-Befehle gibt es nicht.
+Toolchain-Ordners in der VM, nur Installation), `{selftest}`, `{work}` (Arbeitsordner des Jobs), `{results}`
+(Ergebnisordner für Trx/JUnit), `{packages}` (Offline-Paketquelle, nur lesbar). Freie Shell-Befehle gibt es nicht.
+
+Ausführung (ab M4): jeder Job bekommt eine frische Kopie des Snapshots und ein eigenes, leeres Benutzerprofil;
+der Prozess läuft mit eingeschränktem Token auf niedriger Integritätsstufe in einem Job Object (kann Worker,
+Toolchains, Windows und HKLM nicht verändern) und wird nach `timeoutSeconds` (Standard 120 s) samt Kindprozessen
+beendet. Testergebnisse (`testResultFormat`: `Trx`, `JUnit`, `NUnit`, `ExitCode`) werden in ein einheitliches Format
+übersetzt.

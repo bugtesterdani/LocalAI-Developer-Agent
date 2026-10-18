@@ -11,7 +11,8 @@ import itertools
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from localai.contracts import (
     ActivityKind,
@@ -23,6 +24,7 @@ from localai.contracts import (
     ProposalRequest,
     ProposalState,
     ResultStatus,
+    TestReport,
     ToolTarget,
 )
 from localai.orchestrator.activity import ActivityReporter
@@ -31,6 +33,7 @@ from localai.orchestrator.gateway import Cancelled, CancelToken
 from localai.orchestrator.protocol import Action
 from localai.orchestrator.runtime import RunClock
 from localai.pipe import BrokerError
+from localai.worker import patching
 
 TOOL_VERSION = "1"
 STATE_TEXT = {
@@ -51,6 +54,31 @@ class ToolOutcome:
     summary: str  # englische Kurzfassung für den Verlauf des Agenten
 
 
+@dataclass
+class PatchOutcome:
+    applied: bool
+    state: str  # applied | invalid | rejected | not-applicable | denied | expired | …
+    snapshot_id: str | None = None
+    feedback: str | None = None  # englisch an das Modell: Patch korrigieren und erneut senden
+    note_de: str = ""  # für den Chat
+    files: list[str] = field(default_factory=list)
+    deselected: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ToolchainOutcome:
+    ran: bool
+    state: str
+    report: TestReport | None = None
+    log: str = ""
+    message: str = ""
+
+    @property
+    def ok(self) -> bool:
+        r = self.report
+        return self.ran and r is not None and r.exit_code == 0 and not r.timed_out and r.failed == 0
+
+
 class ToolBridge:
     def __init__(self, client, reporter: ActivityReporter, run_id: str, clock: RunClock, max_jobs: int = 2,
                  poll: float = 0.4) -> None:
@@ -62,7 +90,10 @@ class ToolBridge:
         self._jobs = threading.BoundedSemaphore(max_jobs)
         self._evidence_ids = itertools.count(1)
         self.grant: FolderGrant | None = None
-        self.snapshot_id: str | None = None
+        self.snapshot_id: str | None = None  # aktueller Stand (nach angewendeten Patches)
+        self.base_snapshot_id: str | None = None  # Stand des Projektordners beim Snapshot
+        self._apply_lock = threading.Lock()
+        self._toolchains: list[dict[str, Any]] | None = None
 
     # ------------------------------------------------------------------ Grundlagen
     def find_grant(self) -> FolderGrant | None:
@@ -121,7 +152,102 @@ class ToolBridge:
         if isinstance(outcome, str) or outcome.state != ProposalState.Succeeded or outcome.result is None:
             return None
         self.snapshot_id = outcome.result.target_results[0].text or None
+        self.base_snapshot_id = self.snapshot_id
         return self.snapshot_id
+
+    def rights(self) -> set[FolderRight]:
+        return set(self.grant.rights) if self.grant else set()
+
+    # ------------------------------------------------------------------ Repo.Index
+    def repo_map(self, agent: str, task_id: str, cancel: CancelToken, max_chars: int = 12_000) -> ToolOutcome:
+        assert self.grant is not None and self.snapshot_id is not None
+        request = self._request(agent, task_id, "Repo.Index", "Symbolindex und Repo-Map des Projekts als Startkontext",
+                                [], {"grantId": self.grant.grant_id, "maxChars": max_chars}, self.snapshot_id)
+        outcome = self._submit_and_wait(agent, task_id, request, "Repo-Map erstellen", cancel)
+        if isinstance(outcome, str):
+            return ToolOutcome([], f"repo map: {outcome}")
+        return self._evidence(request, outcome, "repo map")
+
+    # ------------------------------------------------------------------ Toolchains
+    def toolchains(self) -> list[dict[str, Any]]:
+        """Ausführbare Toolchains der Sandbox (leer außerhalb der VM-Betriebsart)."""
+        if self._toolchains is None:
+            try:
+                info = self.client.toolchains_available()
+                self._toolchains = list(info.get("toolchains") or []) if info.get("enabled") else []
+            except (BrokerError, AttributeError):
+                self._toolchains = []
+        return self._toolchains
+
+    def run_toolchain(self, agent: str, task_id: str, toolchain: str, action: str, parameters: dict[str, Any],
+                      purpose: str, cancel: CancelToken) -> ToolchainOutcome:
+        assert self.grant is not None and self.snapshot_id is not None
+        tool = "Toolchain." + action[:1].upper() + action[1:]
+        if action == "format":
+            tool = "Toolchain.Lint"
+        request = self._request(agent, task_id, tool, purpose, [],
+                                {"grantId": self.grant.grant_id, "toolchain": toolchain, "parameters": parameters},
+                                self.snapshot_id)
+        shown = ", ".join(f"{k}={v}" for k, v in parameters.items())
+        outcome = self._submit_and_wait(agent, task_id, request, f"{toolchain} {action}" + (f" ({shown})" if shown else ""),
+                                        cancel)
+        if isinstance(outcome, str):
+            return ToolchainOutcome(False, "rejected", message=outcome)
+        if outcome.state != ProposalState.Succeeded or outcome.result is None:
+            messages = [r.message for r in (outcome.result.target_results if outcome.result else []) if r.message]
+            return ToolchainOutcome(False, outcome.state.value.lower(), message="; ".join(messages)[:1000])
+        by_id = {r.target_id: r for r in outcome.result.target_results}
+        report = None
+        if by_id.get("tests") and by_id["tests"].text:
+            try:
+                report = TestReport.model_validate_json(by_id["tests"].text)
+            except ValueError:
+                report = None
+        log = (by_id["log"].text or "") if "log" in by_id else ""
+        message = (by_id["tests"].message or "") if "tests" in by_id else ""
+        return ToolchainOutcome(report is not None, "succeeded", report, log, message)
+
+    # ------------------------------------------------------------------ Patch.Apply
+    def apply_patch(self, agent: str, task_id: str, patch: str, purpose: str, cancel: CancelToken) -> PatchOutcome:
+        """Schlägt Patch.Apply auf dem aktuellen Stand vor; nacheinander, damit kein Patch einen anderen überholt."""
+        assert self.grant is not None
+        try:
+            files = patching.parse(patch)
+        except patching.PatchError as err:
+            return PatchOutcome(False, "invalid", feedback=f"Your diff could not be read: {err}. Send a corrected unified diff.",
+                                note_de=f"Patch unlesbar: {err}")
+        targets = [ToolTarget(target_id=f"t{i}", path=f.path) for i, f in enumerate(files, start=1)]
+        paths = {t.target_id: t.path for t in targets}
+        with self._apply_lock:
+            base = self.snapshot_id
+            assert base is not None
+            request = self._request(agent, task_id, "Patch.Apply", purpose, targets,
+                                    {"grantId": self.grant.grant_id, "patch": patch}, base)
+            label = f"Patch anwenden ({len(files)} Datei{'en' if len(files) != 1 else ''})"
+            outcome = self._submit_and_wait(agent, task_id, request, label, cancel)
+            if isinstance(outcome, str):
+                code = outcome.split("(", 1)[1].split(")", 1)[0] if "(" in outcome else ""
+                if code == "422":
+                    return PatchOutcome(False, "rejected", feedback=f"The patch was rejected: {outcome}. Fix it and send it again.",
+                                        note_de=outcome, files=list(paths.values()))
+                return PatchOutcome(False, "rejected", note_de=outcome, files=list(paths.values()))
+            if outcome.state == ProposalState.Succeeded and outcome.result is not None:
+                new_id = next((r.text for r in outcome.result.target_results if r.target_id == "snapshot"), None)
+                if new_id:
+                    self.snapshot_id = new_id
+                deselected = [paths.get(t, t) for t in outcome.result.skipped_target_ids or []]
+                applied = [p for tid, p in paths.items() if p not in deselected]
+                return PatchOutcome(True, "applied", new_id, note_de="angewendet", files=applied, deselected=deselected)
+            if outcome.state == ProposalState.Failed and outcome.result is not None:
+                problems = [f"{paths.get(r.target_id, r.target_id)}: {r.message}" for r in outcome.result.target_results
+                            if r.status == ResultStatus.Failed and r.message and r.target_id != "snapshot"]
+                text = "; ".join(problems)[:3000] or "unknown error"
+                return PatchOutcome(False, "not-applicable",
+                                    feedback=(f"Your patch was NOT applied: {text}. Read the affected files again (they may "
+                                              "already contain other changes) and send a corrected patch."),
+                                    note_de=f"passt nicht: {text}"[:600], files=list(paths.values()))
+            state = outcome.state.value.lower()
+            return PatchOutcome(False, state, note_de=STATE_TEXT.get(outcome.state, state), files=list(paths.values()))
 
     # ------------------------------------------------------------------ Agentenaktionen
     def execute(self, agent: str, task_id: str, action: Action, cancel: CancelToken) -> ToolOutcome:
@@ -139,6 +265,11 @@ class ToolBridge:
                                     {"grantId": grant, "query": action.query, "maxResults": 100}, self.snapshot_id)
             label = f"Suche '{action.query}' in {action.path}"
             describe = f"search {action.query!r} in {action.path}"
+        elif action.kind == "symbols":
+            request = self._request(agent, task_id, "Repo.Index", action.reason or f"Symbole '{action.query}' suchen", [],
+                                    {"grantId": grant, "query": action.query}, self.snapshot_id)
+            label = f"Symbole '{action.query}'"
+            describe = f"symbols {action.query!r}"
         elif action.kind == "read":
             targets = [ToolTarget(target_id=f"t{i}", path=f.path, line_start=f.start, line_end=f.end)
                        for i, f in enumerate(action.files, start=1)]
@@ -173,7 +304,7 @@ class ToolBridge:
             path = target.path if target else r.target_id
             if r.status == ResultStatus.Succeeded and r.text is not None:
                 source = f"{request.tool} {_ref(path, target.line_start if target else None, target.line_end if target else None)}"
-                if request.tool == "File.Search":
+                if request.tool in ("File.Search", "Repo.Index") and request.arguments.get("query"):
                     source += f" query={request.arguments.get('query')!r}"
                 evidence.append(Evidence(f"E{next(self._evidence_ids)}", source, r.text or "(empty)"))
             else:

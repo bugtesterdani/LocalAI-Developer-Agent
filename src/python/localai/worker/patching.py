@@ -123,15 +123,16 @@ def parse(text: str) -> list[FilePatch]:
                         hunk.no_newline_new = True
             elif line[:1] in (" ", "-", "+"):
                 hunk.lines.append(line)
-            elif line == "":
-                # Leere Kontextzeile ohne Leerzeichen (häufig bei Modellen) – nur, wenn der Hunk weitergeht.
+            elif not line.startswith(("diff ", "index ", "new file", "deleted file", "similarity")):
+                # Kontextzeile ohne führendes Leerzeichen (häufig bei Modellen, v. a. leere Zeilen) – nur, wenn der
+                # Hunk danach weitergeht; sonst endet er hier (z. B. Erklärtext nach dem Diff).
                 j = i + 1
                 while j < len(lines) and lines[j] == "":
                     j += 1
                 nxt = lines[j] if j < len(lines) else ""
                 header = nxt.startswith("--- ") and j + 1 < len(lines) and lines[j + 1].startswith("+++ ")
                 if nxt[:1] in (" ", "-", "+") and not header:
-                    hunk.lines.append(" ")
+                    hunk.lines.append(" " + line)
                 else:
                     hunk = None
             else:
@@ -190,10 +191,13 @@ class TextFile:
         return (b"\xef\xbb\xbf" + data) if self.bom else data
 
 
-def _find(lines: list[str], needle: list[str], hint: int, loose: bool) -> int | None:
+_NORMALIZE = (lambda s: s, str.rstrip, str.strip)  # exakt, ohne Leerzeichen am Ende, ohne Einrückung
+
+
+def _find(lines: list[str], needle: list[str], hint: int, level: int) -> int | None:
     if not needle:
         return min(max(hint, 0), len(lines))
-    norm = (lambda s: s.rstrip()) if loose else (lambda s: s)
+    norm = _NORMALIZE[level]
     want = [norm(n) for n in needle]
     first = want[0]
     best: int | None = None
@@ -240,8 +244,8 @@ def apply_hunks(file: TextFile, hunks: list[Hunk], path: str) -> ApplyReport:
                 continue
             trim_front, trim_back = front, back
             needle = old[front:len(old) - back]
-            for loose in (False, True):
-                pos = _find(lines, needle, hint + front, loose)
+            for level in range(len(_NORMALIZE)):
+                pos = _find(lines, needle, hint + front, level)
                 if pos is not None:
                     break
             if pos is not None:
@@ -251,7 +255,18 @@ def apply_hunks(file: TextFile, hunks: list[Hunk], path: str) -> ApplyReport:
         if pos is None:
             preview = "\n".join(f"  {ln}" for ln in old[:4]) or "  (leer)"
             raise PatchError(f"{path}: Hunk {number} passt nicht zum aktuellen Stand der Datei. Erwartet wurde:\n{preview}")
-        replacement = new[trim_front:len(new) - trim_back]
+        # Kontextzeilen aus der Datei übernehmen (exakte Einrückung/Leerzeichen), nur +-Zeilen aus dem Patch.
+        body = hunk.lines[trim_front:len(hunk.lines) - trim_back]
+        replacement: list[str] = []
+        cursor = pos
+        for ln in body:
+            if ln[0] == " ":
+                replacement.append(lines[cursor])
+                cursor += 1
+            elif ln[0] == "-":
+                cursor += 1
+            else:
+                replacement.append(ln[1:])
         start = pos
         end = pos + len(old) - trim_front - trim_back
         if start != hint + trim_front:

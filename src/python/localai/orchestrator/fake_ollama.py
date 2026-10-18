@@ -28,7 +28,9 @@ def _fence(obj: dict[str, Any], reasoning: str) -> str:
 
 
 def _files_from_listing(prompt: str) -> list[str]:
-    return re.findall(r"^([^\s<>][^\n]*?)  \(\d+ Bytes\)$", prompt, re.M)
+    """Dateien aus File.List (``pfad  (n Bytes)``) oder der Repo-Map (``pfad [Sprache, n lines]``)."""
+    return (re.findall(r"^([^\s<>][^\n]*?)  \(\d+ Bytes\)$", prompt, re.M)
+            or re.findall(r"^([^\s<>\[][^\n]*?) \[[^\]\n]+, \d+ lines\]$", prompt, re.M))
 
 
 def scripted_answer(body: dict[str, Any]) -> tuple[str, str]:
@@ -59,11 +61,11 @@ def scripted_answer(body: dict[str, Any]) -> tuple[str, str]:
             return _fence({"action": "read", "files": [{"path": first}], "reason": "file to change"}, "Reading first."), thinking
         return _fence({"action": "finish", "result": {
             "message_de": f"Leere Eingaben werden in {first} abgefangen.", "files": [first],
-            "patch": f"--- a/{first}\n+++ b/{first}\n@@ -1,1 +1,3 @@\n+# handle empty input\n+",
+            "patch": f"--- a/{first}\n+++ b/{first}\n@@ -0,0 +1 @@\n+# handle empty input\n",
             "rationale": "Guard clause for empty input."}}, "The change is small."), thinking
     if role == "Tester":
         return _fence({"action": "finish", "result": {
-            "message_de": "Zwei Grenzfälle sind abgedeckt.", "executed": True,
+            "message_de": "Zwei Grenzfälle sind abgedeckt.",
             "test_plan": [{"name": "test_empty", "purpose": "empty input", "expected": "no exception"},
                           {"name": "test_large", "purpose": "large input", "expected": "same result"}],
             "test_patch": "--- /dev/null\n+++ b/tests/test_edge.py\n@@ -0,0 +1,2 @@\n+def test_empty():\n+    pass\n"}},
@@ -80,7 +82,7 @@ def scripted_answer(body: dict[str, Any]) -> tuple[str, str]:
     if role == "Debugger":
         return _fence({"action": "finish", "result": {
             "message_de": "None wird jetzt wie eine leere Eingabe behandelt.", "hypothesis": "Missing None check.",
-            "fix_patch": f"--- a/{first}\n+++ b/{first}\n@@ -1,1 +1,2 @@\n+# handle None\n",
+            "fix_patch": f"--- a/{first}\n+++ b/{first}\n@@ -0,0 +1 @@\n+# handle None\n",
             "regression_test": "test_none_input"}}, "Minimal fix."), thinking
     return _fence({"action": "finish", "result": {"message_de": "?"}}, ""), thinking
 
