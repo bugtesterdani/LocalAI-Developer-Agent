@@ -162,17 +162,34 @@ class StreamCallbacks:
     on_progress: Callable[[int, float], None] = lambda _tokens, _elapsed: None
 
 
-def validate_loopback(url: str) -> urllib.parse.SplitResult:
+def is_loopback_url(url: str) -> bool:
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host in LOOPBACK_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_loopback(url: str, allow_lan: bool = False) -> urllib.parse.SplitResult:
+    """Standard: nur Loopback. Mit ``allow_lan`` (ollama.allowLan) zusätzlich eine private LAN-Adresse als
+    IP-Literal (10/8, 172.16/12, 192.168/16, fd00::/8, Link-Local) – nie ein öffentliches Ziel, kein DNS-Name."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "http" or not parts.hostname:
-        raise GatewayError(f"Ollama-Adresse muss http://127.0.0.1:<port> sein, nicht {url!r}")
+        raise GatewayError(f"Ollama-Adresse muss http://<ip>:<port> sein, nicht {url!r}")
+    if is_loopback_url(url):
+        return parts
     host = parts.hostname
-    if host not in LOOPBACK_HOSTS:
-        try:
-            if not ipaddress.ip_address(host).is_loopback:
-                raise GatewayError(f"Ollama nur über Loopback erlaubt, nicht {host}")
-        except ValueError as err:
-            raise GatewayError(f"Ollama nur über Loopback erlaubt, nicht {host}") from err
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as err:
+        raise GatewayError(f"Ollama nur über Loopback oder eine private LAN-IP (als Zahl) erlaubt, nicht {host}") from err
+    if not allow_lan:
+        raise GatewayError(f"Ollama nur über Loopback erlaubt, nicht {host} – für einen anderen Rechner im LAN "
+                           "\"allowLan\": true in config/models.local.json setzen")
+    if not (address.is_private or address.is_link_local) or address.is_unspecified or address.is_multicast:
+        raise GatewayError(f"{host} ist keine private LAN-Adresse – nicht erlaubt")
     return parts
 
 
@@ -217,8 +234,8 @@ class _ThinkSplitter:
 
 class OllamaGateway:
     def __init__(self, url: str = "http://127.0.0.1:11434", stall_warning: float = 45.0, stall_abort: float = 900.0,
-                 connect_timeout: float = 5.0, poll: float = 0.25) -> None:
-        parts = validate_loopback(url)
+                 connect_timeout: float = 5.0, poll: float = 0.25, allow_lan: bool = False) -> None:
+        parts = validate_loopback(url, allow_lan)
         self.url = url.rstrip("/")
         self.host = parts.hostname or "127.0.0.1"
         self.port = parts.port or 11434

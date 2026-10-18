@@ -56,6 +56,18 @@ def filler(target_chars: int, nonce: str) -> str:
     return "\n".join(parts)
 
 
+class NoSampler:
+    """Keine Messung (Ollama auf einem anderen Rechner)."""
+
+    vram_peak = vram_total = ram_peak_used = None
+
+    def __enter__(self) -> NoSampler:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+
 @dataclasses.dataclass
 class Target:
     profile_name: str
@@ -138,7 +150,8 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
         reasons.append(f"nur {runs} Läufe (Freigabe erfordert 10)")
     if reserve is None:
         if not accept_unknown_vram:
-            reasons.append("VRAM nicht messbar (nvidia-smi fehlt) – mit --ohne-vram-messung bewusst akzeptieren")
+            where = "Ollama läuft auf einem anderen Rechner" if hw.remote_host else "nvidia-smi fehlt"
+            reasons.append(f"VRAM nicht messbar ({where}) – mit --ohne-vram-messung bewusst akzeptieren")
     elif reserve < min_reserve_gib * GIB:
         reasons.append(f"VRAM-Reserve {reserve / GIB:.1f} GiB < {min_reserve_gib:g} GiB")
     if offload and offload > 0.05 and not target.offload:
@@ -178,10 +191,8 @@ def report(path: pathlib.Path, hw: hardware.Hardware, version: str, measurements
 
 
 def main(argv: list[str] | None = None) -> int:
-    from localai.orchestrator.__main__ import models_path
-
     parser = argparse.ArgumentParser(prog="localai.orchestrator.calibrate", description="Modellprofile kalibrieren")
-    parser.add_argument("--models", help="models.json (Standard: config/models.local.json bzw. config/models.json)")
+    parser.add_argument("--models", help="nur diese Datei (Standard: config/models.json + config/models.local.json)")
     parser.add_argument("--profile", action="append", help="nur dieses Profil (mehrfach möglich)")
     parser.add_argument("--laeufe", type=int, help="Läufe pro Profil (Standard aus models.json, 10)")
     parser.add_argument("--kontexte", help="zusätzliche Messreihe je Modell, z. B. 4096,8192,16384,32768")
@@ -191,11 +202,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ollama", help="Ollama-Adresse (nur Loopback)")
     args = parser.parse_args(argv)
     try:
-        config = ModelsConfig.load(models_path(args.models))
+        config = ModelsConfig.load_default(args.models)
     except ConfigError as err:
         print(f"FEHLER: {err}", file=sys.stderr)
         return 2
-    gateway = OllamaGateway(args.ollama or config.ollama_url, stall_warning=1e9, stall_abort=1800)
+    try:
+        gateway = config.gateway(args.ollama, stall_warning=1e9, stall_abort=1800)
+    except GatewayError as err:
+        print(f"FEHLER: {err}", file=sys.stderr)
+        return 2
     data_dir = pathlib.Path(args.daten) if args.daten else default_data_dir()
     try:
         version = gateway.version()
@@ -203,7 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     except GatewayError as err:
         print(f"FEHLER: {err}", file=sys.stderr)
         return 3
-    hw = hardware.detect()
+    hw = hardware.detect(gateway.url)
+    # Ollama auf einem anderen Rechner: hiesige GPU/RAM-Werte wären falsch, also nicht messen.
+    sampler = hardware.PeakSampler if hw.remote_host is None else NoSampler
     print(f"Hardware: {hw.describe()}\nOllama {version}, {len(installed)} Modelle installiert\nDaten: {data_dir}")
     selected: list[ModelProfile] = [p for p in config.profiles.values() if not args.profile or p.name in args.profile]
     if args.profile and len(selected) != len(set(args.profile)):
@@ -231,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         for t in targets:
             print(f"\n{t.profile_name}: {t.model} mit {t.context_tokens} Token Kontext, {runs} Läufe")
             m = measure(gateway, t, runs, config.calibration.output_tokens, config.calibration.min_vram_reserve_gib, hw,
-                        installed[t.model], args.ohne_vram_messung)
+                        installed[t.model], args.ohne_vram_messung, sampler_factory=sampler)
             existing = store.get_key(m.key)
             if t.profile_name.startswith("messreihe-") and existing is not None and existing.stable and existing.runs >= m.runs:
                 print("  (Messreihe ersetzt die stabile Profilkalibrierung nicht)")

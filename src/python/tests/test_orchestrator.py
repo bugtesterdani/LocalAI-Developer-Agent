@@ -236,6 +236,38 @@ def test_nur_loopback_erlaubt():
             validate_loopback(url)
 
 
+def test_ollama_im_lan_nur_ausdruecklich_und_nur_private_ip():
+    with pytest.raises(GatewayError, match="allowLan"):
+        validate_loopback("http://192.168.178.39:11434")
+    validate_loopback("http://192.168.178.39:11434", allow_lan=True)
+    validate_loopback("http://10.0.0.5:11434", allow_lan=True)
+    for url in ("http://8.8.8.8:11434", "http://ollama.example.com:11434", "http://0.0.0.0:11434", "http://224.0.0.1:1"):
+        with pytest.raises(GatewayError):
+            validate_loopback(url, allow_lan=True)
+    raw = {"ollama": {"url": "http://192.168.178.39:11434", "allowLan": True},
+           "profiles": [{"name": "s", "model": "qwen2.5-coder:14b", "contextTokens": 8192, "maxOutputTokens": 2048}]}
+    config = ModelsConfig.parse(raw)
+    assert config.gateway().url == "http://192.168.178.39:11434"
+    with pytest.raises(ConfigError, match="allowLan"):
+        ModelsConfig.parse({**raw, "ollama": {"url": "http://192.168.178.39:11434"}})
+    remote = hardware.detect("http://192.168.178.39:11434")
+    assert remote.remote_host == "192.168.178.39:11434" and "anderer Rechner" in remote.describe()
+    assert remote.fingerprint() != hardware.detect("http://192.168.178.40:11434").fingerprint()
+
+
+def test_persoenliche_einstellungen_ueberlagern_nur_einzelne_werte():
+    from localai.orchestrator.models import merge, repo_root
+    base = json.loads((repo_root() / "config" / "models.json").read_text(encoding="utf-8"))
+    for name in ("models.local.example.json", "models.demo.json"):
+        overlay = json.loads((repo_root() / "config" / name).read_text(encoding="utf-8"))
+        config = ModelsConfig.parse(merge(base, overlay))
+        assert config.stall_warning_seconds == 45 and len(config.profiles) == len(base["profiles"])
+    lan = ModelsConfig.parse(merge(base, json.loads((repo_root() / "config" / "models.local.example.json").read_text("utf-8"))))
+    assert lan.ollama_url == "http://192.168.178.39:11434" and lan.allow_lan and lan.require_calibration
+    demo = ModelsConfig.parse(merge(base, json.loads((repo_root() / "config" / "models.demo.json").read_text("utf-8"))))
+    assert demo.ollama_url.endswith(":11435") and not demo.require_calibration and demo.roles["Coder"] == ["standard"]
+
+
 def test_streaming_mit_thinking_und_kennzahlen(ollama):
     ollama.responder = lambda body: ("<think>inline idea</think>Answer text", "native thought")
     chunks, thoughts = [], []

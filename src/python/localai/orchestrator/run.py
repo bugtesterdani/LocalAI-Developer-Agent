@@ -61,8 +61,8 @@ class Orchestrator:
         self.run_id = run_id
         self.config = config
         self.data_dir = data_dir
-        self.gateway = gateway or OllamaGateway(config.ollama_url, config.stall_warning_seconds, config.stall_abort_seconds)
-        self.detect = detect
+        self.gateway = gateway or config.gateway()
+        self.detect = detect if detect is not hardware.detect else (lambda: hardware.detect(config.ollama_url))
         self.inbox_after = inbox_after
         self.reporter = reporter or ActivityReporter(run_id, client.report_activity, echo=echo)
         self.goals: queue.Queue[str | None] = queue.Queue()

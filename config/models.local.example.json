@@ -1,0 +1,4 @@
+{
+  "_hinweis": "Als config/models.local.json speichern. Nur die Werte, die von config/models.json abweichen; models.local.json wird beim Aktualisieren nie überschrieben. Beispiel: Ollama auf einem anderen Rechner im LAN (dort OLLAMA_HOST=0.0.0.0:11434, siehe docs/pruefung-M3.md).",
+  "ollama": { "url": "http://192.168.178.39:11434", "allowLan": true }
+}

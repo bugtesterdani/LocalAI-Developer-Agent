@@ -89,6 +89,15 @@ class ModelsConfig:
     calibration: CalibrationSettings
     require_calibration: bool = True
     source: str = ""
+    allow_lan: bool = False
+
+    def gateway(self, url: str | None = None, **overrides):
+        """Gateway mit den Einstellungen dieser Konfiguration (eine Stelle für Adresse und LAN-Freigabe)."""
+        from localai.orchestrator.gateway import OllamaGateway
+
+        kwargs = {"stall_warning": self.stall_warning_seconds, "stall_abort": self.stall_abort_seconds,
+                  "allow_lan": self.allow_lan, **overrides}
+        return OllamaGateway(url or self.ollama_url, **kwargs)
 
     @staticmethod
     def load(path: pathlib.Path) -> ModelsConfig:
@@ -97,6 +106,25 @@ class ModelsConfig:
         except (OSError, json.JSONDecodeError) as err:
             raise ConfigError(f"{path}: {err}") from err
         return ModelsConfig.parse(raw, str(path))
+
+    @staticmethod
+    def load_default(explicit: str | pathlib.Path | None = None) -> ModelsConfig:
+        """``config/models.json`` plus – falls vorhanden – die persönlichen Abweichungen aus
+        ``config/models.local.json`` (nur geänderte Werte nötig, z. B. die Ollama-Adresse).
+        Mit ``explicit`` nur genau diese Datei."""
+        if explicit:
+            return ModelsConfig.load(pathlib.Path(explicit))
+        base_path = repo_root() / "config" / "models.json"
+        local_path = base_path.with_name("models.local.json")
+        try:
+            raw = json.loads(base_path.read_text(encoding="utf-8-sig"))
+            source = str(base_path)
+            if local_path.exists():
+                raw = merge(raw, json.loads(local_path.read_text(encoding="utf-8-sig")))
+                source += f" + {local_path.name}"
+        except (OSError, json.JSONDecodeError) as err:
+            raise ConfigError(f"Modellkonfiguration: {err}") from err
+        return ModelsConfig.parse(raw, source)
 
     @staticmethod
     def parse(raw: dict[str, Any], source: str = "") -> ModelsConfig:
@@ -134,12 +162,31 @@ class ModelsConfig:
         calibration = CalibrationSettings(
             runs=int(cal.get("runs", 10)), min_vram_reserve_gib=float(cal.get("minVramReserveGiB", 2.0)),
             output_tokens=int(cal.get("outputTokens", 256)))
+        url = str(ollama.get("url", "http://127.0.0.1:11434"))
+        from localai.orchestrator.gateway import GatewayError, validate_loopback
+
+        try:
+            validate_loopback(url, bool(ollama.get("allowLan", False)))
+        except GatewayError as err:
+            raise ConfigError(f"ollama.url: {err}") from err
         return ModelsConfig(
-            ollama_url=str(ollama.get("url", "http://127.0.0.1:11434")),
+            ollama_url=url,
             stall_warning_seconds=float(ollama.get("stallWarningSeconds", 45)),
             stall_abort_seconds=float(ollama.get("stallAbortSeconds", 900)),
             profiles=profiles, roles=roles, limits=limits, calibration=calibration,
-            require_calibration=bool(raw.get("requireCalibration", True)), source=source)
+            require_calibration=bool(raw.get("requireCalibration", True)), source=source,
+            allow_lan=bool(ollama.get("allowLan", False)))
+
+
+def merge(base: Any, override: Any) -> Any:
+    """Objekte werden feldweise überlagert, alles andere (auch Listen) ersetzt."""
+    if isinstance(base, dict) and isinstance(override, dict):
+        result = dict(base)
+        for key, value in override.items():
+            if not key.startswith("_"):
+                result[key] = merge(base.get(key), value)
+        return result
+    return override
 
 
 # ---------------------------------------------------------------------- Kalibrierungsstand

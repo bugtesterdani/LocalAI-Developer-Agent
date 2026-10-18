@@ -10,7 +10,7 @@ Abgrenzung: `Patch.Apply` und Build/Test kommen mit M4. In M3 sind Patches nur *
 |---|---|
 | Orchestrator (Python) | `src/python/localai/orchestrator/` – startet mit der ersten Chatnachricht, nur mit Orchestrator-Token |
 | Rollen-Prompts (englisch, versioniert) | `src/python/localai/orchestrator/prompts/*.md` |
-| Modellprofile und Grenzen | `config/models.json`; eigene Änderungen in `config/models.local.json` (wird beim Synchronisieren nicht überschrieben) |
+| Modellprofile und Grenzen | `config/models.json`; persönliche Abweichungen (nur die geänderten Werte) in `config/models.local.json` – wird beim Aktualisieren nie überschrieben, Vorlage `config/models.local.example.json` |
 | Kalibrierung | `%LOCALAPPDATA%\LocalAi\broker\calibration.json` und `kalibrierung-*.md` |
 | Protokoll des Orchestrators | `%LOCALAPPDATA%\LocalAi\broker\orchestrator.log` |
 
@@ -48,6 +48,18 @@ Ablauf eines Runs: Snapshot (Freigabe) → Dateiliste (Freigabe) → Planner lie
    ```
    Benötigt (feste Tags, nie `latest`): `qwen2.5-coder:14b`, `qwen2.5-coder:7b`. Optional: `qwen3:8b` (Profil „planung“), `qwen3-coder:30b` (Profil „offload“). Fehlende mit `ollama pull qwen2.5-coder:14b` usw.
 
+### Ollama auf einem anderen Rechner (z. B. 192.168.178.39)
+
+Nur **eine** Datei auf diesem Rechner: `config\models.local.json`
+
+```json
+{ "ollama": { "url": "http://192.168.178.39:11434", "allowLan": true } }
+```
+
+Auf dem Ollama-Rechner `OLLAMA_HOST` = `0.0.0.0:11434` statt `127.0.0.1:11434` setzen, Ollama neu starten und in der Windows-Firewall eingehend TCP 11434 erlauben – am besten nur für die IP dieses Rechners (Ollama hat keine Anmeldung; jeder, der den Port erreicht, kann es benutzen). Prüfen von hier: `curl.exe http://192.168.178.39:11434/api/version`.
+
+Erlaubt sind nur private LAN-Adressen als Zahl (10.x, 172.16–31.x, 192.168.x) und nur mit `allowLan: true`; öffentliche Adressen und Namen werden abgewiesen. Die Kalibrierung kann GPU/RAM des anderen Rechners nicht messen und gibt Profile deshalb nur mit `--ohne-vram-messung` frei (Speicherreserve dann selbst auf dem Ollama-Rechner prüfen, z. B. mit `nvidia-smi` und `ollama ps` während der Läufe).
+
 ## 1. Automatische Tests
 
 ```powershell
@@ -82,7 +94,7 @@ Modus: `dev-local-unsafe` oder `hyperv` (egal). Im Reiter **Chat** z. B. schreib
 - [ ] **Run abbrechen** während eines Laufs → „Run abgebrochen …“ im Chat; offene Vorschläge des Runs ungültig.
 - [ ] **NOT-AUS** während eines Laufs → Orchestrator wird beendet („Orchestrator gestoppt“), Senden gesperrt; „Not-Aus aufheben“ → nächste Nachricht startet einen neuen Orchestrator.
 
-Danach: `del config\models.local.json` und den simulierten Server beenden.
+Danach: `del config\models.local.json` (bzw. deine eigene Datei wiederherstellen) und den simulierten Server beenden.
 
 ## 3. Kalibrierung (SEC-16, AC09)
 
@@ -107,7 +119,7 @@ Gesperrt bleibt ein Profil bei Speichermangel, Fehlern, weniger als 10 Läufen, 
 
 ## 4. Abnahme: fünf Rollen mit echtem Modell
 
-`config\models.local.json` darf **nicht** existieren (oder nur deine eigenen Profile enthalten). Oberfläche starten, Projekt `config/demo-project.json` (CSV-Importer).
+`config\models.local.json` darf nicht mehr das Demo-Profil enthalten (nur z. B. deine Ollama-Adresse). Oberfläche starten, Projekt `config/demo-project.json` (CSV-Importer).
 
 Chat: „Ergänze im CSV-Importer eine Prüfung auf leere Zeilen und schreibe Tests dafür.“
 
@@ -122,7 +134,8 @@ Antwortet das Modell nicht im vorgegebenen Format, erscheint „Antwort nicht ve
 ## 5. Live-Ansicht unter 32K bzw. Offload
 
 1. Profil `gross` (32K) kalibrieren; für Offload `qwen3-coder:30b` ziehen und `--profile offload` kalibrieren (CPU-Offload ist zulässig, Latenz zweitrangig).
-2. Offload für alle Rollen erzwingen: `config\models.local.json` als Kopie von `config\models.json` anlegen und in `roles` überall `"offload"` an die erste Stelle setzen.
+2. Offload für alle Rollen erzwingen: in `config\models.local.json` zusätzlich
+   `"roles": { "Planner": ["offload"], "Coder": ["offload"], "Tester": ["offload"], "Debugger": ["offload"], "Reviewer": ["offload"] }` eintragen.
 3. Run wie in Abschnitt 4.
 
 - [ ] Oberfläche bleibt während langer Prompt-Verarbeitung und Generierung bedienbar (Fenster verschieben, Reiter wechseln, Freigaben entscheiden).
