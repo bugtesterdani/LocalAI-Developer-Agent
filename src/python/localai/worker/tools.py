@@ -85,6 +85,10 @@ class ToolRunner:
                       else ResultStatus.Failed)
         except (ToolError, SnapshotError, ExecError, patching.PatchError) as err:
             results, truncated, status = [TargetResult(target_id="*", status=ResultStatus.Failed, message=str(err))], False, ResultStatus.Failed
+        except Exception as err:  # noqa: BLE001 – unerwarteter Fehler: melden statt ohne Antwort abzustürzen
+            message = f"Interner Fehler im Worker ({type(err).__name__}): {err}"[:2000]
+            print(f"[Worker] {message}", flush=True)
+            results, truncated, status = [TargetResult(target_id="*", status=ResultStatus.Failed, message=message)], False, ResultStatus.Failed
         output = canonical.sha256_hex([r.content_sha256 or "" for r in results])
         exit_code = self._exit_code if self._exit_code is not None else (0 if status == ResultStatus.Succeeded else 1)
         return ToolResult(

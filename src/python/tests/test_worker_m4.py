@@ -446,3 +446,21 @@ def test_gast_update_im_entwicklungsmodus_nicht_moeglich(tmp_path, store):
     from localai.worker.update import UPDATE_TOOL
     result = ToolRunner(store).run(job(proposal(UPDATE_TOOL, [], "-"), 1), None)
     assert result.status == ResultStatus.Failed
+
+
+def test_repo_index_schliesst_datenbanken(tmp_path, store):
+    """Unter Windows scheitert das Umbenennen einer offenen SQLite-Datei – Verbindungen müssen geschlossen sein."""
+    base = imported(tmp_path, store)
+    indexer = RepoIndexer(tmp_path / "work")
+    indexer.build(base)
+    assert indexer.search(base, "add")
+    db = tmp_path / "work" / "index" / f"{base.snapshot_id}.sqlite"
+    db.rename(db.with_suffix(".x"))  # wäre unter Windows mit offener Verbindung nicht möglich
+
+
+def test_unerwarteter_fehler_wird_gemeldet_statt_abzusturzen(tmp_path, store, monkeypatch):
+    base = imported(tmp_path, store)
+    indexer = RepoIndexer(tmp_path / "work")
+    monkeypatch.setattr(indexer, "build", lambda _i: (_ for _ in ()).throw(PermissionError("gesperrt")))
+    result = ToolRunner(store, indexer=indexer).run(job(proposal("Repo.Index", [], base.snapshot_id), 1), None)
+    assert result.status == ResultStatus.Failed and "PermissionError" in result.target_results[0].message

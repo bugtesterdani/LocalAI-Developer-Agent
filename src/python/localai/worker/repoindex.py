@@ -16,6 +16,7 @@ import json
 import pathlib
 import re
 import sqlite3
+from contextlib import closing
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -185,7 +186,8 @@ class RepoIndexer:
         if not db_path.exists():
             tmp = db_path.with_suffix(".tmp")
             tmp.unlink(missing_ok=True)
-            with sqlite3.connect(tmp) as db:
+            # closing(): unter Windows lässt sich eine noch offene Datenbank nicht umbenennen.
+            with closing(sqlite3.connect(tmp)) as db, db:
                 fts = _has_fts5(db)
                 if fts:
                     db.execute("CREATE VIRTUAL TABLE symbols USING fts5(name, kind UNINDEXED, path, line UNINDEXED)")
@@ -200,7 +202,7 @@ class RepoIndexer:
 
     def search(self, index: SnapshotIndex, query: str, limit: int = 100) -> list[str]:
         self.build(index)
-        with sqlite3.connect(self.base / f"{index.snapshot_id}.sqlite") as db:
+        with closing(sqlite3.connect(self.base / f"{index.snapshot_id}.sqlite")) as db:
             fts = db.execute("SELECT value FROM meta WHERE key = 'fts5'").fetchone()[0] == "True"
             words = _IDENT.findall(query) or [query.strip()]
             rows: list[tuple] = []
