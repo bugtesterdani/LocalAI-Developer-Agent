@@ -366,9 +366,9 @@ public sealed class ApprovalBroker : IAsyncDisposable
     /// </summary>
     public void PublishInfo(string type, string message)
     {
-        if (!type.StartsWith("sandbox.", StringComparison.Ordinal) && !type.StartsWith("toolchain.", StringComparison.Ordinal))
+        if (!InfoPrefixes.Any(prefix => type.StartsWith(prefix, StringComparison.Ordinal)))
         {
-            throw new ArgumentException("Nur sandbox.* und toolchain.* Ereignisse", nameof(type));
+            throw new ArgumentException("Nur sandbox.*, toolchain.*, orchestrator.* und run.* Ereignisse", nameof(type));
         }
         lock (_gate)
         {
@@ -384,6 +384,35 @@ public sealed class ApprovalBroker : IAsyncDisposable
             catch (ObjectDisposedException)
             {
             }
+        }
+    }
+
+    private static readonly string[] InfoPrefixes = ["sandbox.", "toolchain.", "orchestrator.", "run."];
+
+    /// <summary>
+    /// Bricht Vorschläge eines Runs ab (optional nur eines Agenten): offene und freigegebene werden ungültig,
+    /// laufende abgebrochen. Für Abbruch pro Agent und bei abgestürztem Orchestrator (SEC-22).
+    /// </summary>
+    public int CancelProposals(string runId, AgentRole? agent, string reason)
+    {
+        lock (_gate)
+        {
+            EnsureStarted();
+            var count = 0;
+            foreach (var entry in _entries.Values.Where(e => e.Proposal.RunId == runId && (agent is null || e.Proposal.Agent == agent)).ToList())
+            {
+                if (entry.State is ProposalState.AwaitingApproval or ProposalState.Approved)
+                {
+                    SetState(entry, ProposalState.Invalidated, reason);
+                    count++;
+                }
+                else if (entry.State == ProposalState.Running)
+                {
+                    entry.RunCts?.Cancel();
+                    count++;
+                }
+            }
+            return count;
         }
     }
 

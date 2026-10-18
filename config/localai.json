@@ -24,6 +24,12 @@
       "keepVmOnExit": false
     }
   },
+  "orchestrator": {
+    "command": "uv",
+    "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.orchestrator"],
+    "workingDirectory": ".",
+    "heartbeatTimeoutSeconds": 30
+  },
   "fakeAgent": {
     "command": "uv",
     "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.fake_agent"],

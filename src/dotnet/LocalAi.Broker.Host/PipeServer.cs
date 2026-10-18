@@ -32,13 +32,30 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.ToolchainsScan] = [CallerRole.Ui],
         [M.ToolchainsRegister] = [CallerRole.Ui],
         [M.ToolchainsUnregister] = [CallerRole.Ui],
+        [M.ChatSend] = [CallerRole.Ui],
+        [M.AgentCancel] = [CallerRole.Ui],
+        [M.RunCancel] = [CallerRole.Ui],
+        [M.ActivityWait] = [CallerRole.Ui],
+        [M.ActivityReport] = [CallerRole.Orchestrator],
+        [M.OrchestratorWait] = [CallerRole.Orchestrator],
+        [M.OrchestratorStatus] = [CallerRole.Ui],
+        [M.OrchestratorStop] = [CallerRole.Ui],
     };
+
+    public const int MaxChatChars = 16_000;
 
     /// <summary>Aktueller Zustand der Offline-VM (nur Betriebsart hyperv).</summary>
     public Func<string?> SandboxStatus { get; init; } = () => null;
 
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
+
+    /// <summary>Live-Aktivität (Anzeige) und Aufträge an den Orchestrator.</summary>
+    public required ActivityHub Activity { get; init; }
+
+    public required OrchestratorInbox Inbox { get; init; }
+
+    public required OrchestratorSupervisor Orchestrator { get; init; }
 
     /// <summary>Mehrere wartende Instanzen, damit gleichzeitige Verbindungen nicht als "Pipe beschäftigt" scheitern.</summary>
     private const int ListeningInstances = 4;
@@ -195,6 +212,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             }
             case M.EmergencyStop:
                 broker.EmergencyStop();
+                // Not-Aus wirkt auch, wenn der Orchestrator hängt: Prozess wird beendet (SEC-22).
+                Orchestrator.Stop("Not-Aus");
                 return new JsonObject { ["stopped"] = true };
             case M.Release:
                 broker.ReleaseEmergencyStop();
@@ -231,6 +250,67 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 }
                 return new JsonObject { ["removed"] = removed };
             }
+            case M.ChatSend:
+            {
+                var text = RequireString(p, "text").Trim();
+                if (text.Length == 0 || text.Length > MaxChatChars)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Unprocessable, $"Nachricht leer oder länger als {MaxChatChars} Zeichen");
+                }
+                if (broker.IsStopped)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Conflict, "Not-Aus ist aktiv – erst aufheben");
+                }
+                var runId = Orchestrator.EnsureRunning();
+                Activity.AddUserChat(runId, text);
+                Inbox.Post(OrchestratorCommandKind.Chat, text: text);
+                return new JsonObject { ["runId"] = runId };
+            }
+            case M.AgentCancel:
+            {
+                var agent = RequireString(p, "agent");
+                if (!Enum.TryParse<AgentRole>(agent, ignoreCase: false, out var agentRole) || !Enum.IsDefined(agentRole))
+                {
+                    throw new BrokerException(BrokerErrorCodes.Unprocessable, $"Unbekannter Agent: {agent}");
+                }
+                var cancelled = Orchestrator.RunId is { } run ? broker.CancelProposals(run, agentRole, $"Abbruch von {agentRole} durch Nutzer") : 0;
+                Inbox.Post(OrchestratorCommandKind.CancelAgent, agent: agentRole.ToString());
+                broker.PublishInfo("run.agentCancelled", $"{agentRole} abgebrochen ({cancelled} Vorschläge)");
+                return new JsonObject { ["cancelledProposals"] = cancelled };
+            }
+            case M.RunCancel:
+            {
+                var cancelled = Orchestrator.RunId is { } run ? broker.CancelProposals(run, null, "Run durch Nutzer abgebrochen") : 0;
+                Inbox.Post(OrchestratorCommandKind.CancelRun);
+                broker.PublishInfo("run.cancelled", $"Run abgebrochen ({cancelled} Vorschläge)");
+                return new JsonObject { ["cancelledProposals"] = cancelled };
+            }
+            case M.ActivityWait:
+            {
+                var after = p.TryGetProperty("afterSeq", out var a) ? a.GetInt64() : 0;
+                var timeoutMs = p.TryGetProperty("timeoutMs", out var t) ? Math.Clamp(t.GetInt32(), 0, 30_000) : 10_000;
+                return Node(await Activity.WaitAsync(after, TimeSpan.FromMilliseconds(timeoutMs), cancellationToken).ConfigureAwait(false));
+            }
+            case M.ActivityReport:
+            {
+                var report = ContractJson.Deserialize<ActivityReport>(p);
+                // Nur der aktuell vom Broker gestartete Orchestrator darf melden (kein Einschleusen fremder Runs).
+                if (Orchestrator.RunId is not { } current || report.RunId != current)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Conflict, "Kein laufender Run mit dieser Kennung");
+                }
+                return new JsonObject { ["accepted"] = Activity.Report(report) };
+            }
+            case M.OrchestratorWait:
+            {
+                var after = p.TryGetProperty("afterSeq", out var a) ? a.GetInt64() : 0;
+                var timeoutMs = p.TryGetProperty("timeoutMs", out var t) ? Math.Clamp(t.GetInt32(), 0, 30_000) : 10_000;
+                return Node(await Inbox.WaitAsync(after, TimeSpan.FromMilliseconds(timeoutMs), cancellationToken).ConfigureAwait(false));
+            }
+            case M.OrchestratorStatus:
+                return Orchestrator.Status();
+            case M.OrchestratorStop:
+                return new JsonObject { ["stopped"] = Orchestrator.Stop("durch Nutzer beendet") };
             default:
                 throw new BrokerException(BrokerErrorCodes.BadRequest, $"Unbekannte Methode: {method}");
         }

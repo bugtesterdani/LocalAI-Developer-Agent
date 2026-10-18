@@ -1,6 +1,6 @@
 """Typisierter Client für die Broker-Methoden.
 
-Der Orchestrator nutzt nur ``submit``, ``outcome`` und ``wait_events``.
+Der Orchestrator nutzt nur ``submit``, ``outcome``, ``grants``, ``report_activity`` und ``wait_commands``.
 Die UI-Methoden existieren hier ausschließlich für Integrationstests; der Broker
 lehnt sie mit dem Orchestrator-Token ab (SEC-17).
 """
@@ -11,7 +11,10 @@ import time
 from typing import Any
 
 from localai.contracts import (
+    ActivityEvent,
+    ActivityReport,
     BrokerEvent,
+    OrchestratorCommand,
     FolderGrant,
     DecisionKind,
     NarrowRequest,
@@ -54,7 +57,33 @@ class BrokerClient:
                 return outcome
             time.sleep(poll)
 
+    def report_activity(self, report: ActivityReport) -> int:
+        return int(self.pipe.call("activity.report", report.to_json_obj())["accepted"])
+
+    def wait_commands(self, after_seq: int, timeout_ms: int = 10_000) -> list[OrchestratorCommand]:
+        raw = self.pipe.call("orchestrator.wait", {"afterSeq": after_seq, "timeoutMs": timeout_ms})
+        return [OrchestratorCommand.model_validate(c) for c in raw]
+
     # ---------------------------------------------------------------- nur UI / Tests
+    def chat_send(self, text: str) -> str:
+        return str(self.pipe.call("chat.send", {"text": text})["runId"])
+
+    def agent_cancel(self, agent: str) -> int:
+        return int(self.pipe.call("agent.cancel", {"agent": agent})["cancelledProposals"])
+
+    def run_cancel(self) -> int:
+        return int(self.pipe.call("run.cancel")["cancelledProposals"])
+
+    def wait_activity(self, after_seq: int, timeout_ms: int = 10_000) -> list[ActivityEvent]:
+        raw = self.pipe.call("activity.wait", {"afterSeq": after_seq, "timeoutMs": timeout_ms})
+        return [ActivityEvent.model_validate(e) for e in raw]
+
+    def orchestrator_status(self) -> dict[str, Any]:
+        return self.pipe.call("orchestrator.status")
+
+    def orchestrator_stop(self) -> bool:
+        return bool(self.pipe.call("orchestrator.stop")["stopped"])
+
     def status(self) -> dict[str, Any]:
         return self.pipe.call("status")
 

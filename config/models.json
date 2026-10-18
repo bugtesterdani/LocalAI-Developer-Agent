@@ -1,0 +1,36 @@
+{
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "stallWarningSeconds": 45,
+    "stallAbortSeconds": 900
+  },
+  "requireCalibration": true,
+  "profiles": [
+    { "name": "standard",  "model": "qwen2.5-coder:14b", "contextTokens": 8192,  "maxOutputTokens": 2048 },
+    { "name": "leicht",    "model": "qwen2.5-coder:7b",  "contextTokens": 8192,  "maxOutputTokens": 2048 },
+    { "name": "planung",   "model": "qwen3:8b",          "contextTokens": 8192,  "maxOutputTokens": 2048, "think": true },
+    { "name": "erweitert", "model": "qwen2.5-coder:14b", "contextTokens": 16384, "maxOutputTokens": 4096 },
+    { "name": "gross",     "model": "qwen2.5-coder:14b", "contextTokens": 32768, "maxOutputTokens": 4096 },
+    { "name": "offload",   "model": "qwen3-coder:30b",   "contextTokens": 32768, "maxOutputTokens": 4096, "offload": true }
+  ],
+  "roles": {
+    "Planner":  ["gross", "erweitert", "standard", "leicht"],
+    "Coder":    ["gross", "erweitert", "standard", "leicht"],
+    "Tester":   ["gross", "erweitert", "standard", "leicht"],
+    "Debugger": ["gross", "erweitert", "standard", "leicht"],
+    "Reviewer": ["gross", "erweitert", "standard", "leicht"]
+  },
+  "limits": {
+    "maxStepsPerTask": 20,
+    "maxRepairAttempts": 3,
+    "maxActiveMinutes": 30,
+    "maxSandboxJobs": 2,
+    "maxGpuRequests": 1,
+    "maxTasks": 12
+  },
+  "calibration": {
+    "runs": 10,
+    "minVramReserveGiB": 2.0,
+    "outputTokens": 256
+  }
+}

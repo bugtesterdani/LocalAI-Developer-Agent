@@ -1,7 +1,7 @@
 """Erzeugt C#-Records und Pydantic-Modelle aus contracts/schemas/contracts.schema.json.
 
 Unterstützte Schema-Teilmenge (bewusst klein gehalten):
-  type: string | integer | boolean | object (frei oder additionalProperties = Map) | array (items) ;
+  type: string | integer | number | boolean | object (frei oder additionalProperties = Map) | array (items) ;
   enum (string) ; $ref auf #/$defs/X
   format: date-time (bleibt string)
 
@@ -48,6 +48,8 @@ def cs_type(prop: dict) -> str:
         return "string"
     if t == "integer":
         return "long"
+    if t == "number":
+        return "double"
     if t == "boolean":
         return "bool"
     if t == "object" and "additionalProperties" in prop:
@@ -107,6 +109,8 @@ def py_type(prop: dict) -> str:
         return "str"
     if t == "integer":
         return "StrictInt"
+    if t == "number":
+        return "float"
     if t == "boolean":
         return "StrictBool"
     if t == "object" and "additionalProperties" in prop:

@@ -370,3 +370,67 @@ class ToolchainRegistration(Contract):
     digest: str = Field(alias="digest")
     files: dict[str, str] = Field(alias="files")
     registered_at: str = Field(alias="registeredAt")
+
+
+class AgentState(str, Enum):
+    Ready = "Ready"
+    Queued = "Queued"
+    Generating = "Generating"
+    WaitingApproval = "WaitingApproval"
+    WaitingUser = "WaitingUser"
+    Done = "Done"
+    Failed = "Failed"
+    Cancelled = "Cancelled"
+
+
+class ActivityKind(str, Enum):
+    State = "State"
+    Output = "Output"
+    Thinking = "Thinking"
+    Proposal = "Proposal"
+    Task = "Task"
+    Chat = "Chat"
+    Metric = "Metric"
+    Warning = "Warning"
+    Error = "Error"
+    Heartbeat = "Heartbeat"
+
+
+class ActivityEvent(Contract):
+    """Live-Aktivität eines Agenten (reine Anzeige; ändert keine Freigaben). seq vergibt der Broker."""
+
+    seq: StrictInt = Field(alias="seq")
+    at: str = Field(alias="at")
+    run_id: str = Field(alias="runId")
+    agent: str = Field(alias="agent")
+    kind: ActivityKind = Field(alias="kind")
+    task_id: str | None = Field(default=None, alias="taskId")
+    text: str | None = Field(default=None, alias="text")
+    state: AgentState | None = Field(default=None, alias="state")
+    model: str | None = Field(default=None, alias="model")
+    tokens: StrictInt | None = Field(default=None, alias="tokens")
+    tokens_per_second: float | None = Field(default=None, alias="tokensPerSecond")
+    elapsed_ms: StrictInt | None = Field(default=None, alias="elapsedMs")
+    context_tokens: StrictInt | None = Field(default=None, alias="contextTokens")
+    stalled: StrictBool | None = Field(default=None, alias="stalled")
+
+
+class ActivityReport(Contract):
+    run_id: str = Field(alias="runId")
+    events: list[ActivityEvent] = Field(alias="events")
+
+
+class OrchestratorCommandKind(str, Enum):
+    Chat = "Chat"
+    CancelAgent = "CancelAgent"
+    CancelRun = "CancelRun"
+
+
+class OrchestratorCommand(Contract):
+    """Auftrag der Oberfläche an den Orchestrator (über den Broker)."""
+
+    seq: StrictInt = Field(alias="seq")
+    at: str = Field(alias="at")
+    kind: OrchestratorCommandKind = Field(alias="kind")
+    agent: str | None = Field(default=None, alias="agent")
+    text: str | None = Field(default=None, alias="text")

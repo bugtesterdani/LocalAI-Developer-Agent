@@ -1024,6 +1024,145 @@
         "files",
         "registeredAt"
       ]
+    },
+    "AgentState": {
+      "type": "string",
+      "description": "Zustand eines Agenten in der Live-Ansicht.",
+      "enum": [
+        "Ready",
+        "Queued",
+        "Generating",
+        "WaitingApproval",
+        "WaitingUser",
+        "Done",
+        "Failed",
+        "Cancelled"
+      ]
+    },
+    "ActivityKind": {
+      "type": "string",
+      "enum": [
+        "State",
+        "Output",
+        "Thinking",
+        "Proposal",
+        "Task",
+        "Chat",
+        "Metric",
+        "Warning",
+        "Error",
+        "Heartbeat"
+      ]
+    },
+    "ActivityEvent": {
+      "type": "object",
+      "description": "Live-Aktivität eines Agenten (reine Anzeige; ändert keine Freigaben). seq vergibt der Broker.",
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string",
+          "description": "Planner, Coder, Tester, Debugger, Reviewer, Orchestrator oder User (nur Broker)"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActivityKind"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentState"
+        },
+        "model": {
+          "type": "string"
+        },
+        "tokens": {
+          "type": "integer"
+        },
+        "tokensPerSecond": {
+          "type": "number"
+        },
+        "elapsedMs": {
+          "type": "integer"
+        },
+        "contextTokens": {
+          "type": "integer"
+        },
+        "stalled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "runId",
+        "agent",
+        "kind"
+      ]
+    },
+    "ActivityReport": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActivityEvent"
+          }
+        }
+      },
+      "required": [
+        "runId",
+        "events"
+      ]
+    },
+    "OrchestratorCommandKind": {
+      "type": "string",
+      "enum": [
+        "Chat",
+        "CancelAgent",
+        "CancelRun"
+      ]
+    },
+    "OrchestratorCommand": {
+      "type": "object",
+      "description": "Auftrag der Oberfläche an den Orchestrator (über den Broker).",
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "kind": {
+          "$ref": "#/$defs/OrchestratorCommandKind"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "at",
+        "kind"
+      ]
     }
   }
 }

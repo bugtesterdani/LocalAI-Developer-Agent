@@ -334,3 +334,68 @@ public sealed partial record ToolchainRegistration(
     [property: JsonPropertyName("digest")] string Digest,
     [property: JsonPropertyName("files")] IReadOnlyDictionary<string, string> Files,
     [property: JsonPropertyName("registeredAt")] string RegisteredAt);
+
+[JsonConverter(typeof(JsonStringEnumConverter<AgentState>))]
+public enum AgentState
+{
+    Ready,
+    Queued,
+    Generating,
+    WaitingApproval,
+    WaitingUser,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<ActivityKind>))]
+public enum ActivityKind
+{
+    State,
+    Output,
+    Thinking,
+    Proposal,
+    Task,
+    Chat,
+    Metric,
+    Warning,
+    Error,
+    Heartbeat,
+}
+
+/// <summary>Live-Aktivität eines Agenten (reine Anzeige; ändert keine Freigaben). seq vergibt der Broker.</summary>
+public sealed partial record ActivityEvent(
+    [property: JsonPropertyName("seq")] long Seq,
+    [property: JsonPropertyName("at")] string At,
+    [property: JsonPropertyName("runId")] string RunId,
+    [property: JsonPropertyName("agent")] string Agent,
+    [property: JsonPropertyName("kind")] ActivityKind Kind,
+    [property: JsonPropertyName("taskId"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TaskId = null,
+    [property: JsonPropertyName("text"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text = null,
+    [property: JsonPropertyName("state"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AgentState? State = null,
+    [property: JsonPropertyName("model"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Model = null,
+    [property: JsonPropertyName("tokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Tokens = null,
+    [property: JsonPropertyName("tokensPerSecond"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? TokensPerSecond = null,
+    [property: JsonPropertyName("elapsedMs"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ElapsedMs = null,
+    [property: JsonPropertyName("contextTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ContextTokens = null,
+    [property: JsonPropertyName("stalled"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Stalled = null);
+
+public sealed partial record ActivityReport(
+    [property: JsonPropertyName("runId")] string RunId,
+    [property: JsonPropertyName("events")] IReadOnlyList<ActivityEvent> Events);
+
+[JsonConverter(typeof(JsonStringEnumConverter<OrchestratorCommandKind>))]
+public enum OrchestratorCommandKind
+{
+    Chat,
+    CancelAgent,
+    CancelRun,
+}
+
+/// <summary>Auftrag der Oberfläche an den Orchestrator (über den Broker).</summary>
+public sealed partial record OrchestratorCommand(
+    [property: JsonPropertyName("seq")] long Seq,
+    [property: JsonPropertyName("at")] string At,
+    [property: JsonPropertyName("kind")] OrchestratorCommandKind Kind,
+    [property: JsonPropertyName("agent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Agent = null,
+    [property: JsonPropertyName("text"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text = null);

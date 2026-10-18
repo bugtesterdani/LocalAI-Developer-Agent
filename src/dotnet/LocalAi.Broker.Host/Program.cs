@@ -74,8 +74,15 @@ Console.CancelKeyPress += (_, e) =>
     shutdown.Cancel();
 };
 
+var activity = new ActivityHub(journal, clock);
+var inbox = new OrchestratorInbox(clock);
+var orchestrator = new OrchestratorSupervisor(options.Orchestrator, children, broker, activity, inbox, clock, pipeName,
+    tokens.Orchestrator, options.DataDirectory, options.OrchestratorHeartbeatTimeout);
 var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, options)
 {
+    Activity = activity,
+    Inbox = inbox,
+    Orchestrator = orchestrator,
     SandboxStatus = () => vm?.Status.Text,
     Toolchains = toolchains,
 };
@@ -137,6 +144,7 @@ catch (OperationCanceledException)
 }
 finally
 {
+    await orchestrator.DisposeAsync();
     children.StopAll();
     if (vm is not null)
     {

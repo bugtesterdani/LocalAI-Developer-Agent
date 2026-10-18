@@ -30,6 +30,14 @@ public static class PipeProtocol
         public const string ToolchainsScan = "toolchains.scan";
         public const string ToolchainsRegister = "toolchains.register";
         public const string ToolchainsUnregister = "toolchains.unregister";
+        public const string ChatSend = "chat.send";
+        public const string AgentCancel = "agent.cancel";
+        public const string RunCancel = "run.cancel";
+        public const string ActivityWait = "activity.wait";
+        public const string ActivityReport = "activity.report";
+        public const string OrchestratorWait = "orchestrator.wait";
+        public const string OrchestratorStatus = "orchestrator.status";
+        public const string OrchestratorStop = "orchestrator.stop";
     }
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)

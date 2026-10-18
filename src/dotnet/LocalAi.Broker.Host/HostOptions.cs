@@ -66,6 +66,8 @@ public sealed record HostOptions
     public string RepoRoot { get; init; } = AppContext.BaseDirectory;
     public ProcessCommand? FakeAgent { get; init; }
     public ProcessCommand? DevWorker { get; init; }
+    public ProcessCommand? Orchestrator { get; init; }
+    public TimeSpan OrchestratorHeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public LocalAi.Sandbox.HyperVSettings? HyperV { get; init; }
     public string? ToolchainsDirectory { get; init; }
 
@@ -156,6 +158,22 @@ public sealed record HostOptions
         if (root.TryGetProperty("fakeAgent", out var agent))
         {
             options = options with { FakeAgent = ReadCommand(agent, repoRoot) };
+        }
+        if (root.TryGetProperty("orchestrator", out var orchestrator) && orchestrator.ValueKind == JsonValueKind.Object)
+        {
+            options = options with { Orchestrator = ReadCommand(orchestrator, repoRoot) };
+            if (orchestrator.TryGetProperty("heartbeatTimeoutSeconds", out var hb) && hb.ValueKind == JsonValueKind.Number)
+            {
+                options = options with { OrchestratorHeartbeatTimeout = TimeSpan.FromSeconds(Math.Max(2, hb.GetInt32())) };
+            }
+        }
+        else
+        {
+            // Ohne eigenen Abschnitt: Standardaufruf über uv (eigene localai.json bleibt unverändert gültig).
+            options = options with
+            {
+                Orchestrator = new ProcessCommand("uv", ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.orchestrator"], repoRoot),
+            };
         }
         if (root.TryGetProperty("toolchains", out var toolchains) && toolchains.TryGetProperty("directory", out var tcDir)
             && tcDir.ValueKind == JsonValueKind.String && tcDir.GetString()!.Length > 0)
