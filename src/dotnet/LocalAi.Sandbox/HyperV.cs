@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -343,18 +344,34 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private int _diskCounter;
     private readonly SandboxSession? _session;
     private readonly Func<string>? _fingerprint;
+    private readonly Func<string>? _codeFingerprint;
+    private readonly Func<string, Task>? _buildUpdate;
     private readonly SandboxReuseStore _reuse;
     private string? _currentFingerprint;
+    private string? _currentCode;
+    private int _guestUpdate;
+    private volatile bool _updating;
+
+    /// <summary>Version des Gast-Updates, die neu aufgebaute VMs beherrschen (worker.cmd mit Neustart, update.ps1).</summary>
+    public const int GuestUpdateVersion = 1;
+
+    /// <summary>Internes Werkzeug des Hosts für das Gast-Update; nie über den Broker erreichbar.</summary>
+    public const string UpdateTool = "Sandbox.Update";
     private DateTimeOffset _builtAt;
     private CancellationTokenSource? _lifecycleCts;
     private bool _forceRebuild;
 
     /// <param name="prepareGuest">Legt die Gastdateien im übergebenen Ordner ab (Python, Worker, Schlüssel, Skripte).</param>
     /// <param name="session">Sitzung (Schlüssel, Sequenz) – nötig für die Wiederverwendung.</param>
-    /// <param name="fingerprint">Fingerabdruck des Aufbaus (Abbild, Einstellungen, Worker, Toolchains) – nötig für die Wiederverwendung.</param>
+    /// <param name="fingerprint">Fingerabdruck der Grundlage (Abbild, Einstellungen, Laufzeit, Toolchains) – nötig für die Wiederverwendung.</param>
+    /// <param name="codeFingerprint">Fingerabdruck von Worker-Code und Gastskripten; weicht nur er ab, wird die VM per Gast-Update aktualisiert.</param>
+    /// <param name="buildUpdate">Schreibt die Nutzlast eines Gast-Updates (ZIP) an den übergebenen Pfad.</param>
     public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest, IReadOnlyList<string>? expectedToolchains = null,
-        SandboxSession? session = null, Func<string>? fingerprint = null)
+        SandboxSession? session = null, Func<string>? fingerprint = null, Func<string>? codeFingerprint = null,
+        Func<string, Task>? buildUpdate = null)
     {
+        _codeFingerprint = codeFingerprint;
+        _buildUpdate = buildUpdate;
         _expectedToolchains = expectedToolchains ?? [];
         settings.Validate();
         _settings = settings;
@@ -474,7 +491,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         try
         {
             _reuse.Save(new SandboxReuseState(1, _currentFingerprint, _session!.SessionId, "", "", _session.LastSequence, _currentDisk,
-                Volatile.Read(ref _diskCounter), _builtAt, clean), _session.Key);
+                Volatile.Read(ref _diskCounter), _builtAt, clean, _currentCode, _guestUpdate), _session.Key);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         {
@@ -497,9 +514,16 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         SetStatus(SandboxState.WaitingForGuest, "vorhandene VM wird fortgesetzt (Stand passt)");
         // Ab jetzt gilt die VM als in Benutzung: stürzt das Programm ab, wird beim nächsten Start neu aufgebaut.
         _reuse.Save(l.State with { Clean = false }, l.Key);
+        var codeMatches = _currentCode is null || l.State.CodeFingerprint == _currentCode;
+        if (!codeMatches && (l.State.GuestUpdate < 1 || _buildUpdate is null))
+        {
+            // Älterer Gast ohne Update-Fähigkeit: einmal neu aufbauen.
+            return false;
+        }
         _currentDisk = l.State.CurrentDisk;
         Volatile.Write(ref _diskCounter, l.State.DiskCounter);
         _builtAt = l.State.BuiltAt;
+        _guestUpdate = l.State.GuestUpdate;
         Directory.CreateDirectory(WorkDirectory);
         var started = await _host.SetVmStateAsync("Start", ct).ConfigureAwait(false);
         if (started.NetworkAdapters != 0)
@@ -546,10 +570,82 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             Lock($"VM hat {nics} Netzwerkkarte(n)");
             return true;
         }
-        resumed = true;
         var note = leftover is null ? "" : " (alte Rückgabe auf dem Transfer-Laufwerk verworfen)";
-        SetStatus(SandboxState.Ready, $"Offline-VM bereit – wiederverwendet (aufgebaut {_builtAt.ToLocalTime():dd.MM. HH:mm}){note}");
+        if (!codeMatches)
+        {
+            SetStatus(SandboxState.WaitingForGuest, "vorhandene VM wird aktualisiert (Worker-Code und Gastskripte, ohne Neuaufbau)");
+            var problem = await UpdateGuestAsync(ct).ConfigureAwait(false);
+            if (Status.State == SandboxState.Locked)
+            {
+                return true;
+            }
+            if (problem is not null)
+            {
+                return await GiveUp($"Gast-Update fehlgeschlagen ({problem}) – wird neu aufgebaut").ConfigureAwait(false);
+            }
+            note += " und aktualisiert";
+        }
+        resumed = true;
+        SaveReuseState(clean: false);
+        SetStatus(SandboxState.Ready, $"Offline-VM bereit – wiederverwendet{note} (aufgebaut {_builtAt.ToLocalTime():dd.MM. HH:mm})");
         return true;
+    }
+
+    /// <summary>
+    /// Gast-Update: signierter Job <see cref="UpdateTool"/> mit neuem Worker-Code und Gastskripten. Der Worker tauscht
+    /// sie aus, richtet sie ein (update.ps1) und startet neu. Rückgabe: null = erfolgreich, sonst der Grund.
+    /// </summary>
+    private async Task<string?> UpdateGuestAsync(CancellationToken ct)
+    {
+        var zip = Path.Combine(WorkDirectory, "gast-update.zip");
+        try
+        {
+            File.Delete(zip);
+            await _buildUpdate!(zip).ConfigureAwait(false);
+            var now = DateTimeOffset.UtcNow;
+            var proposal = new ToolProposal(ContractJson.SchemaVersion, Guid.NewGuid().ToString("D"), "sandbox", "gast-update", AgentRole.Planner,
+                UpdateTool, "1", "Gast-Update durch den Host (Worker-Code und Gastskripte)",
+                JsonSerializer.SerializeToElement(new { codeFingerprint = _currentCode }), [], "-", 0, "sbx-hyperv",
+                ContractTime.ToContract(now), ContractTime.ToContract(now.AddMinutes(15)));
+            byte[] payloadHash;
+            await using (var stream = File.OpenRead(zip))
+            {
+                payloadHash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
+            }
+            var job = new SandboxJob(ContractJson.SchemaVersion, Guid.NewGuid().ToString("D"), _session!.NextSequence(), _session.SessionId,
+                Guid.NewGuid().ToString("D"), proposal, ProposalHashing.Sha256(proposal), ContractTime.ToContract(now),
+                ContractTime.ToContract(now.AddMinutes(15)), PayloadSha256: Convert.ToHexStringLower(payloadHash));
+            _updating = true;
+            SandboxReply reply;
+            try
+            {
+                reply = await ExchangeAsync(JobSigner.Sign(job, _session.Key), zip, TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _updating = false;
+            }
+            var result = ResultValidator.Validate(reply, job);
+            if (result.Status != ResultStatus.Succeeded)
+            {
+                return GuestReport.Clip(result.TargetResults.FirstOrDefault()?.Message ?? "kein Ergebnis", 300);
+            }
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return GuestReport.Clip(ex.Message, 300);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(zip);
+            }
+            catch (IOException)
+            {
+            }
+        }
     }
 
     private async Task LifecycleAsync(CancellationToken ct)
@@ -573,6 +669,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             if (ReuseEnabled)
             {
                 _currentFingerprint = _fingerprint!();
+                _currentCode = _codeFingerprint?.Invoke();
                 if (!_forceRebuild && await TryResumeAsync(ct).ConfigureAwait(false))
                 {
                     return;
@@ -653,6 +750,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             }
             var minutes = (DateTime.UtcNow - started).TotalMinutes;
             _builtAt = DateTimeOffset.UtcNow;
+            _guestUpdate = GuestUpdateVersion;
             SaveReuseState(clean: false);
             SetStatus(SandboxState.Ready, $"Offline-VM bereit – {text}; Aufbau {minutes:F0} min");
         }
@@ -713,7 +811,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     public async Task<SandboxReply> ExchangeAsync(JobEnvelope envelope, string? payloadPath, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var status = Status;
-        if (!status.IsReady)
+        if (!status.IsReady && !_updating)
         {
             return new SandboxReply(null, $"Sandbox nicht bereit ({status.Text})");
         }
@@ -724,7 +822,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         var files = new List<string>();
         try
         {
-            if (!Status.IsReady)
+            if (!Status.IsReady && !_updating)
             {
                 return new SandboxReply(null, $"Sandbox nicht bereit ({Status.Text})");
             }

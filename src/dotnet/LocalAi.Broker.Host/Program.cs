@@ -211,8 +211,11 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
                 GuestPayloadBuilder.Build(guestDir, GuestPayloadSources.FromRepository(options.RepoRoot), session.Key, settings.TransferDiskBytes, staged,
                     settings.LowIntegrityTools);
             }), project.Toolchains ?? [], session,
-                () => SandboxFingerprint.Compute(settings, GuestPayloadSources.FromRepository(options.RepoRoot), toolchains!.Registrations,
-                    project.Toolchains ?? []));
+                () => SandboxFingerprint.ComputeBase(settings, GuestPayloadSources.FromRepository(options.RepoRoot), toolchains!.Registrations,
+                    project.Toolchains ?? []),
+                () => SandboxFingerprint.ComputeCode(settings, GuestPayloadSources.FromRepository(options.RepoRoot)),
+                zip => Task.Run(() => GuestPayloadBuilder.BuildUpdate(zip, GuestPayloadSources.FromRepository(options.RepoRoot),
+                    settings.TransferDiskBytes, project.Toolchains ?? [], settings.LowIntegrityTools)));
             var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance);
             return (adapter, context, null, vm);
         }

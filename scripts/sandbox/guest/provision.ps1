@@ -113,15 +113,9 @@ try {
         if ($LASTEXITCODE -ne 0) { $errors.Add("icacls C:\Toolchains fehlgeschlagen ($LASTEXITCODE)") }
     }
     if (Test-Path -LiteralPath $sourceRoot) { Remove-Item -LiteralPath $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue }
-    # Werkzeugprozesse laufen mit SYSTEM-Token auf niedriger Integrität. Windows gibt SYSTEM-Prozessen als Temp-Ordner
-    # fest C:\Windows\SystemTemp (GetTempPath2, TEMP/TMP werden ignoriert) – MSBuild/NuGet brauchen dort Schreibrecht.
-    # Nur die Integritätsstufe wird gesenkt; der Worker räumt nach jedem Job auf, was der Job dort angelegt hat.
-    $systemTemp = Join-Path $env:SystemRoot 'SystemTemp'
-    $lowIntegrity = -not ($config.PSObject.Properties['lowIntegrityTools'] -and $config.lowIntegrityTools -eq $false)
-    if ($lowIntegrity -and (Test-Path -LiteralPath $systemTemp)) {
-        & icacls.exe $systemTemp /setintegritylevel '(OI)(CI)low' | Out-Null
-        if ($LASTEXITCODE -ne 0) { $errors.Add("icacls SystemTemp fehlgeschlagen ($LASTEXITCODE)") }
-    }
+    # Werkzeugprozesse mit niedriger Integrität brauchen C:\Windows\SystemTemp (siehe Set-SystemTempIntegrity).
+    $problem = Set-SystemTempIntegrity -Config $config
+    if ($problem) { $errors.Add($problem) }
 
     # 4 – Worker
     Set-Progress 'worker'
@@ -129,11 +123,7 @@ try {
     $version = & $python -I -c "import sys, pydantic, localai.worker; print(sys.version.split()[0])"
     if ($LASTEXITCODE -ne 0) { throw "Python oder Worker im Gast nicht lauffähig (Exitcode $LASTEXITCODE)" }
     $report.worker.python = ([string]$version).Trim()
-    # Toolchain-Aktionen nur mit installierten Toolchains; Werkzeugprozesse standardmäßig mit niedriger Integrität (SEC-21).
-    $execArgs = "--toolchains $root\toolchains"
-    if ($config.PSObject.Properties['lowIntegrityTools'] -and $config.lowIntegrityTools -eq $false) { $execArgs += ' --no-low-integrity' }
-    $cmd = "@echo off`r`n`"$python`" -I -m localai.worker --inbox $root\inbox --work $root\work --key-file $root\session.key --transfer-disk auto --transfer-size $size --require-ready $execArgs >> $root\logs\worker.log 2>&1`r`n"
-    [System.IO.File]::WriteAllText((Join-Path $root 'worker.cmd'), $cmd, [System.Text.Encoding]::ASCII)
+    Set-WorkerCommand -Config $config
     $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$root\worker.cmd`"" -WorkingDirectory $root
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest

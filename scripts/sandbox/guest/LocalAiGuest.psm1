@@ -235,4 +235,38 @@ function Publish-ToolchainForJobs([string]$Name, [string]$SourceRoot, [string]$T
     }
 }
 
+function Test-LowIntegrityTools($Config) {
+    return -not ($Config.PSObject.Properties['lowIntegrityTools'] -and $Config.lowIntegrityTools -eq $false)
+}
+
+function Set-SystemTempIntegrity($Config) {
+    # Werkzeugprozesse laufen mit SYSTEM-Token auf niedriger Integrität. Windows gibt SYSTEM-Prozessen als Temp-Ordner
+    # fest C:\Windows\SystemTemp (GetTempPath2, TEMP/TMP werden ignoriert) – MSBuild/NuGet brauchen dort Schreibrecht.
+    # Nur die Integritätsstufe wird gesenkt; der Worker räumt nach jedem Job auf, was der Job dort angelegt hat.
+    $systemTemp = Join-Path $env:SystemRoot 'SystemTemp'
+    if ((Test-LowIntegrityTools $Config) -and (Test-Path -LiteralPath $systemTemp)) {
+        & icacls.exe $systemTemp /setintegritylevel '(OI)(CI)low' | Out-Null
+        if ($LASTEXITCODE -ne 0) { return "icacls SystemTemp fehlgeschlagen ($LASTEXITCODE)" }
+    }
+    return $null
+}
+
+function Set-WorkerCommand($Config) {
+    # worker.cmd startet den Worker; Exitcode 75 = nach einem Gast-Update mit neuem Code neu starten.
+    $root = $script:Root
+    $python = Join-Path $root 'python\python.exe'
+    $size = [int64]$Config.transferDiskBytes
+    # Toolchain-Aktionen nur mit installierten Toolchains; Werkzeugprozesse standardmäßig mit niedriger Integrität (SEC-21).
+    $execArgs = "--toolchains $root\toolchains"
+    if (-not (Test-LowIntegrityTools $Config)) { $execArgs += ' --no-low-integrity' }
+    $lines = @(
+        '@echo off',
+        ':start',
+        "`"$python`" -I -m localai.worker --inbox $root\inbox --work $root\work --key-file $root\session.key --transfer-disk auto --transfer-size $size --require-ready $execArgs >> $root\logs\worker.log 2>&1",
+        'if %ERRORLEVEL%==75 goto start',
+        ''
+    )
+    [System.IO.File]::WriteAllText((Join-Path $root 'worker.cmd'), ($lines -join "`r`n"), [System.Text.Encoding]::ASCII)
+}
+
 Export-ModuleMember -Function *

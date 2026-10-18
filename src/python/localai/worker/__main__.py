@@ -28,6 +28,7 @@ import json
 import pathlib
 import sys
 import time
+from dataclasses import dataclass
 
 from localai.contracts import ResultEnvelope
 from localai.worker.execution import Executor, ToolchainCatalog
@@ -36,6 +37,7 @@ from localai.worker.repoindex import RepoIndexer
 from localai.worker.snapshot import SnapshotStore
 from localai.worker.tools import ToolRunner
 from localai.worker.transfer import Signal, TransferDisk, TransferError, TransferKind
+from localai.worker.update import RESTART_EXIT_CODE, UPDATE_TOOL, apply_update
 
 
 def _write_atomic(path: pathlib.Path, text: str) -> None:
@@ -84,7 +86,18 @@ class TransferSink:
         self.signal.send(f"result:{sequence}")
 
 
-def process_one(job_file: pathlib.Path, sink, key: bytes, state: WorkerState, runner: ToolRunner) -> None:
+@dataclass
+class UpdateTarget:
+    """Wohin ein Gast-Update schreibt (VM: C:\\LocalAi und das installierte Paket; Tests: eigene Ordner)."""
+
+    guest_root: pathlib.Path
+    package_dir: pathlib.Path
+
+
+def process_one(job_file: pathlib.Path, sink, key: bytes, state: WorkerState, runner: ToolRunner,
+                update: UpdateTarget | None = None) -> bool:
+    """Verarbeitet einen Job. True = Worker soll sich nach einem Gast-Update neu starten."""
+    restart = False
     stem = job_file.name.removesuffix(".job.json")
     payload = job_file.with_name(stem + ".payload.zip")
     ready = job_file.with_name(stem + ".ready")
@@ -95,13 +108,21 @@ def process_one(job_file: pathlib.Path, sink, key: bytes, state: WorkerState, ru
         sink.rejected(job_file.name, _sequence_of(job_file.name), str(err))
         print(f"[Worker] abgelehnt: {job_file.name}: {err}", flush=True)
     else:
-        result = runner.run(job, payload if payload.exists() else None)
+        if job.proposal.tool == UPDATE_TOOL:
+            if update is None:
+                result = runner.run(job, None)  # unbekanntes Tool → Failed
+            else:
+                result = apply_update(job, payload if payload.exists() else None, update.guest_root, update.package_dir)
+                restart = result.status.value == "Succeeded"
+        else:
+            result = runner.run(job, payload if payload.exists() else None)
         sink.result(ResultEnvelope(job_id=job.job_id, sequence=job.sequence, result=result))
         print(f"[Worker] {job.proposal.tool} {job.job_id[:8]}: {result.status.value}", flush=True)
     finally:
         job_file.unlink(missing_ok=True)
         payload.unlink(missing_ok=True)
         ready.unlink(missing_ok=True)
+    return restart
 
 
 def pending_jobs(inbox: pathlib.Path, require_ready: bool) -> list[pathlib.Path]:
@@ -112,7 +133,8 @@ def pending_jobs(inbox: pathlib.Path, require_ready: bool) -> list[pathlib.Path]
 
 
 def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, poll: float,
-        require_ready: bool = False, executor: Executor | None = None) -> None:
+        require_ready: bool = False, executor: Executor | None = None, update: UpdateTarget | None = None) -> int:
+    """Verarbeitet Jobs; Rückgabe 75 = nach Gast-Update neu starten, sonst 0."""
     for d in (inbox, work):
         d.mkdir(parents=True, exist_ok=True)
     state = WorkerState.load(work / "state.json")
@@ -121,12 +143,14 @@ def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, p
     while True:
         for job_file in pending_jobs(inbox, require_ready):
             try:
-                process_one(job_file, sink, key, state, runner)
+                if process_one(job_file, sink, key, state, runner, update):
+                    print("[Worker] Gast-Update angewendet – Neustart", flush=True)
+                    return RESTART_EXIT_CODE
             except (TransferError, OSError) as err:
                 # Ohne Rückweg kann nichts gemeldet werden; der Host läuft in seine Zeitgrenze.
                 print(f"[Worker] Rückgabe fehlgeschlagen: {err}", flush=True)
         if once:
-            return
+            return 0
         time.sleep(poll)
 
 
@@ -146,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--toolchains", type=pathlib.Path,
                         help="nur VM: Manifeste/Paketquellen der installierten Toolchains – schaltet Toolchain.* frei")
     parser.add_argument("--toolchain-root", type=pathlib.Path, help="nur Tests: Installationsort statt C:\\Toolchains")
+    parser.add_argument("--guest-root", type=pathlib.Path,
+                        help="Gast-Update: Ordner für Gastskripte (Standard: übergeordneter Ordner von --work)")
+    parser.add_argument("--package-dir", type=pathlib.Path, help="Gast-Update: installiertes Paket localai (nur Tests)")
     parser.add_argument("--no-low-integrity", action="store_true",
                         help="Werkzeugprozesse ohne niedrige Integritätsstufe starten (schwächer, nur zur Fehlersuche)")
     args = parser.parse_args(argv)
@@ -176,8 +203,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.toolchains:
         executor = Executor(ToolchainCatalog(args.toolchains, args.toolchain_root), args.work / "jobs",
                             low_integrity=not args.no_low_integrity)
-    run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor)
-    return 0
+    import localai
+    update = None
+    if transfer is not None:
+        # Gast-Update nur im VM-Modus (Transfer-Laufwerk); im Entwicklungsmodus ersetzt der Worker nie Code.
+        update = UpdateTarget(args.guest_root or args.work.resolve().parent,
+                              args.package_dir or pathlib.Path(localai.__file__).resolve().parent)
+    return run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor, update)
 
 
 if __name__ == "__main__":

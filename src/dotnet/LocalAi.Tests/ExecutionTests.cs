@@ -214,6 +214,15 @@ public sealed class ExecutionTests : IAsyncLifetime
     }
 
     [Fact, Trait("Pruefung", "B08")]
+    public void No_restore_in_Aktionen_wird_beim_Registrieren_gemeldet()
+    {
+        var json = ManifestJson().Replace("\"arguments\": [\"-c\", \"print(1)\", \"{configuration}\"]",
+            "\"arguments\": [\"-c\", \"print(1)\", \"--no-restore\", \"{configuration}\"]", StringComparison.Ordinal);
+        var problems = ToolchainValidator.Validate(ToolchainValidator.Parse(json), _ => true);
+        Assert.Contains(problems, p => p.Contains("--no-restore entfernen", StringComparison.Ordinal));
+    }
+
+    [Fact, Trait("Pruefung", "B08")]
     public void Abgeleiteter_Snapshot_nur_zum_bekannten_Basissnapshot_desselben_Grants()
     {
         var registry = new SnapshotRegistry();

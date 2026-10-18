@@ -9,7 +9,9 @@ namespace LocalAi.Sandbox;
 /// <summary>
 /// Zustand einer wiederverwendbaren Sandbox-VM (Option <c>reuseVm</c>): Fingerabdruck des Aufbaus, Sitzung
 /// (Kennung, Schlüssel, letzte Sequenz) und das angehängte Transfer-Laufwerk. Nur eine „saubere“ VM
-/// (bei Programmende bereit, nie gesperrt) wird wiederverwendet.
+/// (bei Programmende bereit, nie gesperrt) wird wiederverwendet. <c>fingerprint</c> ist die Grundlage (Abbild,
+/// Einstellungen, Laufzeit, Toolchains), <c>codeFingerprint</c> der Worker-Code und die Gastskripte;
+/// <c>guestUpdate</c> ≥ 1 heißt, der Gast kann Code-Updates ohne Neuaufbau übernehmen.
 /// </summary>
 public sealed record SandboxReuseState(
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
@@ -21,7 +23,9 @@ public sealed record SandboxReuseState(
     [property: JsonPropertyName("currentDisk")] string CurrentDisk,
     [property: JsonPropertyName("diskCounter")] int DiskCounter,
     [property: JsonPropertyName("builtAt")] DateTimeOffset BuiltAt,
-    [property: JsonPropertyName("clean")] bool Clean);
+    [property: JsonPropertyName("clean")] bool Clean,
+    [property: JsonPropertyName("codeFingerprint")] string? CodeFingerprint = null,
+    [property: JsonPropertyName("guestUpdate")] int GuestUpdate = 0);
 
 public sealed class SandboxReuseStore(string vmDirectory)
 {

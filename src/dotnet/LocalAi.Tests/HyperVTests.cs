@@ -132,14 +132,15 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.Empty(Directory.GetFiles(Path.Combine(host.GuestRoot, "inbox")));
     }
 
-    private async Task<HyperVSandbox> StartReusableAsync(HyperVSettings settings, SimulatedHost host, SandboxSession session, string fingerprint)
+    private async Task<HyperVSandbox> StartReusableAsync(HyperVSettings settings, SimulatedHost host, SandboxSession session, string fingerprint,
+        string? code = null, Func<string, Task>? buildUpdate = null)
     {
         var vm = new HyperVSandbox(settings, host, guestDir =>
         {
             var root = Directory.CreateDirectory(Path.Combine(guestDir, "LocalAi")).FullName;
             File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(session.Key));
             return Task.CompletedTask;
-        }, session: session, fingerprint: () => fingerprint);
+        }, session: session, fingerprint: () => fingerprint, codeFingerprint: code is null ? null : () => code, buildUpdate: buildUpdate);
         vm.Start();
         var deadline = DateTime.UtcNow.AddSeconds(90);
         while (vm.Status.State is not (SandboxState.Ready or SandboxState.Locked) && DateTime.UtcNow < deadline)
@@ -208,6 +209,90 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm3, third, root, "c")).Status);
     }
 
+    [Fact, Trait("Pruefung", "M4-Gast-Update")]
+    public async Task Nur_Code_geaendert_laufende_VM_wird_aktualisiert_statt_neu_aufgebaut()
+    {
+        var settings = Settings() with { ReuseVm = true };
+        var host = new SimulatedHost(settings, Path.Combine(_dir, "guest-sim"));
+        _cleanup.Add(host);
+        var root = Project();
+        // Quelle des Updates: kleines Paket localai und die drei Gastskripte.
+        var src = Directory.CreateDirectory(Path.Combine(_dir, "update-src")).FullName;
+        var pkg = Directory.CreateDirectory(Path.Combine(src, "localai", "worker")).FullName;
+        File.WriteAllText(Path.Combine(src, "localai", "__init__.py"), "");
+        File.WriteAllText(Path.Combine(pkg, "marker.py"), "VERSION = 2\n");
+        var scripts = Directory.CreateDirectory(Path.Combine(src, "guest")).FullName;
+        foreach (var f in GuestPayloadBuilder.GuestScriptFiles)
+        {
+            File.WriteAllText(Path.Combine(scripts, f), "# " + f);
+        }
+        var sources = new GuestPayloadSources(src, src, Path.Combine(src, "localai"), scripts, []);
+        var updates = 0;
+        Task Build(string zip)
+        {
+            updates++;
+            GuestPayloadBuilder.BuildUpdate(zip, sources, settings.TransferDiskBytes, ["dotnet"], true);
+            return Task.CompletedTask;
+        }
+
+        var session = new SandboxSession("s-upd");
+        var vm1 = await StartReusableAsync(settings, host, session, "basis-1", "code-1", Build);
+        Assert.Equal(SandboxState.Ready, vm1.Status.State);
+        await vm1.DisposeAsync();
+        Assert.Equal(0, updates);
+
+        // Nur der Code ist neu: VM wird fortgesetzt und aktualisiert, kein Neuaufbau.
+        var resumed = HyperVSandbox.LoadReusableSession(settings)!;
+        var vm2 = await StartReusableAsync(settings, host, resumed, "basis-1", "code-2", Build);
+        Assert.True(vm2.Status.State == SandboxState.Ready, vm2.Status.Text);
+        Assert.Contains("aktualisiert", vm2.Status.Text, StringComparison.Ordinal);
+        Assert.Equal(1, host.Builds);
+        Assert.Equal(1, updates);
+        Assert.Equal("VERSION = 2\n", File.ReadAllText(Path.Combine(host.PackageDir, "worker", "marker.py")));
+        Assert.Equal("# update.ps1", File.ReadAllText(Path.Combine(host.GuestScriptsDir, "update.ps1")));
+        Assert.Contains("\"lowIntegrityTools\":true", File.ReadAllText(Path.Combine(host.GuestScriptsDir, "guest-config.json")), StringComparison.Ordinal);
+        // Worker hat sich nach dem Update neu gestartet und arbeitet normal weiter.
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (host.WorkerRestarts == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+        Assert.Equal(1, host.WorkerRestarts);
+        var read = await ReadOnceAsync(vm2, resumed, root, "u");
+        Assert.True(read.Status == ResultStatus.Succeeded, read.TargetResults[0].Message);
+        await vm2.DisposeAsync();
+
+        // Gleicher Code beim nächsten Start: kein weiteres Update.
+        var again = HyperVSandbox.LoadReusableSession(settings)!;
+        var vm3 = await StartReusableAsync(settings, host, again, "basis-1", "code-2", Build);
+        _cleanup.Add(vm3);
+        Assert.True(vm3.Status.State == SandboxState.Ready, vm3.Status.Text);
+        Assert.DoesNotContain("aktualisiert", vm3.Status.Text, StringComparison.Ordinal);
+        Assert.Equal(1, updates);
+        Assert.Equal(1, host.Builds);
+    }
+
+    [Fact, Trait("Pruefung", "M4-Gast-Update")]
+    public async Task Grundlage_geaendert_baut_trotz_Gast_Update_neu_auf()
+    {
+        var settings = Settings() with { ReuseVm = true };
+        var host = new SimulatedHost(settings, Path.Combine(_dir, "guest-sim"));
+        _cleanup.Add(host);
+        var updates = 0;
+        Task Build(string zip)
+        {
+            updates++;
+            return Task.CompletedTask;
+        }
+        var vm1 = await StartReusableAsync(settings, host, new SandboxSession("s-b"), "basis-1", "code-1", Build);
+        await vm1.DisposeAsync();
+        var vm2 = await StartReusableAsync(settings, host, HyperVSandbox.LoadReusableSession(settings)!, "basis-2", "code-2", Build);
+        _cleanup.Add(vm2);
+        Assert.Equal(SandboxState.Ready, vm2.Status.State);
+        Assert.Equal(2, host.Builds);
+        Assert.Equal(0, updates);
+    }
+
     [Fact, Trait("Pruefung", "M3-Wiederverwendung")]
     public async Task Gesperrte_VM_wird_nie_wiederverwendet_und_Neuaufbau_auf_Knopfdruck()
     {
@@ -259,6 +344,16 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.NotEqual(baseline, scriptChanged);
         File.WriteAllText(Path.Combine(pkg, "worker", "tools.py"), "b");
         Assert.NotEqual(scriptChanged, Fp(reg));
+
+        // Aufteilung für das Gast-Update: Code (Worker, Skripte, Ausführungsoption) getrennt von der Grundlage.
+        var basis = SandboxFingerprint.ComputeBase(settings, sources, [reg], ["dotnet"]);
+        var code = SandboxFingerprint.ComputeCode(settings, sources);
+        File.WriteAllText(Path.Combine(pkg, "worker", "tools.py"), "c");
+        Assert.Equal(basis, SandboxFingerprint.ComputeBase(settings, sources, [reg], ["dotnet"]));
+        Assert.NotEqual(code, SandboxFingerprint.ComputeCode(settings, sources));
+        Assert.NotEqual(code, SandboxFingerprint.ComputeCode(settings with { LowIntegrityTools = false }, sources));
+        Assert.NotEqual(basis, SandboxFingerprint.ComputeBase(settings with { MemoryMB = 4096 }, sources, [reg], ["dotnet"]));
+        Assert.NotEqual(basis, SandboxFingerprint.ComputeBase(settings, sources, [reg with { Digest = "digest-3" }], ["dotnet"]));
     }
 
     [Fact, Trait("Pruefung", "SEC-24")]
@@ -466,7 +561,11 @@ public sealed class HyperVTests : IAsyncLifetime
         public int JobsCopied { get; private set; }
         public int Builds { get; private set; }
         public List<string> StateActions { get; } = [];
+        public int WorkerRestarts { get; private set; }
+        public string PackageDir => Path.Combine(GuestRoot, "pkg", "localai");
+        public string GuestScriptsDir => Path.Combine(GuestRoot, "root");
         private string[]? _workerArgs;
+        private volatile bool _stopping;
 
         public Task<HostCheck> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(new HostCheck(true, "simuliert"));
 
@@ -494,9 +593,10 @@ public sealed class HyperVTests : IAsyncLifetime
             // Schlüssel wie im echten Gast in die VM kopieren (die Gastdateien des Hosts werden später gelöscht).
             var guestKey = Path.Combine(GuestRoot, "session.key");
             File.Copy(key, guestKey, overwrite: true);
+            Directory.CreateDirectory(GuestScriptsDir);
             _workerArgs = ["--inbox", Path.Combine(GuestRoot, "inbox"), "--work", Path.Combine(GuestRoot, "work"),
-                "--key-file", guestKey, "--require-ready", "--poll-ms", "20", .. common];
-            _processes.Add(StartWorker(_workerArgs));
+                "--key-file", guestKey, "--require-ready", "--poll-ms", "20", "--guest-root", GuestScriptsDir, "--package-dir", PackageDir, .. common];
+            StartSupervised(_workerArgs);
             // Provisionierung: Bericht über das Transfer-Laufwerk.
             var report = Path.Combine(GuestRoot, "report.json");
             await File.WriteAllTextAsync(report, ReportJson, cancellationToken);
@@ -566,9 +666,9 @@ public sealed class HyperVTests : IAsyncLifetime
             {
                 StopAll();
             }
-            else if (Nics == 0 && _workerArgs is not null && _processes.Count == 0)
+            else if (Nics == 0 && _workerArgs is not null && _processes.All(p => p.HasExited))
             {
-                _processes.Add(StartWorker(_workerArgs));
+                StartSupervised(_workerArgs);
             }
             return Task.FromResult(new VmInfo(true, action == "Save" ? "Saved" : "Running", Nics));
         }
@@ -586,9 +686,33 @@ public sealed class HyperVTests : IAsyncLifetime
             return ValueTask.CompletedTask;
         }
 
+        /// <summary>Wie worker.cmd im Gast: Exitcode 75 (nach Gast-Update) → Worker neu starten.</summary>
+        private void StartSupervised(string[] args)
+        {
+            _stopping = false;
+            var process = StartWorker(args);
+            process.EnableRaisingEvents = true;
+            process.Exited += (_, _) =>
+            {
+                if (!_stopping && process.ExitCode == 75)
+                {
+                    WorkerRestarts++;
+                    lock (_processes)
+                    {
+                        StartSupervised(args);
+                    }
+                }
+            };
+            lock (_processes)
+            {
+                _processes.Add(process);
+            }
+        }
+
         private void StopAll()
         {
-            foreach (var p in _processes)
+            _stopping = true;
+            foreach (var p in _processes.ToList())
             {
                 try
                 {

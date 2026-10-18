@@ -371,14 +371,23 @@ public static class SandboxFingerprint
 {
     private static readonly HashSet<string> WorkerFiles = new(StringComparer.Ordinal) { "__init__.py", "canonical.py", "pathrules.py" };
 
+    /// <summary>Gesamter Stand (Grundlage + Code) – ändert sich irgendetwas davon, passt eine gespeicherte VM nicht mehr unverändert.</summary>
     public static string Compute(HyperVSettings settings, GuestPayloadSources sources, IEnumerable<ToolchainRegistration> toolchains,
+        IEnumerable<string> projectToolchains) =>
+        Hash([ComputeBase(settings, sources, toolchains, projectToolchains), ComputeCode(settings, sources)]);
+
+    /// <summary>
+    /// Grundlage der VM: Abbild, VM-Einstellungen, Python-Laufzeit und -Pakete, Toolchains. Ändert sie sich, wird neu
+    /// aufgebaut.
+    /// </summary>
+    public static string ComputeBase(HyperVSettings settings, GuestPayloadSources sources, IEnumerable<ToolchainRegistration> toolchains,
         IEnumerable<string> projectToolchains)
     {
         var lines = new List<string>
         {
-            "v1",
+            "v2-base",
             $"image|{settings.ImagePath}|{Facts(settings.ImagePath)}|{settings.ImageName}|{settings.ImageIndex}",
-            $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.ProductKey is not null}|low={settings.LowIntegrityTools}",
+            $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.ProductKey is not null}",
             $"python|{sources.PythonHome}|{Facts(Path.Combine(sources.PythonHome, "python.exe"))}",
         };
         IEnumerable<string?> entries = Directory.Exists(sources.SitePackages)
@@ -391,7 +400,21 @@ public static class SandboxFingerprint
                 lines.Add("pkg|" + entry);
             }
         }
-        // Nur was im Gast tatsächlich läuft: Worker und seine Abhängigkeiten (Orchestrator-Änderungen erzwingen keinen Neuaufbau).
+        var registered = toolchains.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in projectToolchains.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            lines.Add($"toolchain|{name}|{(registered.TryGetValue(name, out var r) ? r.Digest : "nicht-registriert")}");
+        }
+        return Hash(lines);
+    }
+
+    /// <summary>
+    /// Code im Gast: Worker (Paket localai ohne Orchestrator), Gastskripte, Ausführungsoption. Ändert sich nur er, kann
+    /// eine laufende VM per Gast-Update aktualisiert werden.
+    /// </summary>
+    public static string ComputeCode(HyperVSettings settings, GuestPayloadSources sources)
+    {
+        var lines = new List<string> { "v2-code", $"low={settings.LowIntegrityTools}" };
         foreach (var (dir, include) in new (string, Func<string, bool>)[]
                  {
                      (sources.LocalAiPackage, rel => WorkerFiles.Contains(rel) || rel.StartsWith("worker/", StringComparison.Ordinal)
@@ -414,13 +437,11 @@ public static class SandboxFingerprint
                 }
             }
         }
-        var registered = toolchains.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
-        foreach (var name in projectToolchains.Order(StringComparer.OrdinalIgnoreCase))
-        {
-            lines.Add($"toolchain|{name}|{(registered.TryGetValue(name, out var r) ? r.Digest : "nicht-registriert")}");
-        }
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines))));
+        return Hash(lines);
     }
+
+    private static string Hash(IEnumerable<string> lines) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines))));
 
     private static string Facts(string path)
     {
@@ -477,13 +498,43 @@ public static class GuestPayloadBuilder
             rel => !rel.Split(Path.DirectorySeparatorChar).Contains("__pycache__") && !rel.EndsWith(".pyc", StringComparison.Ordinal));
 
         File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
-        File.WriteAllText(Path.Combine(root, "guest-config.json"),
-            JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [], lowIntegrityTools }), new UTF8Encoding(false));
-        foreach (var file in new[] { "provision.ps1", "LocalAiGuest.psm1" })
+        File.WriteAllText(Path.Combine(root, "guest-config.json"), GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools), new UTF8Encoding(false));
+        foreach (var file in GuestScriptFiles)
         {
             File.Copy(Path.Combine(sources.GuestScripts, file), Path.Combine(root, file));
         }
         File.Copy(Path.Combine(sources.GuestScripts, "SetupComplete.cmd"), Path.Combine(guestDirectory, "SetupComplete.cmd"));
+    }
+
+    public static readonly string[] GuestScriptFiles = ["provision.ps1", "LocalAiGuest.psm1", "update.ps1"];
+
+    public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools) =>
+        JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [], lowIntegrityTools });
+
+    /// <summary>
+    /// Nutzlast eines Gast-Updates: Paket <c>localai</c> (ohne Caches), Gastskripte und <c>guest-config.json</c>
+    /// (siehe localai/worker/update.py). Python-Laufzeit, Pakete und Toolchains sind nicht enthalten.
+    /// </summary>
+    public static void BuildUpdate(string zipPath, GuestPayloadSources sources, long transferDiskBytes, IReadOnlyList<string>? toolchains,
+        bool lowIntegrityTools)
+    {
+        using var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
+        foreach (var file in Directory.EnumerateFiles(sources.LocalAiPackage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
+            var rel = Path.GetRelativePath(sources.LocalAiPackage, file).Replace('\\', '/');
+            if (rel.Split('/').Contains("__pycache__") || rel.EndsWith(".pyc", StringComparison.Ordinal) || new FileInfo(file).LinkTarget is not null)
+            {
+                continue;
+            }
+            System.IO.Compression.ZipFileExtensions.CreateEntryFromFile(zip, file, "localai/" + rel);
+        }
+        foreach (var file in GuestScriptFiles)
+        {
+            System.IO.Compression.ZipFileExtensions.CreateEntryFromFile(zip, Path.Combine(sources.GuestScripts, file), "guest/" + file);
+        }
+        var config = zip.CreateEntry("guest-config.json");
+        using var writer = new StreamWriter(config.Open(), new UTF8Encoding(false));
+        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools));
     }
 
     /// <summary>„pydantic“, „pydantic-2.9.dist-info“, „typing_extensions.py“ → Paketname; sonst null (.pth, Editables …).</summary>

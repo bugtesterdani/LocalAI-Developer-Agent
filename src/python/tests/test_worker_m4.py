@@ -398,3 +398,51 @@ def test_systemtemp_guard_entfernt_nur_neue_eintraege(tmp_path):
     (tmp_path / "neu.tmp").write_text("z")
     guard.cleanup()
     assert sorted(p.name for p in tmp_path.iterdir()) == ["alt.txt"]
+
+
+# ---------------------------------------------------------------- Gast-Update
+def _update_zip(path, entries):
+    import zipfile
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return path
+
+
+def test_gast_update_tauscht_paket_und_skripte(tmp_path):
+    from localai.worker.update import UPDATE_TOOL, apply_update
+    pkg = tmp_path / "site" / "localai"
+    (pkg / "worker").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "worker" / "alt.py").write_text("alt")
+    root = tmp_path / "root"
+    root.mkdir()
+    zip_path = _update_zip(tmp_path / "u.zip", {"localai/__init__.py": "", "localai/worker/neu.py": "neu",
+                                                "guest/update.ps1": "# u", "guest-config.json": "{}"})
+    result = apply_update(job(proposal(UPDATE_TOOL, [], "-"), 1), zip_path, root, pkg, run_script=False)
+    assert result.status == ResultStatus.Succeeded, result
+    assert (pkg / "worker" / "neu.py").read_text() == "neu" and not (pkg / "worker" / "alt.py").exists()
+    assert (root / "update.ps1").read_text() == "# u" and (root / "guest-config.json").exists()
+    assert not list((tmp_path / "site").glob("localai.*")), "keine Reste alter/neuer Paketordner"
+
+
+@pytest.mark.parametrize("entries, fehler", [
+    ({"localai/__init__.py": "", "../boese.py": "x"}, "unzulässiger Name"),
+    ({"localai/__init__.py": "", "python/python.exe": "x"}, "unerwartete Datei"),
+    ({"guest/update.ps1": "x"}, "Paket localai fehlt"),
+])
+def test_gast_update_lehnt_fremde_inhalte_ab(tmp_path, entries, fehler):
+    from localai.worker.update import UPDATE_TOOL, apply_update
+    pkg = tmp_path / "localai"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("bleibt")
+    result = apply_update(job(proposal(UPDATE_TOOL, [], "-"), 1), _update_zip(tmp_path / "u.zip", entries), tmp_path, pkg,
+                          run_script=False)
+    assert result.status == ResultStatus.Failed and fehler in result.target_results[0].message
+    assert (pkg / "__init__.py").read_text() == "bleibt"
+
+
+def test_gast_update_im_entwicklungsmodus_nicht_moeglich(tmp_path, store):
+    from localai.worker.update import UPDATE_TOOL
+    result = ToolRunner(store).run(job(proposal(UPDATE_TOOL, [], "-"), 1), None)
+    assert result.status == ResultStatus.Failed

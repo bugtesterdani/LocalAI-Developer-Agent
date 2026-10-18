@@ -110,6 +110,9 @@ public static class ToolchainValidator
             }
             Check(binaries.Contains(action.Binary), $"Aktion {name}: Binary {action.Binary} nicht deklariert");
             Check(action.TimeoutSeconds is null or (> 0 and <= 3600), $"Aktion {name}: timeoutSeconds 1 bis 3600");
+            // Jeder Job arbeitet auf einer frischen Kopie ohne obj/-Ordner: ohne Restore im selben Aufruf fehlt project.assets.json.
+            Check(!action.Arguments.Contains("--no-restore", StringComparer.OrdinalIgnoreCase),
+                $"Aktion {name}: --no-restore entfernen – jeder Job beginnt mit einer frischen Kopie (Pakete über -p:RestoreSources={{packages}})");
             var declared = action.Parameters ?? new Dictionary<string, ToolchainParameter>();
             foreach (var (pname, p) in declared)
             {
