@@ -158,6 +158,8 @@ public sealed class ExecutionTests : IAsyncLifetime
                      new { script = 5 },
                      new { script = "--version" },
                      new { script = "../../Windows/System32/cmd.exe" },
+                     new { script = "a&calc.cmd" },
+                     new { script = "x%PATH%.cmd" },
                  })
         {
             Assert.Equal(BrokerErrorCodes.Forbidden, Code(() => policy.Validate(Request("Toolchain.Test", new { grantId = "g", toolchain = "pyfake", parameters }))));
@@ -211,6 +213,21 @@ public sealed class ExecutionTests : IAsyncLifetime
         Assert.Contains(FolderRight.Modify, grant.Rights);
         Assert.DoesNotContain(FolderRight.Delete, grant.Rights);
         Assert.Equal(["dotnet", "python"], project.Toolchains!);
+    }
+
+    [Theory, Trait("Pruefung", "M5")]
+    [InlineData("m5-cpp-project.json")]
+    [InlineData("m5-powershell-project.json")]
+    [InlineData("m5-batch-project.json")]
+    [InlineData("m5-hdevelop-project.json")]
+    public void Beispielprojekte_fuer_M5_sind_gueltig_und_teilen_eine_VM(string file)
+    {
+        var project = ProjectLoader.Load(Path.Combine(ContractTests.RepoRoot(), "config", file), ContractTests.RepoRoot());
+        var grant = Assert.Single(project.Grants);
+        Assert.Contains(FolderRight.Execute, grant.Rights);
+        Assert.True(Directory.Exists(grant.Root), grant.Root);
+        // Gleiche Toolchains in allen M5-Projekten: Wechsel zwischen den Beispielen baut die VM nicht neu auf (reuseVm).
+        Assert.Equal(["cpp", "powershell", "batch", "hdevelop"], project.Toolchains!);
     }
 
     [Fact, Trait("Pruefung", "B08")]

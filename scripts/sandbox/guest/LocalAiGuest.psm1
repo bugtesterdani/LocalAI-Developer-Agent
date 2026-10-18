@@ -110,10 +110,25 @@ function Expand-Placeholders([string]$Text, [hashtable]$Map) {
     return $Text
 }
 
+$script:SystemBinaries = @{ 'cmd.exe' = 'cmd.exe'; 'windowspowershell\v1.0\powershell.exe' = 'WindowsPowerShell\v1.0\powershell.exe' }
+
+function Test-SafeRelativePath([string]$Path) {
+    $p = $Path -replace '/', '\'
+    return ($p -and -not [System.IO.Path]::IsPathRooted($p) -and $p -notmatch '(^|\\)\.\.(\\|$)' -and $p -notmatch ':')
+}
+
 function Get-ToolchainBinary($Manifest, [string]$Name) {
     $binary = @($Manifest.binaries | Where-Object { $_.name -eq $Name }) | Select-Object -First 1
     if (-not $binary) { throw "Binary $Name nicht deklariert" }
-    $path = Join-Path ([string]$Manifest.guestPath) (([string]$binary.path) -replace '/', '\')
+    $raw = ([string]$binary.path) -replace '/', '\'
+    if ($raw.ToLowerInvariant().StartsWith('{system}\')) {
+        # Nur die erlaubten Windows-Programme (Batch, PowerShell 5.1); kein Hash, sie ändern sich mit Updates.
+        $rest = $script:SystemBinaries[$raw.Substring(9).ToLowerInvariant()]
+        if (-not $rest) { throw "Windows-Programm nicht erlaubt: $raw" }
+        return (Join-Path $env:WINDIR "System32\$rest")
+    }
+    if (-not (Test-SafeRelativePath $raw)) { throw "Binary ${Name}: unzulässiger Pfad" }
+    $path = Join-Path ([string]$Manifest.guestPath) $raw
     if (-not (Test-Path -LiteralPath $path)) { throw "Binary fehlt nach der Installation: $path" }
     if ($binary.PSObject.Properties['sha256'] -and $binary.sha256) {
         $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -183,10 +198,32 @@ function Install-Toolchain([string]$Name, [string]$SourceRoot) {
             default { throw "Unbekannte Installationsart: $($manifest.install.kind)" }
         }
 
+        # deploy: Dateien/Ordner aus dem Toolchain-Ordner nach guestPath (Runner-Skripte, Module, Lizenzdatei).
+        if ($manifest.PSObject.Properties['deploy'] -and $manifest.deploy) {
+            foreach ($entry in @($manifest.deploy)) {
+                if (-not (Test-SafeRelativePath ([string]$entry.source)) -or -not (Test-SafeRelativePath ([string]$entry.target))) {
+                    throw "deploy: unzulässiger Pfad ($($entry.source) -> $($entry.target))"
+                }
+                $from = Join-Path $src (([string]$entry.source) -replace '/', '\')
+                $to = Join-Path $guest (([string]$entry.target) -replace '/', '\')
+                $parent = Split-Path -Parent $to
+                if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+                if (Test-Path -LiteralPath $from -PathType Container) {
+                    New-Item -ItemType Directory -Force -Path $to | Out-Null
+                    Get-ChildItem -LiteralPath $from -Force | Copy-Item -Destination $to -Recurse -Force
+                } elseif (Test-Path -LiteralPath $from -PathType Leaf) {
+                    Copy-Item -LiteralPath $from -Destination $to -Force
+                } else {
+                    throw "deploy: Quelle fehlt: $($entry.source)"
+                }
+            }
+        }
+
         if ($manifest.PSObject.Properties['postInstall'] -and $manifest.postInstall) {
             foreach ($command in @($manifest.postInstall)) {
                 $run = Invoke-ToolchainCommand -Manifest $manifest -Command $command -Map $map -Environment $environment -WorkingDirectory $src -TimeoutMinutes $timeout
-                if ($run.ExitCode -ne 0) { throw "Nachinstallation endete mit Exitcode $($run.ExitCode): $(Get-OutputTail $run.Output)" }
+                # 3010 = Neustart empfohlen, 1638 = neuere Version schon installiert (z. B. VC++-Laufzeit).
+                if ($run.ExitCode -notin 0, 3010, 1638) { throw "Nachinstallation endete mit Exitcode $($run.ExitCode): $(Get-OutputTail $run.Output)" }
             }
         }
 

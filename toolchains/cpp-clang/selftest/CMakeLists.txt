@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(LocalAiHallo CXX)
+enable_testing()
+add_executable(hallo hallo.cpp)
+add_test(NAME hallo COMMAND hallo)

@@ -258,6 +258,8 @@ class TestResultFormat(str, Enum):
 class PackageSourceKind(str, Enum):
     NuGet = "NuGet"
     Pip = "Pip"
+    Vcpkg = "Vcpkg"
+    PSModules = "PSModules"
     None_ = "None"
 
 
@@ -309,6 +311,7 @@ class ToolchainAction(Contract):
     arguments: list[str] = Field(alias="arguments")
     parameters: dict[str, ToolchainParameter] | None = Field(default=None, alias="parameters")
     timeout_seconds: StrictInt | None = Field(default=None, alias="timeoutSeconds")
+    then: list[ToolchainCommand] | None = Field(default=None, alias="then")
 
 
 class ToolchainLicense(Contract):
@@ -322,6 +325,13 @@ class ToolchainPackageSource(Contract):
     path: str | None = Field(default=None, alias="path")
 
 
+class ToolchainCopy(Contract):
+    """Datei oder Ordner aus dem Toolchain-Ordner, die beim VM-Aufbau nach guestPath kopiert wird (z. B. Runner-Skripte, Module, Lizenzdatei)."""
+
+    source: str = Field(alias="source")
+    target: str = Field(alias="target")
+
+
 class ToolchainManifest(Contract):
     """toolchain.json im Toolchain-Ordner (Spezifikation §8 Toolchains)."""
 
@@ -333,6 +343,7 @@ class ToolchainManifest(Contract):
     license: ToolchainLicense = Field(alias="license")
     binaries: list[ToolchainBinary] = Field(alias="binaries")
     install: ToolchainInstall = Field(alias="install")
+    deploy: list[ToolchainCopy] | None = Field(default=None, alias="deploy")
     post_install: list[ToolchainCommand] | None = Field(default=None, alias="postInstall")
     self_test: ToolchainSelfTest | None = Field(default=None, alias="selfTest")
     actions: dict[str, ToolchainAction] = Field(alias="actions")

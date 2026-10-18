@@ -652,6 +652,8 @@
       "enum": [
         "NuGet",
         "Pip",
+        "Vcpkg",
+        "PSModules",
         "None"
       ]
     },
@@ -805,6 +807,13 @@
         },
         "timeoutSeconds": {
           "type": "integer"
+        },
+        "then": {
+          "type": "array",
+          "description": "Weitere Schritte nach dem ersten (z. B. CMake: konfigurieren → bauen → testen); jeder nur, wenn der vorige mit Exitcode 0 endet.",
+          "items": {
+            "$ref": "#/$defs/ToolchainCommand"
+          }
         }
       },
       "required": [
@@ -846,6 +855,22 @@
         "kind"
       ]
     },
+    "ToolchainCopy": {
+      "type": "object",
+      "description": "Datei oder Ordner aus dem Toolchain-Ordner, die beim VM-Aufbau nach guestPath kopiert wird (z. B. Runner-Skripte, Module, Lizenzdatei).",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ]
+    },
     "ToolchainManifest": {
       "type": "object",
       "description": "toolchain.json im Toolchain-Ordner (Spezifikation §8 Toolchains).",
@@ -876,6 +901,12 @@
         },
         "install": {
           "$ref": "#/$defs/ToolchainInstall"
+        },
+        "deploy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolchainCopy"
+          }
         },
         "postInstall": {
           "type": "array",

@@ -130,6 +130,11 @@ public static class ToolchainTools
                     {
                         throw Bad(pname, "Pfad darf nicht mit '-' beginnen");
                     }
+                    // Zeichen, die cmd.exe auswertet (Batch-Toolchain: cmd /c {script}), sind in Pfaden nicht erlaubt.
+                    if (text.IndexOfAny(CmdMeta) >= 0)
+                    {
+                        throw Bad(pname, "Pfad enthält eines der Zeichen & | < > ^ % ! \"");
+                    }
                     break;
                 default:
                     text = value.ValueKind == JsonValueKind.String ? value.GetString()! : throw Bad(pname, "Text erwartet");
@@ -150,6 +155,8 @@ public static class ToolchainTools
         }
         return (manifest, actionName, action);
     }
+
+    private static readonly char[] CmdMeta = ['&', '|', '<', '>', '^', '%', '!', '"'];
 
     private static BrokerException Bad(string name, string message) => new(BrokerErrorCodes.Forbidden, $"Parameter {name}: {message}");
 }

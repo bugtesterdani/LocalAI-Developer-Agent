@@ -308,7 +308,9 @@ def new_file(patch: FilePatch) -> TextFile:
                 raise PatchError(f"{patch.path}: neue Datei enthält entfernte Zeilen")
             lines.append(ln[1:])
     final = not (patch.hunks and patch.hunks[-1].no_newline_new)
-    return TextFile(lines, "\n", False, final)
+    # Batch-Dateien mit CRLF: cmd.exe findet Sprungmarken (goto/call :x) in reinen LF-Dateien nicht zuverlässig.
+    eol = "\r\n" if patch.path.lower().endswith((".bat", ".cmd")) else "\n"
+    return TextFile(lines, eol, False, final)
 
 
 def file_section(text: str, path: str) -> str:

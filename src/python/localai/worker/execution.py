@@ -26,13 +26,27 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any
 
-from localai.contracts import TestCaseFailure, TestReport, TestResultFormat, ToolchainAction, ToolchainManifest
+from localai.contracts import (
+    TestCaseFailure,
+    TestReport,
+    TestResultFormat,
+    ToolchainAction,
+    ToolchainCommand,
+    ToolchainManifest,
+)
 from localai.pathrules import ROOT, PathRuleError, is_within, normalize_relative
 from localai.worker.snapshot import SnapshotIndex
 
 ACTIONS = {"Toolchain.Restore": ["restore"], "Toolchain.Build": ["build"], "Toolchain.Test": ["test"],
            "Toolchain.Run": ["run"], "Toolchain.Lint": ["lint", "format"]}
 GUEST_ROOT = "C:\\Toolchains\\"
+# Programme aus Windows selbst (System32), die ein Manifest als "{system}\\…" nennen darf (Batch, PowerShell 5.1).
+SYSTEM_PREFIX = "{system}\\"
+SYSTEM_BINARIES = {"cmd.exe": ("cmd.exe",),
+                   "windowspowershell\\v1.0\\powershell.exe": ("WindowsPowerShell", "v1.0", "powershell.exe")}
+MAX_THEN_STEPS = 5
+# Zeichen, die cmd.exe auswertet – in Pfadparametern verboten (Batch: cmd /c {script}).
+CMD_META = set('&|<>^%!"')
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 3600
 MAX_LOG_BYTES = 10 * 1024 * 1024
@@ -111,6 +125,32 @@ class ToolchainCatalog:
         return Toolchain(manifest, self.root / name, self.install_root / name)
 
 
+def binary_path(toolchain: Toolchain, name: str, system_dir: pathlib.Path | None = None) -> pathlib.Path:
+    """Pfad eines deklarierten Binaries: relativ zu guestPath oder eines der erlaubten Windows-Programme."""
+    binary = next((b for b in toolchain.manifest.binaries if b.name == name), None)
+    if binary is None:
+        raise ExecError(f"Binary {name} nicht deklariert")
+    raw = binary.path.replace("/", "\\")
+    if raw.lower().startswith(SYSTEM_PREFIX):
+        parts = SYSTEM_BINARIES.get(raw[len(SYSTEM_PREFIX):].lower())
+        if parts is None:
+            raise ExecError(f"Binary {name}: Windows-Programm nicht erlaubt ({binary.path})")
+        if binary.sha256:
+            raise ExecError(f"Binary {name}: sha256 ist für Windows-Programme nicht vorgesehen")
+        base = system_dir or pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        return base.joinpath(*parts)
+    try:
+        rel = normalize_relative(raw.replace("\\", "/"))
+    except PathRuleError as err:
+        raise ExecError(f"Binary {name}: unzulässiger Pfad") from err
+    exe = toolchain.install_dir.joinpath(*rel.split("/"))
+    if binary.sha256 and exe.is_file():
+        import hashlib
+        if hashlib.sha256(exe.read_bytes()).hexdigest() != binary.sha256:
+            raise ExecError(f"Hash von {exe.name} weicht vom Manifest ab")
+    return exe
+
+
 def resolve_action(toolchain: Toolchain, tool: str) -> tuple[str, ToolchainAction]:
     for name in ACTIONS.get(tool, []):
         action = toolchain.manifest.actions.get(name)
@@ -154,6 +194,8 @@ def validate_parameters(action: ToolchainAction, values: Any, index: SnapshotInd
                 raise ExecError(f"{name}: unzulässiger Pfad: {err}") from err
             if text.startswith("-"):
                 raise ExecError(f"{name}: Pfad darf nicht mit '-' beginnen")
+            if any(c in text for c in CMD_META):
+                raise ExecError(f"{name}: Pfad enthält eines der Zeichen & | < > ^ % ! \"")
             if text != ROOT and text not in index.files and not any(is_within(p, text) for p in index.files):
                 raise ExecError(f"{name}: '{text}' gibt es im Snapshot nicht")
         else:  # Text
@@ -165,7 +207,7 @@ def validate_parameters(action: ToolchainAction, values: Any, index: SnapshotInd
             if value.startswith("-"):
                 raise ExecError(f"{name}: Wert darf nicht mit '-' beginnen (keine zusätzlichen Optionen)")
             text = value
-        if kind != "Path" and pattern_violation(spec.pattern, text):
+        if pattern_violation(spec.pattern, text):
             raise ExecError(f"{name}: entspricht nicht dem Muster {spec.pattern}")
         result[name] = (kind, text)
     return result
@@ -192,7 +234,7 @@ class JobDirs:
         return dirs
 
 
-def expand(action: ToolchainAction, params: dict[str, tuple[str, str]], fixed: dict[str, str],
+def expand(action: ToolchainAction | ToolchainCommand, params: dict[str, tuple[str, str]], fixed: dict[str, str],
            repo: pathlib.Path) -> list[str]:
     args: list[str] = []
     for raw in action.arguments:
@@ -528,19 +570,20 @@ class Executor:
         toolchain = self.catalog.get(arguments.get("toolchain"))
         action_name, action = resolve_action(toolchain, tool)
         params = validate_parameters(action, arguments.get("parameters"), index)
-        binary = next((b for b in toolchain.manifest.binaries if b.name == action.binary), None)
-        if binary is None:
-            raise ExecError(f"Binary {action.binary} nicht deklariert")
-        exe = toolchain.install_dir.joinpath(*binary.path.replace("\\", "/").split("/"))
-        if not exe.is_file():
-            raise ExecError(f"Programm fehlt in der Sandbox: {exe}")
-        if binary.sha256:
-            import hashlib
-            if hashlib.sha256(exe.read_bytes()).hexdigest() != binary.sha256:
-                raise ExecError(f"Hash von {exe.name} weicht vom Manifest ab")
+        steps: list[ToolchainCommand] = [ToolchainCommand(binary=action.binary, arguments=list(action.arguments))]
+        steps += list(action.then or [])[:MAX_THEN_STEPS]
+        if len(action.then or []) > MAX_THEN_STEPS:
+            raise ExecError(f"Aktion {action_name}: höchstens {MAX_THEN_STEPS} weitere Schritte (then)")
+        programs = []
+        for step in steps:
+            exe = binary_path(toolchain, step.binary)
+            if not exe.is_file():
+                raise ExecError(f"Programm fehlt in der Sandbox: {exe}")
+            programs.append(exe)
         timeout = min(action.timeout_seconds or DEFAULT_TIMEOUT, MAX_TIMEOUT)
 
         dirs = JobDirs.create(self.jobs_root, job_id)
+        shown: list[str] = []
         try:
             if self.low_integrity:
                 label_low_integrity(dirs.root)
@@ -551,24 +594,44 @@ class Executor:
             fixed = {"guest": str(toolchain.install_dir), "work": str(dirs.root), "results": str(dirs.results),
                      "packages": str(packages if packages.is_dir() else dirs.root / "no-packages")}
             (dirs.root / "no-packages").mkdir(exist_ok=True)
-            args = expand(action, params, fixed, dirs.repo)
             env = environment(toolchain, dirs, fixed)
             system_temp = SystemTempGuard.for_windows() if self.low_integrity else None
-            outcome = run_process(exe, args, dirs.repo, env, timeout, dirs.root / "output.log", self.low_integrity)
+            started = time.monotonic()
+            logs: list[bytes] = []
+            truncated = False
+            exit_code, timed_out, failed_step = 0, False, 0
+            for number, (step, exe) in enumerate(zip(steps, programs, strict=True), start=1):
+                args = expand(step, params, fixed, dirs.repo)
+                shown.append(" ".join([exe.name, *[a.replace(str(dirs.root), "{work}") for a in args]]))
+                remaining = max(1, int(timeout - (time.monotonic() - started)))
+                outcome = run_process(exe, args, dirs.repo, env, remaining, dirs.root / f"output-{number}.log", self.low_integrity)
+                if len(steps) > 1:
+                    logs.append(f"\n> Schritt {number}/{len(steps)}: {shown[-1]}\n".encode())
+                logs.append(outcome.log)
+                truncated = truncated or outcome.log_truncated
+                exit_code, timed_out = outcome.exit_code, outcome.timed_out
+                if exit_code != 0 or timed_out:
+                    failed_step = number
+                    break
+            seconds = time.monotonic() - started
             report = parse_results(toolchain.manifest.test_result_format if action_name == "test" else TestResultFormat.ExitCode,
-                                   dirs.results, outcome.exit_code, outcome.timed_out)
+                                   dirs.results, exit_code, timed_out)
+            if failed_step and len(steps) > 1 and failed_step < len(steps):
+                report.problems.append(f"Schritt {failed_step} von {len(steps)} fehlgeschlagen – spätere Schritte nicht ausgeführt")
             if system_temp is not None:
                 system_temp.cleanup()
         finally:
             remove_tree(dirs.root)
-        state = "Zeitüberschreitung" if outcome.timed_out else f"Exitcode {outcome.exit_code}"
-        message = f"{toolchain.manifest.name} {action_name}: {state} nach {outcome.seconds:.0f} s"
+        state = "Zeitüberschreitung" if timed_out else f"Exitcode {exit_code}"
+        message = f"{toolchain.manifest.name} {action_name}: {state} nach {seconds:.0f} s"
+        if failed_step and len(steps) > 1:
+            message += f" (Schritt {failed_step}/{len(steps)})"
         if action_name == "test" and report.total:
             message += f"; Tests: {report.total}, bestanden {report.passed}, fehlgeschlagen {report.failed}, übersprungen {report.skipped}"
-        if outcome.log_truncated:
+        if truncated:
             message += "; Ausgabe gekürzt"
-        shown = [exe.name, *[a.replace(str(dirs.root), "{work}") for a in args]]
-        return ExecResult(report, log_excerpt(outcome.log), message, outcome.seconds, shown)
+        command = shown[0].split(" ") if len(shown) == 1 else [x for i, step in enumerate(shown) for x in ((["→"] if i else []) + [step])]
+        return ExecResult(report, log_excerpt(b"".join(logs)), message, seconds, command)
 
 
 if __name__ == "__main__":  # pragma: no cover

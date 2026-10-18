@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "name": "batch",
+  "version": "1.0",
+  "displayName": "Batch (cmd.exe) mit Test-Harness",
+  "guestPath": "C:\\Toolchains\\batch",
+  "license": {
+    "proprietary": false,
+    "note": "cmd.exe und Windows PowerShell sind Teil von Windows; Harness: Teil von LocalAI"
+  },
+  "binaries": [
+    { "name": "cmd", "path": "{system}\\cmd.exe" },
+    { "name": "powershell", "path": "{system}\\WindowsPowerShell\\v1.0\\powershell.exe" }
+  ],
+  "install": {
+    "kind": "None",
+    "expectedMinutes": 1,
+    "check": { "binary": "cmd", "arguments": ["/d", "/c", "ver"], "expectOutput": "Windows" }
+  },
+  "deploy": [
+    { "source": "harness", "target": "harness" }
+  ],
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "powershell", "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\harness\\Invoke-LocalAiBatchTests.ps1", "-Path", "{selftest}", "-Results", "{selftest}\\results"] },
+      { "binary": "cmd", "arguments": ["/d", "/c", "{selftest}\\hallo.cmd"] }
+    ],
+    "expectOutput": "Hallo aus der Sandbox (Batch)"
+  },
+  "actions": {
+    "test": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\harness\\Invoke-LocalAiBatchTests.ps1", "-Path", "{path}", "-Results", "{results}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 600
+    },
+    "lint": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\harness\\Invoke-LocalAiBatchTests.ps1", "-Path", "{path}", "-Lint"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 300
+    },
+    "run": {
+      "binary": "cmd",
+      "arguments": ["/d", "/c", "{script}"],
+      "parameters": { "script": { "type": "Path" } },
+      "timeoutSeconds": 120
+    }
+  },
+  "testResultFormat": "JUnit"
+}

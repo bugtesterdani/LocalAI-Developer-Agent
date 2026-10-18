@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "name": "cpp-clang",
+  "version": "21.1",
+  "displayName": "C++ (Clang/llvm-mingw, CMake, Ninja, CTest)",
+  "guestPath": "C:\\Toolchains\\cpp-clang",
+  "license": {
+    "proprietary": false,
+    "note": "LLVM: Apache-2.0 mit LLVM-Ausnahme; mingw-w64: ZPL/MIT; CMake: BSD-3; Ninja: Apache-2.0"
+  },
+  "binaries": [
+    { "name": "cmake", "path": "cmake\\bin\\cmake.exe" },
+    { "name": "ctest", "path": "cmake\\bin\\ctest.exe" },
+    { "name": "clang", "path": "llvm-mingw\\bin\\clang++.exe" }
+  ],
+  "install": {
+    "kind": "Archive",
+    "file": "cpp-clang.zip",
+    "expectedMinutes": 3,
+    "check": { "binary": "clang", "arguments": ["--version"], "expectOutput": "clang version" }
+  },
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "cmake", "arguments": ["-S", "{selftest}", "-B", "{selftest}\\build", "-G", "Ninja Multi-Config", "-DCMAKE_MAKE_PROGRAM={guest}\\ninja\\ninja.exe", "-DCMAKE_CXX_COMPILER={guest}\\llvm-mingw\\bin\\clang++.exe", "-DCMAKE_EXE_LINKER_FLAGS=-static"] },
+      { "binary": "cmake", "arguments": ["--build", "{selftest}\\build", "--config", "Release"] },
+      { "binary": "ctest", "arguments": ["--test-dir", "{selftest}\\build", "-C", "Release", "-V"] }
+    ],
+    "expectOutput": "Hallo aus der Sandbox (C++)"
+  },
+  "packageSource": { "kind": "Vcpkg", "path": "packages" },
+  "actions": {
+    "build": {
+      "binary": "cmake",
+      "arguments": ["-S", "{project}", "-B", "{work}\\build", "-G", "Ninja Multi-Config", "-DCMAKE_MAKE_PROGRAM={guest}\\ninja\\ninja.exe", "-DCMAKE_C_COMPILER={guest}\\llvm-mingw\\bin\\clang.exe", "-DCMAKE_CXX_COMPILER={guest}\\llvm-mingw\\bin\\clang++.exe", "-DCMAKE_EXE_LINKER_FLAGS=-static", "-DCMAKE_PREFIX_PATH={packages}"],
+      "then": [
+        { "binary": "cmake", "arguments": ["--build", "{work}\\build", "--config", "{configuration}"] }
+      ],
+      "parameters": {
+        "project": { "type": "Path" },
+        "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
+      },
+      "timeoutSeconds": 1200
+    },
+    "test": {
+      "binary": "cmake",
+      "arguments": ["-S", "{project}", "-B", "{work}\\build", "-G", "Ninja Multi-Config", "-DCMAKE_MAKE_PROGRAM={guest}\\ninja\\ninja.exe", "-DCMAKE_C_COMPILER={guest}\\llvm-mingw\\bin\\clang.exe", "-DCMAKE_CXX_COMPILER={guest}\\llvm-mingw\\bin\\clang++.exe", "-DCMAKE_EXE_LINKER_FLAGS=-static", "-DCMAKE_PREFIX_PATH={packages}"],
+      "then": [
+        { "binary": "cmake", "arguments": ["--build", "{work}\\build", "--config", "{configuration}"] },
+        { "binary": "ctest", "arguments": ["--test-dir", "{work}\\build", "-C", "{configuration}", "--output-on-failure", "--timeout", "120", "--output-junit", "{results}\\ctest.xml"] }
+      ],
+      "parameters": {
+        "project": { "type": "Path" },
+        "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
+      },
+      "timeoutSeconds": 1200
+    }
+  },
+  "testResultFormat": "JUnit"
+}

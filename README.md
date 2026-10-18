@@ -5,10 +5,10 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 
 - Spezifikation: [docs/Local-AI-Developer-Agent-Projektspezifikation.md](docs/Local-AI-Developer-Agent-Projektspezifikation.md)
 - Umsetzungsplan: [docs/Umsetzungsplan.md](docs/Umsetzungsplan.md)
-- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M2c.md](docs/pruefung-M2c.md) (vorher: [M2b](docs/pruefung-M2b.md), [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
+- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M5.md](docs/pruefung-M5.md) (vorher: [M4](docs/pruefung-M4.md), [M3](docs/pruefung-M3.md), [M2c](docs/pruefung-M2c.md), [M2b](docs/pruefung-M2b.md), [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
 - Anforderungen → Tests: [docs/sicherheit/anforderungen-tests.md](docs/sicherheit/anforderungen-tests.md)
 
-## Stand: Meilenstein M2 (a–c) – Sandbox mit Offline-VM und Toolchains
+## Stand: Meilenstein M5 – alle Zielsprachen
 
 | Teil | Sprache | Status |
 |---|---|---|
@@ -21,7 +21,9 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 | Modus `dev-local-unsafe` (Worker ohne VM, rot markiert) | – | fertig, **nur zum Entwickeln** |
 | Offline-Hyper-V-VM: Neuaufbau je Sitzung (DISM, unattend, ohne NIC), Selbsttest, Copy-VMFile hin, Transfer-VHDX zurück (ohne Einbinden gelesen) | PowerShell / C# / Python | fertig, **auf PC 123 zu prüfen** |
 | Toolchains: Manifest, Registrierung mit Hashes (UI), Installation + Prüfung + Hallo-Welt beim VM-Aufbau; Vorlagen .NET und Python | C# / PowerShell | fertig, **auf PC 123 zu prüfen** |
-| Modelle, fünf Agenten, Chat | – | M3 |
+| Orchestrator, Model Gateway (Ollama), fünf Agenten, Live-Aktivität und Chat | Python / C# | M3, abgenommen |
+| Patch.Apply, Build/Test in der VM (`Toolchain.*`), Repo.Index/Repo-Map, Reparaturschleife | Python / C# | M4 |
+| Weitere Sprachen: C++ (MSVC/Clang, CMake, CTest), PowerShell (Pester, PSScriptAnalyzer), Batch (Harness), HDevelop (HDevEngine, XML-Prüfung nach Patches) | PowerShell / Python / C# | M5, **auf dem PC zu prüfen** |
 
 ### Sandbox-Modi (`config/localai.json` → `sandbox.mode`, oder `--mode`)
 
@@ -39,11 +41,12 @@ contracts/            JSON Schema (einzige Quelle der Verträge) und Testvektore
 config/               localai.json (Modus, Worker, Fake-Agent), demo-project.json (Ordner + Rechte), m4-*-project.json
 samples/demo-csv/     kleines Demo-Projekt für den Testlauf
 samples/m4-*/         M4: Rechner in C# und Python (Build/Test in der VM), Sicherheitsprobe SEC-13
-toolchains/           Vorlagen für Toolchain-Ordner (dotnet, python) mit Anleitung
+samples/m5-*/         M5: Rechner in C++, PowerShell, Batch und HDevelop
+toolchains/           Vorlagen für Toolchain-Ordner (dotnet, python, cpp, cpp-clang, powershell, powershell5, batch, hdevelop) mit Anleitung
 docs/                 Spezifikation, Plan, Prüfanleitungen
 scripts/              test.ps1 / start.ps1 (Windows), test.sh (Linux)
   sandbox/              Hyper-V: Aufbau, Copy-VMFile, Laufwerkswechsel, KVP-Signal, Gast-Provisionierung
-  toolchains/           Offline-NuGet-Quelle für die dotnet-Toolchain
+  toolchains/           Offline-NuGet-Quelle (dotnet), Toolchain-Ordner für M5 anlegen (New-M5Toolchains.ps1)
   samples/              großes Beispiel-Repository (> 2.000 Dateien) erzeugen
 src/dotnet/           LocalAi.slnx
   LocalAi.Contracts     generierte Records, kanonisches JSON, Pipe-Protokoll

@@ -105,6 +105,16 @@ def default_verify(toolchains: list[dict[str, Any]], projects: list[str], langua
             guess = (solutions or csproj or [None])[0]
         elif name.startswith("python") and languages.get("Python"):
             guess = "."
+        elif name.startswith("cpp"):
+            cmake = sorted((p for p in projects if p.rsplit("/", 1)[-1] == "CMakeLists.txt"), key=lambda p: (_depth(p), p))
+            if cmake:
+                guess = cmake[0].rsplit("/", 1)[0] if "/" in cmake[0] else "."
+        elif name.startswith("powershell") and languages.get("PowerShell"):
+            guess = "."
+        elif name == "batch" and languages.get("Batch"):
+            guess = "."
+        elif name == "hdevelop" and languages.get("HDevelop"):
+            guess = "."
         if guess is None:
             continue
         params: dict[str, Any] = {}
@@ -149,6 +159,27 @@ def check_verify(entries: list[dict[str, Any]], toolchains: list[dict[str, Any]]
             continue
         steps.append(VerifyStep(tc["name"], action, dict(params)))
     return steps[:4], problems
+
+
+_LANGUAGE_HINTS = (
+    ((".hdev", ".hdvp", ".hdpl"), "HDevelop files are XML: every code line is <l>…</l> (comments <c>…</c>) inside "
+     "<procedure><body>; write &amp; &lt; &gt; for & < > inside lines. Tests: local procedures test_* in a *_test.hdev "
+     "program; fail with throw ('message')."),
+    ((".bat", ".cmd"), "Batch tests are files *.test.cmd (or test_*.cmd): exit /b 0 passes, any other exit code fails; "
+     "an optional <name>.expected.txt must match the output."),
+    ((".ps1", ".psm1"), "PowerShell tests are Pester 5 files *.Tests.ps1 (Describe/It/Should)."),
+    (("cmakelists.txt", ".cpp", ".hpp", ".h", ".cc"), "C++ tests are registered in CMake with enable_testing() and "
+     "add_test(); a test executable returning non-zero fails."),
+)
+
+
+_LANGUAGE_SAMPLE = {"HDevelop": "x.hdev", "Batch": "x.cmd", "PowerShell": "x.ps1", "C/C++": "x.cpp"}
+
+
+def language_hints(paths: list[str]) -> list[str]:
+    """Kurze Hinweise für Sprachen, deren Dateiformat oder Testkonvention kleine Modelle oft nicht kennen."""
+    lowered = [p.lower() for p in paths]
+    return [hint for suffixes, hint in _LANGUAGE_HINTS if any(p.endswith(suffixes) for p in lowered)]
 
 
 _WANTS_TESTS = re.compile(
@@ -471,6 +502,10 @@ class Orchestrator:
                  f"Files you may change: {', '.join(task.writes) or 'unknown – keep changes minimal and name them'}"]
         if acceptance:
             lines.append("## Acceptance criteria\n" + "\n".join(f"- {a}" for a in acceptance))
+        paths = [*task.reads, *task.writes] or [_LANGUAGE_SAMPLE[lang] for lang in self.languages if lang in _LANGUAGE_SAMPLE]
+        hints = language_hints(paths)
+        if hints:
+            lines.append("## Language notes\n" + "\n".join(f"- {h}" for h in hints))
         others = [f"- {t.task_id} ({t.role}): {t.title}" for t in tasks if t is not task]
         if others:
             lines.append("## Other tasks in this plan (done by other agents)\n" + "\n".join(others))

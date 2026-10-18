@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "projectId": "m5-cpp",
+  "name": "M5: Rechner (C++)",
+  "grants": [
+    {
+      "grantId": "rechner",
+      "root": "samples/m5-cpp",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": ["cpp", "powershell", "batch", "hdevelop"]
+}

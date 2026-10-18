@@ -962,3 +962,28 @@ def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
     assert calls["Coder"] == 2
     orch.stop()
     thread.join(5)
+
+
+# ---------------------------------------------------------------------- M5: weitere Sprachen
+
+def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
+    from localai.orchestrator.run import default_verify, language_hints, repo_facts
+    text = ("Repo map of snapshot abc – 40 files, C/C++ 12, PowerShell 5, Batch 3, HDevelop 4\n"
+            "Project/build files: native/CMakeLists.txt, native/lib/CMakeLists.txt\n")
+    projects, languages = repo_facts(text)
+    assert languages == {"C/C++": 12, "PowerShell": 5, "Batch": 3, "HDevelop": 4}
+    path = {"path": {"type": "Path"}}
+    toolchains = [
+        {"name": "cpp", "actions": {"test": {"parameters": {"project": {"type": "Path"},
+                                                             "configuration": {"type": "Choice", "values": ["Debug", "Release"]}}}}},
+        {"name": "powershell", "actions": {"test": {"parameters": path}}},
+        {"name": "batch", "actions": {"test": {"parameters": path}}},
+        {"name": "hdevelop", "actions": {"test": {"parameters": path}}},
+    ]
+    steps = [s.describe() for s in default_verify(toolchains, projects, languages)]
+    assert steps == ["cpp test (project=native, configuration=Debug)", "powershell test (path=.)", "batch test (path=.)",
+                     "hdevelop test (path=.)"]
+    assert default_verify(toolchains[:1], [], {"C/C++": 3}) == [], "ohne CMakeLists.txt kein geratener C++-Lauf"
+    hints = language_hints(["vision/inspect.hdev", "scripts/a.cmd"])
+    assert len(hints) == 2 and "&lt;" in hints[0] and "expected.txt" in hints[1]
+    assert language_hints(["src/a.py"]) == []

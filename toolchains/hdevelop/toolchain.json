@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "name": "hdevelop",
+  "version": "24.11",
+  "displayName": "HALCON 24.11 – HDevelop über HDevEngine",
+  "guestPath": "C:\\Toolchains\\hdevelop",
+  "license": {
+    "proprietary": true,
+    "note": "MVTec HALCON – Lizenz des Nutzers. In der VM (ohne Netzwerkkarte/USB) nur Lizenzen nutzbar, die nicht an MAC-Adresse oder Dongle gebunden sind."
+  },
+  "binaries": [
+    { "name": "powershell", "path": "{system}\\WindowsPowerShell\\v1.0\\powershell.exe" },
+    { "name": "vcredist", "path": "redist\\vc_redist.x64.exe" }
+  ],
+  "install": {
+    "kind": "Archive",
+    "file": "halcon.zip",
+    "expectedMinutes": 10,
+    "check": { "binary": "powershell", "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiHDevelop.ps1", "-Mode", "Info"], "expectOutput": "HALCON" }
+  },
+  "deploy": [
+    { "source": "runner", "target": "runner" },
+    { "source": "license", "target": "license" },
+    { "source": "vc_redist.x64.exe", "target": "redist\\vc_redist.x64.exe" }
+  ],
+  "postInstall": [
+    { "binary": "vcredist", "arguments": ["/install", "/quiet", "/norestart"] }
+  ],
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "powershell", "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiHDevelop.ps1", "-Mode", "Run", "-Program", "{selftest}\\hallo.hdev", "-Print", "Message"] }
+    ],
+    "expectOutput": "Hallo aus der Sandbox (HDevelop)"
+  },
+  "environment": {
+    "HALCONROOT": "{guest}",
+    "HALCONARCH": "x64-win64",
+    "HALCONEXAMPLES": "{guest}\\examples"
+  },
+  "actions": {
+    "test": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiHDevelop.ps1", "-Mode", "Test", "-Path", "{path}", "-Results", "{results}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 900
+    },
+    "lint": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiHDevelop.ps1", "-Mode", "Lint", "-Path", "{path}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 600
+    },
+    "run": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiHDevelop.ps1", "-Mode", "Run", "-Program", "{program}"],
+      "parameters": { "program": { "type": "Path" } },
+      "timeoutSeconds": 300
+    }
+  },
+  "testResultFormat": "JUnit"
+}

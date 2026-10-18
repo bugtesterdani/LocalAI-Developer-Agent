@@ -30,10 +30,24 @@ public static class ToolchainValidator
     private static readonly Regex Hex64 = new("^[0-9a-f]{64}$");
     private static readonly HashSet<string> BlockedEnv = new(StringComparer.Ordinal) { "PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH" };
 
+    /// <summary>Präfix für Programme aus Windows selbst (C:\Windows\System32) – nur die hier erlaubten.</summary>
+    public const string SystemPrefix = @"{system}\";
+
+    /// <summary>Programme aus System32, die Toolchains nutzen dürfen: cmd (Batch) und Windows PowerShell 5.1.</summary>
+    public static readonly IReadOnlySet<string> SystemBinaries =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cmd.exe", @"WindowsPowerShell\v1.0\powershell.exe" };
+
+    public const int MaxThenSteps = 5;
+    public const int MaxDeploy = 20;
+
     public static ToolchainManifest Parse(string json) => ContractJson.Deserialize<ToolchainManifest>(json);
 
     /// <summary>Alle Probleme in deutscher Sprache; leer = gültig.</summary>
-    public static List<string> Validate(ToolchainManifest m, Func<string, bool> fileExists)
+    public static List<string> Validate(ToolchainManifest m, Func<string, bool> fileExists) =>
+        Validate(m, fileExists, _ => false);
+
+    /// <summary>Wie oben; <paramref name="directoryExists"/> prüft Ordner im Toolchain-Ordner (für deploy).</summary>
+    public static List<string> Validate(ToolchainManifest m, Func<string, bool> fileExists, Func<string, bool> directoryExists)
     {
         var problems = new List<string>();
         void Check(bool ok, string message)
@@ -61,7 +75,9 @@ public static class ToolchainValidator
         {
             Check(Identifier.IsMatch(b.Name), $"Binary-Name ungültig: {b.Name}");
             Check(binaries.Add(b.Name), $"Binary doppelt: {b.Name}");
-            Check(IsRelative(b.Path) && b.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase), $"Binary {b.Name}: path muss eine relative .exe sein");
+            Check(IsSystemBinary(b.Path) || (IsRelative(b.Path) && !b.Path.Contains('{') && b.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)),
+                $"Binary {b.Name}: path muss eine relative .exe sein oder {SystemPrefix}cmd.exe bzw. {SystemPrefix}WindowsPowerShell\\v1.0\\powershell.exe");
+            Check(b.Sha256 is null || !IsSystemBinary(b.Path), $"Binary {b.Name}: sha256 nicht für Windows-Programme (ändern sich mit Updates)");
             Check(b.Sha256 is null || Hex64.IsMatch(b.Sha256), $"Binary {b.Name}: sha256 ungültig");
         }
 
@@ -90,6 +106,17 @@ public static class ToolchainValidator
         {
             CheckCommand(c, $"postInstall[{i}]", binaries, problems);
         }
+        var deploy = m.Deploy ?? [];
+        Check(deploy.Count <= MaxDeploy, $"deploy: höchstens {MaxDeploy} Einträge");
+        var directories = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (d, i) in deploy.Select((d, i) => (d, i)))
+        {
+            var isFile = RelativeFile(d.Source, fileExists);
+            var isDir = IsRelative(d.Source) && directoryExists(d.Source);
+            Check(isFile || isDir, $"deploy[{i}]: Quelle fehlt im Toolchain-Ordner ({d.Source})");
+            Check(IsRelative(d.Target) && d.Target != ".", $"deploy[{i}]: Ziel muss ein relativer Pfad unter guestPath sein ({d.Target})");
+            Check(!string.Equals(d.Source.Replace('\\', '/'), ManifestFile, StringComparison.OrdinalIgnoreCase), $"deploy[{i}]: toolchain.json wird nicht kopiert");
+        }
         if (m.SelfTest is { } selfTest)
         {
             Check(IsRelative(selfTest.Directory), "selfTest.directory muss ein relativer Ordner sein");
@@ -110,8 +137,16 @@ public static class ToolchainValidator
             }
             Check(binaries.Contains(action.Binary), $"Aktion {name}: Binary {action.Binary} nicht deklariert");
             Check(action.TimeoutSeconds is null or (> 0 and <= 3600), $"Aktion {name}: timeoutSeconds 1 bis 3600");
+            var steps = new List<ToolchainCommand> { new(action.Binary, action.Arguments) };
+            Check((action.Then?.Count ?? 0) <= MaxThenSteps, $"Aktion {name}: then höchstens {MaxThenSteps} Schritte");
+            foreach (var (c, i) in (action.Then ?? []).Select((c, i) => (c, i)))
+            {
+                Check(binaries.Contains(c.Binary), $"Aktion {name}: then[{i}]: Binary {c.Binary} nicht deklariert");
+                Check(c.Arguments.Count <= 40, $"Aktion {name}: then[{i}]: zu viele Argumente");
+                steps.Add(c);
+            }
             // Jeder Job arbeitet auf einer frischen Kopie ohne obj/-Ordner: ohne Restore im selben Aufruf fehlt project.assets.json.
-            Check(!action.Arguments.Contains("--no-restore", StringComparer.OrdinalIgnoreCase),
+            Check(!steps.Any(c => c.Arguments.Contains("--no-restore", StringComparer.OrdinalIgnoreCase)),
                 $"Aktion {name}: --no-restore entfernen – jeder Job beginnt mit einer frischen Kopie (Pakete über -p:RestoreSources={{packages}})");
             var declared = action.Parameters ?? new Dictionary<string, ToolchainParameter>();
             foreach (var (pname, p) in declared)
@@ -131,7 +166,7 @@ public static class ToolchainValidator
                 }
             }
             var used = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var arg in action.Arguments)
+            foreach (var arg in steps.SelectMany(c => c.Arguments))
             {
                 foreach (Match match in Placeholder.Matches(arg))
                 {
@@ -224,6 +259,10 @@ public static class ToolchainValidator
     }
 
     private static bool RelativeFile(string path, Func<string, bool> fileExists) => IsRelative(path) && fileExists(path);
+
+    /// <summary>{system}\cmd.exe oder {system}\WindowsPowerShell\v1.0\powershell.exe (Groß-/Kleinschreibung egal).</summary>
+    public static bool IsSystemBinary(string path) =>
+        path.StartsWith(SystemPrefix, StringComparison.OrdinalIgnoreCase) && SystemBinaries.Contains(path[SystemPrefix.Length..].Replace('/', '\\'));
 }
 
 /// <summary>
@@ -331,7 +370,12 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
 
         if (manifest is not null)
         {
-            problems.AddRange(ToolchainValidator.Validate(manifest, rel => files.ContainsKey(rel.Replace('\\', '/'))));
+            problems.AddRange(ToolchainValidator.Validate(manifest, rel => files.ContainsKey(rel.Replace('\\', '/')),
+                rel =>
+                {
+                    var prefix = rel.Replace('\\', '/').TrimEnd('/') + "/";
+                    return files.Keys.Any(k => k.StartsWith(prefix, StringComparison.Ordinal));
+                }));
             foreach (var (rel, expected) in manifest.Files ?? new Dictionary<string, string>())
             {
                 var key = rel.Replace('\\', '/');
@@ -546,5 +590,30 @@ public sealed class RegisteredToolchainCatalog(ToolchainRegistry registry) : ITo
                 return null;
             }
         }
+    }
+}
+
+/// <summary>Mindestdauer für den VM-Aufbau aus den erwarteten Installationszeiten der Projekt-Toolchains (M5).</summary>
+public static class ToolchainBuildTime
+{
+    public static readonly TimeSpan WindowsSetup = TimeSpan.FromMinutes(60);
+
+    public static TimeSpan Minimum(IEnumerable<ToolchainRegistration> registrations, IEnumerable<string> projectToolchains)
+    {
+        var wanted = new HashSet<string>(projectToolchains, StringComparer.OrdinalIgnoreCase);
+        var minutes = 0;
+        foreach (var r in registrations.Where(r => wanted.Contains(r.Name)))
+        {
+            try
+            {
+                var manifest = ToolchainValidator.Parse(File.ReadAllText(Path.Combine(r.Directory, ToolchainValidator.ManifestFile)).TrimStart('\uFEFF'));
+                minutes += (int)Math.Clamp(manifest.Install.ExpectedMinutes, 1, 240) * 3 + 5;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                minutes += 15;
+            }
+        }
+        return WindowsSetup + TimeSpan.FromMinutes(minutes);
     }
 }

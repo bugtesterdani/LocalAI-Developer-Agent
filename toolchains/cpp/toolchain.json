@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "name": "cpp",
+  "version": "17.14",
+  "displayName": "C++ (MSVC Build Tools 2022, CMake, CTest)",
+  "guestPath": "C:\\Toolchains\\cpp",
+  "license": {
+    "proprietary": true,
+    "note": "Visual Studio Build Tools 2022 – Microsoft-Lizenz (Nutzung für dein Projekt durch Visual Studio Professional abgedeckt)"
+  },
+  "binaries": [
+    { "name": "cmake", "path": "Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe" },
+    { "name": "ctest", "path": "Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\ctest.exe" }
+  ],
+  "install": {
+    "kind": "Installer",
+    "file": "layout\\vs_buildtools.exe",
+    "arguments": [
+      "--noWeb", "--quiet", "--wait", "--norestart", "--nocache", "--installPath", "{guest}",
+      "--add", "Microsoft.VisualStudio.Workload.VCTools",
+      "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      "--add", "Microsoft.VisualStudio.Component.VC.CMake.Project",
+      "--add", "Microsoft.VisualStudio.Component.Windows11SDK.26100"
+    ],
+    "expectedMinutes": 30,
+    "check": { "binary": "cmake", "arguments": ["--version"], "expectOutput": "cmake version" }
+  },
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "cmake", "arguments": ["-S", "{selftest}", "-B", "{selftest}\\build", "-G", "Visual Studio 17 2022", "-A", "x64", "-DCMAKE_GENERATOR_INSTANCE={guest}"] },
+      { "binary": "cmake", "arguments": ["--build", "{selftest}\\build", "--config", "Release"] },
+      { "binary": "ctest", "arguments": ["--test-dir", "{selftest}\\build", "-C", "Release", "-V"] }
+    ],
+    "expectOutput": "Hallo aus der Sandbox (C++)"
+  },
+  "environment": {
+    "VSCMD_SKIP_SENDTELEMETRY": "1",
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    "CMAKE_BUILD_PARALLEL_LEVEL": "4"
+  },
+  "packageSource": { "kind": "Vcpkg", "path": "packages" },
+  "actions": {
+    "build": {
+      "binary": "cmake",
+      "arguments": ["-S", "{project}", "-B", "{work}\\build", "-G", "Visual Studio 17 2022", "-A", "x64", "-DCMAKE_GENERATOR_INSTANCE={guest}", "-DCMAKE_PREFIX_PATH={packages}"],
+      "then": [
+        { "binary": "cmake", "arguments": ["--build", "{work}\\build", "--config", "{configuration}"] }
+      ],
+      "parameters": {
+        "project": { "type": "Path" },
+        "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
+      },
+      "timeoutSeconds": 1800
+    },
+    "test": {
+      "binary": "cmake",
+      "arguments": ["-S", "{project}", "-B", "{work}\\build", "-G", "Visual Studio 17 2022", "-A", "x64", "-DCMAKE_GENERATOR_INSTANCE={guest}", "-DCMAKE_PREFIX_PATH={packages}"],
+      "then": [
+        { "binary": "cmake", "arguments": ["--build", "{work}\\build", "--config", "{configuration}"] },
+        { "binary": "ctest", "arguments": ["--test-dir", "{work}\\build", "-C", "{configuration}", "--output-on-failure", "--timeout", "120", "--output-junit", "{results}\\ctest.xml"] }
+      ],
+      "parameters": {
+        "project": { "type": "Path" },
+        "configuration": { "type": "Choice", "values": ["Debug", "Release"] }
+      },
+      "timeoutSeconds": 1800
+    }
+  },
+  "testResultFormat": "JUnit"
+}

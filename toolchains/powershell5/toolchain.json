@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "name": "powershell5",
+  "version": "5.1",
+  "displayName": "Windows PowerShell 5.1 mit Pester und PSScriptAnalyzer",
+  "guestPath": "C:\\Toolchains\\powershell5",
+  "license": {
+    "proprietary": false,
+    "note": "Windows PowerShell ist Teil von Windows; Pester: Apache-2.0; PSScriptAnalyzer: MIT"
+  },
+  "binaries": [
+    { "name": "powershell", "path": "{system}\\WindowsPowerShell\\v1.0\\powershell.exe" }
+  ],
+  "install": {
+    "kind": "None",
+    "expectedMinutes": 1,
+    "check": { "binary": "powershell", "arguments": ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"], "expectOutput": "5.1" }
+  },
+  "deploy": [
+    { "source": "runner", "target": "runner" },
+    { "source": "modules", "target": "Modules" }
+  ],
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "powershell", "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiPester.ps1", "-Path", "{selftest}", "-Results", "{selftest}\\results"] },
+      { "binary": "powershell", "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{selftest}\\hallo.ps1"] }
+    ],
+    "expectOutput": "Hallo aus der Sandbox (PowerShell)"
+  },
+  "environment": {
+    "LOCALAI_PACKAGES": "{packages}"
+  },
+  "packageSource": { "kind": "PSModules", "path": "packages" },
+  "actions": {
+    "test": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiPester.ps1", "-Path", "{path}", "-Results", "{results}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 600
+    },
+    "lint": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{guest}\\runner\\Invoke-LocalAiAnalyzer.ps1", "-Path", "{path}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 600
+    },
+    "run": {
+      "binary": "powershell",
+      "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "{script}"],
+      "parameters": { "script": { "type": "Path" } },
+      "timeoutSeconds": 120
+    }
+  },
+  "testResultFormat": "JUnit"
+}

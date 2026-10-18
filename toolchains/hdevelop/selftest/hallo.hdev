@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="20.11.0.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* Selbsttest der Toolchain hdevelop (LocalAI)</c>
+<l>Message := 'Hallo aus der Sandbox (HDevelop)'</l>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+</hdevelop>

@@ -2,7 +2,7 @@
 
 Basis: `Local-AI-Developer-Agent-Projektspezifikation.md` v1.3 · Plan v4 · Stand: 16.10.2026
 
-**Umsetzungsstand:** M1 und M2 (M2a–M2c) abgenommen. **M3** (Orchestrator, Model Gateway, Kalibrierung, fünf Rollen mit DAG und Limits, Live-Aktivität mit Chat in der Oberfläche) abgenommen am 18.10.2026 (echter Lauf mit `qwen2.5-coder:7b` über Ollama im LAN, SEC-22 bestätigt). **M4** (Patch.Apply, Toolchain-Aktionen in der VM, Repo.Index, Verify-/Reparaturschleife) implementiert; Prüfung mit echter VM offen (`docs/pruefung-M4.md`).
+**Umsetzungsstand:** M1 und M2 (M2a–M2c) abgenommen. **M3** (Orchestrator, Model Gateway, Kalibrierung, fünf Rollen mit DAG und Limits, Live-Aktivität mit Chat in der Oberfläche) abgenommen am 18.10.2026 (echter Lauf mit `qwen2.5-coder:7b` über Ollama im LAN, SEC-22 bestätigt). **M4** (Patch.Apply, Toolchain-Aktionen in der VM, Repo.Index, Verify-/Reparaturschleife) implementiert, Abnahme-Skript mit echter VM grün (18.10.2026), Ende zu Ende mit Modell läuft (`docs/pruefung-M4.md`). **M5** (C++, PowerShell, Batch, HDevelop) implementiert; Prüfung offen (`docs/pruefung-M5.md`).
 
 ## Entscheidungen
 
@@ -111,6 +111,8 @@ Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 →
 
 **Abnahme:** je ein Beispiel pro Sprache gebaut und getestet; Installationszeiten im VM-Aufbau dokumentiert.
 
+**Umgesetzt (Stand 18.10.2026):** Toolchain-Vorlagen `cpp` (Visual Studio Build Tools 2022 aus Offline-Layout, CMake mit VS-Generator, CTest → JUnit), `cpp-clang` (llvm-mingw, Ninja Multi-Config), `powershell` (PowerShell 7) und `powershell5` (Windows PowerShell 5.1) mit Pester 5 → JUnit und PSScriptAnalyzer, `batch` (Harness: `*.test.cmd`, Exitcode, `*.expected.txt` → JUnit; statische Prüfung), `hdevelop` (HALCON-ZIP, Lizenz über `deploy`, VC++-Laufzeit, HDevEngine-Runner in Windows PowerShell 5.1: Lade-Test aller `.hdev/.hdvp/.hdpl`, Tests = lokale Prozeduren `test_*`). Manifest erweitert um `then` (mehrstufige Aktionen), `deploy` und `{system}` (nur `cmd.exe` und Windows PowerShell); Pfadparameter ohne cmd-Sonderzeichen. Worker: HDevelop-XML-Prüfung nach jedem Patch (alles oder nichts), CRLF für neue Batch-Dateien. Orchestrator: Prüfläufe und Sprachhinweise für die neuen Sprachen. VM-Aufbau: Zeitgrenze aus den erwarteten Installationszeiten, Installationsdauer je Toolchain in der Statuszeile. Hilfsskript `scripts/toolchains/New-M5Toolchains.ps1`, Beispiele `samples/m5-*`, Abnahme-Skript `tests/integration/test_m5_abnahme.py`.
+
 ## M6 – Web & Übernahme
 
 - **B09:** Web Fetcher + Content Gate als getrennte Python-Prozesse, SSRF-Schutz, zwei Freigaben.
@@ -130,4 +132,5 @@ Alle SEC-01–24 und AC01–17; Demo (§16) in allen Sprachen; Runbook durchgesp
 | Unbeaufsichtigte Installer verhalten sich unerwartet ohne Netzwerk | Prüfbefehl je Toolchain; Bericht in der UI; Offline-Layouts verwenden |
 | Hot-Detach der Transfer-VHDX instabil | VM vor Wechsel pausieren |
 | Hash C# ≠ Python | gemeinsame Testvektoren |
+| HALCON-Lizenz in der VM ohne Netzwerkkarte/USB (MAC- oder Dongle-Bindung greift nicht) | Lizenz ohne Bindung (z. B. Evaluierung) über `deploy`; ohne Lizenz bleibt die XML-Prüfung der `.hdev`-Patches, Toolchain `hdevelop` entfällt |
 | Windows-/WPF-/Hyper-V-Teile nur auf Danis PC testbar | Prüfanleitung + Skripte je Meilenstein, kurze Feedbackschleifen |

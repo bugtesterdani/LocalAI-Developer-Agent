@@ -239,6 +239,8 @@ public enum PackageSourceKind
 {
     NuGet,
     Pip,
+    Vcpkg,
+    PSModules,
     None,
 }
 
@@ -280,7 +282,8 @@ public sealed partial record ToolchainAction(
     [property: JsonPropertyName("binary")] string Binary,
     [property: JsonPropertyName("arguments")] IReadOnlyList<string> Arguments,
     [property: JsonPropertyName("parameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, ToolchainParameter>? Parameters = null,
-    [property: JsonPropertyName("timeoutSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? TimeoutSeconds = null);
+    [property: JsonPropertyName("timeoutSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? TimeoutSeconds = null,
+    [property: JsonPropertyName("then"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolchainCommand>? Then = null);
 
 public sealed partial record ToolchainLicense(
     [property: JsonPropertyName("proprietary")] bool Proprietary,
@@ -290,6 +293,11 @@ public sealed partial record ToolchainLicense(
 public sealed partial record ToolchainPackageSource(
     [property: JsonPropertyName("kind")] PackageSourceKind Kind,
     [property: JsonPropertyName("path"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null);
+
+/// <summary>Datei oder Ordner aus dem Toolchain-Ordner, die beim VM-Aufbau nach guestPath kopiert wird (z. B. Runner-Skripte, Module, Lizenzdatei).</summary>
+public sealed partial record ToolchainCopy(
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("target")] string Target);
 
 /// <summary>toolchain.json im Toolchain-Ordner (Spezifikation §8 Toolchains).</summary>
 public sealed partial record ToolchainManifest(
@@ -303,6 +311,7 @@ public sealed partial record ToolchainManifest(
     [property: JsonPropertyName("install")] ToolchainInstall Install,
     [property: JsonPropertyName("actions")] IReadOnlyDictionary<string, ToolchainAction> Actions,
     [property: JsonPropertyName("testResultFormat")] TestResultFormat TestResultFormat,
+    [property: JsonPropertyName("deploy"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolchainCopy>? Deploy = null,
     [property: JsonPropertyName("postInstall"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolchainCommand>? PostInstall = null,
     [property: JsonPropertyName("selfTest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ToolchainSelfTest? SelfTest = null,
     [property: JsonPropertyName("environment"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, string>? Environment = null,

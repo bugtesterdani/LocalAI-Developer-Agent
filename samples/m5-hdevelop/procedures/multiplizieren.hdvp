@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="24.11.0.0">
+<procedure name="multiplizieren">
+<interface>
+<ic>
+<par name="A" base_type="ctrl" dimension="0"/>
+<par name="B" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="Produkt" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* Produkt von A und B</c>
+<l>Produkt := A * B</l>
+<l>return ()</l>
+</body>
+<docu id="multiplizieren">
+<parameters>
+<parameter id="A"/>
+<parameter id="B"/>
+<parameter id="Produkt"/>
+</parameters>
+</docu>
+</procedure>
+</hdevelop>

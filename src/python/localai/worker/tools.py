@@ -10,7 +10,7 @@ from typing import Any
 from localai import canonical
 from localai.contracts import ResultStatus, SandboxJob, TargetResult, ToolResult
 from localai.pathrules import ROOT, PathRuleError, is_within, normalize_relative
-from localai.worker import patching
+from localai.worker import hdevelop, patching
 from localai.worker.execution import ACTIONS, ExecError, Executor
 from localai.worker.repoindex import DEFAULT_MAX_CHARS, MAX_CHARS, RepoIndexer, build_map
 from localai.worker.snapshot import SnapshotError, SnapshotIndex, SnapshotStore
@@ -235,6 +235,7 @@ class ToolRunner:
                     if any(rel.casefold().startswith(p.casefold() + "/") for p in index.files):
                         raise ToolError("Ein Teil des Pfads ist eine Datei")
                     data = patching.new_file(fp).encode()
+                    _check_hdevelop(rel, data)
                     changes[rel] = data
                     message = f"neu angelegt ({len(data)} Bytes)"
                 else:
@@ -250,6 +251,7 @@ class ToolRunner:
                         file = patching.TextFile.decode(index.resolve(actual).read_bytes(), actual)
                         report = patching.apply_hunks(file, fp.hunks, actual)
                         data = file.encode()
+                        _check_hdevelop(actual, data)
                         changes[actual] = data
                         message = report.describe() + (" – Inhalt unverändert" if hashlib.sha256(data).hexdigest() == sha else "")
                 results.append(TargetResult(target_id=target.target_id, status=ResultStatus.Succeeded, message=message))
@@ -300,3 +302,10 @@ class ToolRunner:
         symbols = sum(len(i.symbols) for i in infos)
         return [TargetResult(target_id="map", status=ResultStatus.Succeeded, text=text, content_sha256=_sha(text),
                              message=f"{len(index.files)} Dateien, {len(infos)} Quelldateien, {symbols} Symbole")], False
+
+
+def _check_hdevelop(path: str, data: bytes) -> None:
+    """HDevelop-Dateien müssen nach dem Patch gültiges HDevelop-XML sein (B20), sonst wird nichts angewendet."""
+    problem = hdevelop.check(path, data)
+    if problem:
+        raise ToolError(f"HDevelop-Datei nach dem Patch ungültig: {problem}")

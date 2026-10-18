@@ -328,11 +328,20 @@ public static class GuestReport
                 return (false, $"Toolchain {name} nicht installiert: {Clip(entry["error"]?.ToString() ?? "unbekannt")}");
             }
             var selfTest = entry["selfTest"]?.ToString();
-            installed.Add($"{name} {Clip(entry["version"]?.ToString() ?? "", 20)}" + (selfTest == "ok" ? " (Hallo-Welt ok)" : ""));
+            var seconds = entry["seconds"] is JsonValue sv && sv.GetValueKind() == JsonValueKind.Number ? (int)sv : -1;
+            installed.Add($"{name} {Clip(entry["version"]?.ToString() ?? "", 20)}" + (selfTest == "ok" ? " (Hallo-Welt ok)" : "") + InstallTime(seconds));
         }
         var tools = installed.Count == 0 ? "" : "; Toolchains: " + string.Join(", ", installed);
         return (true, $"Selbsttest bestanden ({probes.Count} Netzwerkprüfungen ohne Verbindung, Python {Clip(w["python"]?.ToString() ?? "?", 20)}{tools})");
     }
+
+    /// <summary>Installationsdauer einer Toolchain im VM-Aufbau (M5: wird dokumentiert), z. B. „ 3 min“.</summary>
+    public static string InstallTime(int seconds) => seconds switch
+    {
+        < 0 => "",
+        < 120 => $" {seconds} s",
+        _ => $" {(seconds + 30) / 60} min",
+    };
 
     /// <summary>Gasttext nur gekürzt und ohne Steuerzeichen anzeigen.</summary>
     public static string Clip(string text, int max = 300)

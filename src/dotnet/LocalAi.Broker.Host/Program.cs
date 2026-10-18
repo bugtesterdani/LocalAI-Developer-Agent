@@ -200,6 +200,12 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
             var registry = new SnapshotRegistry();
             ProjectPolicyContext context;
             var settings = options.HyperV ?? throw new InvalidDataException("sandbox.hyperv fehlt in config/localai.json");
+            // Große Toolchains (C++-Build-Tools, HALCON) brauchen länger: Aufbauzeit mindestens Windows + 3× erwartete Installationszeit.
+            var needed = ToolchainBuildTime.Minimum(toolchains!.Registrations, project.Toolchains ?? []);
+            if (settings.BuildTimeout < needed)
+            {
+                settings = settings with { BuildTimeout = needed };
+            }
             context = new ProjectPolicyContext(project, registry, new RegisteredToolchainCatalog(toolchains!));
             // reuseVm: Sitzung der zuletzt sauber beendeten VM übernehmen (Schlüssel, Sequenz); sonst neue Sitzung.
             var session = HyperVSandbox.LoadReusableSession(settings) ?? new SandboxSession(sessionId);

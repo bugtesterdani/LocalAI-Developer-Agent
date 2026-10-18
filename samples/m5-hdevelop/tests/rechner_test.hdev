@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="24.11.0.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* Testprogramm: jede lokale Prozedur test_* ist ein Testfall (Runner der Toolchain hdevelop)</c>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="test_addieren">
+<interface/>
+<body>
+<l>addieren (2, 3, Summe)</l>
+<l>if (Summe != 5)</l>
+<l>    throw ('addieren(2, 3) ergab ' + Summe + ' statt 5')</l>
+<l>endif</l>
+<l>return ()</l>
+</body>
+<docu id="test_addieren">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="test_multiplizieren">
+<interface/>
+<body>
+<l>multiplizieren (4, 5, Produkt)</l>
+<l>if (Produkt != 20)</l>
+<l>    throw ('multiplizieren(4, 5) ergab ' + Produkt + ' statt 20')</l>
+<l>endif</l>
+<l>return ()</l>
+</body>
+<docu id="test_multiplizieren">
+<parameters/>
+</docu>
+</procedure>
+</hdevelop>

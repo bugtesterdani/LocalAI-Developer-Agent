@@ -53,10 +53,45 @@ public sealed class ToolchainTests : IDisposable
     [Theory, Trait("Pruefung", "R12")]
     [InlineData("dotnet")]
     [InlineData("python")]
+    [InlineData("cpp")]
+    [InlineData("cpp-clang")]
+    [InlineData("powershell")]
+    [InlineData("powershell5")]
+    [InlineData("batch")]
+    [InlineData("hdevelop")]
     public void Referenz_Manifeste_sind_gueltig(string name)
     {
-        var problems = ToolchainValidator.Validate(Reference(name), _ => true);
+        var problems = ToolchainValidator.Validate(Reference(name), _ => true, _ => true);
         Assert.True(problems.Count == 0, string.Join("; ", problems));
+    }
+
+    [Fact, Trait("Pruefung", "SEC-20")]
+    public void M5_mehrstufige_Aktionen_Windows_Programme_und_deploy_streng_geprueft()
+    {
+        static List<string> Check(string from, string to) =>
+            ToolchainValidator.Validate(Demo(m => m.Replace(from, to, StringComparison.Ordinal)), f => f != "fehlt", d => d == "runner");
+        const string build = "\"build\": { \"binary\": \"demo\", \"arguments\": [\"build\", \"{project}\"]";
+        Assert.Empty(Check(build, build + ", \"then\": [ { \"binary\": \"demo\", \"arguments\": [\"test\", \"{project}\", \"{results}\"] } ]"));
+        Assert.Contains(Check(build, build + ", \"then\": [ { \"binary\": \"demo\", \"arguments\": [\"{other}\"] } ]"),
+            p => p.Contains("{other} nicht deklariert", StringComparison.Ordinal));
+        Assert.Contains(Check(build, build + ", \"then\": [ { \"binary\": \"cmd\", \"arguments\": [] } ]"),
+            p => p.Contains("then[0]: Binary cmd", StringComparison.Ordinal));
+        var six = string.Join(", ", Enumerable.Repeat("{ \"binary\": \"demo\", \"arguments\": [] }", 6));
+        Assert.Contains(Check(build, build + $", \"then\": [ {six} ]"), p => p.Contains("höchstens 5", StringComparison.Ordinal));
+
+        const string bin = "{ \"name\": \"demo\", \"path\": \"bin/demo.exe\" }";
+        Assert.Empty(Check(bin, bin + ", { \"name\": \"cmd\", \"path\": \"{system}\\\\cmd.exe\" }"));
+        Assert.Empty(Check(bin, bin + ", { \"name\": \"ps\", \"path\": \"{system}\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" }"));
+        Assert.Contains(Check(bin, bin + ", { \"name\": \"np\", \"path\": \"{system}\\\\notepad.exe\" }"), p => p.Contains("Binary np", StringComparison.Ordinal));
+        Assert.Contains(Check(bin, bin + ", { \"name\": \"up\", \"path\": \"{system}\\\\..\\\\explorer.exe\" }"), p => p.Contains("Binary up", StringComparison.Ordinal));
+        Assert.Contains(Check(bin, bin + $", {{ \"name\": \"h\", \"path\": \"{{system}}\\\\cmd.exe\", \"sha256\": \"{new string('a', 64)}\" }}"),
+            p => p.Contains("sha256 nicht für Windows-Programme", StringComparison.Ordinal));
+
+        const string install = "\"install\":";
+        Assert.Empty(Check(install, "\"deploy\": [ { \"source\": \"runner\", \"target\": \"runner\" }, { \"source\": \"demo.zip\", \"target\": \"x/demo.zip\" } ], " + install));
+        Assert.Contains(Check(install, "\"deploy\": [ { \"source\": \"fehlt\", \"target\": \"x\" } ], " + install), p => p.Contains("Quelle fehlt", StringComparison.Ordinal));
+        Assert.Contains(Check(install, "\"deploy\": [ { \"source\": \"runner\", \"target\": \"../../Windows\" } ], " + install), p => p.Contains("Ziel muss", StringComparison.Ordinal));
+        Assert.Contains(Check(install, "\"deploy\": [ { \"source\": \"runner\", \"target\": \"C:/Windows\" } ], " + install), p => p.Contains("Ziel muss", StringComparison.Ordinal));
     }
 
     [Fact, Trait("Pruefung", "SEC-20")]
@@ -81,6 +116,17 @@ public sealed class ToolchainTests : IDisposable
         Bad("\"--version\"", "\"--version\\nformat c:\"", "Steuerzeichen");
         Assert.Contains(ToolchainValidator.Validate(Demo(), f => f != "demo.zip"), p => p.Contains("ZIP-Archiv", StringComparison.Ordinal));
         Assert.Throws<JsonException>(() => ToolchainValidator.Parse(DemoManifest.Replace("\"schemaVersion\": 1,", "\"schemaVersion\": 1, \"shell\": \"cmd\",", StringComparison.Ordinal)));
+    }
+
+    [Fact, Trait("Pruefung", "M5")]
+    public void Aufbauzeit_waechst_mit_den_Installationszeiten_der_Projekt_Toolchains()
+    {
+        var dir = CreateDemo();
+        var registry = Registry("demo");
+        var info = Assert.Single(registry.Scan(TestContext.Current.CancellationToken));
+        registry.Register(dir, info.Digest, TestContext.Current.CancellationToken);
+        Assert.Equal(TimeSpan.FromMinutes(68), ToolchainBuildTime.Minimum(registry.Registrations, ["demo"]));
+        Assert.Equal(ToolchainBuildTime.WindowsSetup, ToolchainBuildTime.Minimum(registry.Registrations, ["andere"]));
     }
 
     [Fact, Trait("Pruefung", "SEC-19")]
@@ -178,6 +224,12 @@ public sealed class ToolchainTests : IDisposable
         Assert.True(good, text);
         Assert.Contains("dotnet 9.0.306 (Hallo-Welt ok)", text, StringComparison.Ordinal);
         Assert.False(GuestReport.Evaluate(ok, 0, ["dotnet", "python"]).Ok);
+        // M5: Installationszeiten erscheinen in der Statuszeile (werden für die Abnahme dokumentiert).
+        var timed = Report(new[] { new { name = "cpp", version = "17.14", installed = true, selfTest = "ok", error = (string?)null, seconds = 1490 },
+                                   new { name = "batch", version = "1.0", installed = true, selfTest = "ok", error = (string?)null, seconds = 4 } });
+        var timedText = GuestReport.Evaluate(timed, 0, ["cpp", "batch"]).Message;
+        Assert.Contains("cpp 17.14 (Hallo-Welt ok) 25 min", timedText, StringComparison.Ordinal);
+        Assert.Contains("batch 1.0 (Hallo-Welt ok) 4 s", timedText, StringComparison.Ordinal);
         var failed = Report(new[] { new { name = "dotnet", version = "9", installed = false, selfTest = "fehlgeschlagen", error = (string?)"Selbsttest: Ausgabe fehlt" } });
         Assert.Contains("Selbsttest", GuestReport.Evaluate(failed, 0, ["dotnet"]).Message, StringComparison.Ordinal);
     }
