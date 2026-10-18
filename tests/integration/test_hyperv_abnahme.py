@@ -62,6 +62,11 @@ def test_hyperv_vm_aufbau_und_roundtrips():
     registry = base.parent / "broker" / "toolchains.json"
     if registry.exists():
         (data / "toolchains.json").write_bytes(registry.read_bytes())
+        names = [r.get("name") for r in json.loads(registry.read_text(encoding="utf-8"))]
+        log(f"Toolchain-Registrierungen aus der Oberfläche übernommen: {', '.join(names) or 'keine'}")
+    else:
+        (data / "toolchains.json").unlink(missing_ok=True)
+        log(f"Keine Toolchain-Registrierungen gefunden ({registry}) – in der Oberfläche unter TOOLCHAINS registrieren")
     started = time.monotonic()
     broker = start_broker(data, "--mode", "hyperv", "--config", str(ROOT / "config" / "localai.json"))
     summary: dict = {"roundtrips": ROUNDTRIPS}

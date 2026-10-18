@@ -407,7 +407,9 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
         foreach (var name in projectToolchains)
         {
             var r = registrations.FirstOrDefault(x => x.Name == name)
-                    ?? throw new ToolchainException($"Toolchain '{name}' ist für das Projekt gewählt, aber nicht registriert");
+                    ?? throw new ToolchainException($"Toolchain '{name}' ist für das Projekt gewählt, aber nicht registriert " +
+                        $"(registriert: {(registrations.Count == 0 ? "keine" : string.Join(", ", registrations.Select(x => x.Name)))}; " +
+                        $"Registrierungsdatei: {registryPath}) – in der Oberfläche unter TOOLCHAINS prüfen und registrieren");
             var target = Path.Combine(stagingDirectory, name);
             Directory.CreateDirectory(target);
             var source = Path.GetFullPath(r.Directory);
