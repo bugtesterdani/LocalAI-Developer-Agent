@@ -36,6 +36,7 @@ public partial class App : Application
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
             window.DataContext = _viewModel;
             await _viewModel.InitializeAsync();
+            window.ShowStatus(string.Empty);
         }
         catch (Exception ex)
         {

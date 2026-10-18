@@ -13,6 +13,7 @@ from __future__ import annotations
 import concurrent.futures as cf
 import pathlib
 import queue
+import re
 import threading
 import time
 import traceback
@@ -34,6 +35,7 @@ SEVERITY_DE = {"high": "hoch", "medium": "mittel", "low": "niedrig"}
 STATE_DE = {dag.TaskState.DONE: "erledigt", dag.TaskState.FAILED: "gescheitert", dag.TaskState.CANCELLED: "abgebrochen",
             dag.TaskState.SKIPPED: "übersprungen", dag.TaskState.PENDING: "offen", dag.TaskState.RUNNING: "läuft"}
 MAX_CHAT = 15_000
+NOT_EXECUTED = re.compile(r"not\s+executed|nicht\s+ausgef(ü|ue)hrt|not\s+been\s+(run|executed)", re.I)
 
 
 @dataclass
@@ -401,7 +403,11 @@ class Orchestrator:
                     self.reporter.chat("Reviewer", f"Review nicht abgeschlossen: {err}")
                     verdict = "gescheitert"
                     break
-                findings = review.result.get("findings", [])
+                # Nicht ausgeführte Tests sind in M3 erwartet und kein Befund für den Debugger.
+                findings = [f for f in review.result.get("findings", []) if not NOT_EXECUTED.search(
+                    f"{f.get('finding', '')} {f.get('evidence', '')}")]
+                if review.result["verdict"] == "changes_needed" and not any(f["severity"] in ("high", "medium") for f in findings):
+                    review.result["verdict"] = "ready_for_user_review"
                 lines = [f"Review {attempt + 1} (keine Freigabe – die Entscheidung liegt bei dir): {review.result['message_de']}"]
                 for f in findings:
                     where = f.get("file") or "?"
@@ -431,6 +437,10 @@ class Orchestrator:
                 except (LimitReached, AgentFailed) as err:
                     self.reporter.chat("Debugger", f"Reparatur nicht abgeschlossen: {err}")
                     verdict = "Reparatur gescheitert"
+                    break
+                if not fix.result.get("fix_patch", "").strip():
+                    self.reporter.chat("Debugger", f"Reparatur {attempt}: keine Codeänderung – {fix.result['message_de']}")
+                    verdict = "Befunde ohne Codekorrektur – bitte selbst prüfen"
                     break
                 fixes.append(fix.result)
                 self.reporter.chat("Debugger", (f"Reparatur {attempt}: {fix.result['message_de']}\nHypothese: "

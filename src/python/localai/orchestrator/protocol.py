@@ -150,6 +150,16 @@ def _str_list(value: Any, key: str) -> list[str]:
     return [v.strip().replace("\\", "/") for v in value if v.strip()]
 
 
+_HUNK = re.compile(r"^@@ -\d+(,\d+)? \+\d+(,\d+)? @@", re.M)
+
+
+def check_diff(text: str, field: str) -> None:
+    """Grobe Formprüfung eines Unified Diffs (Patch.Apply in M4 prüft streng)."""
+    if not re.search(r"^--- (a/|/dev/null)", text, re.M) or not re.search(r"^\+\+\+ b/", text, re.M) or not _HUNK.search(text):
+        raise ProtocolError(f"result.{field} must be a unified diff with file headers: '--- a/<path>' (or '--- /dev/null' "
+                            "for a new file), '+++ b/<path>', then hunks starting with '@@ -start,count +start,count @@'.")
+
+
 def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
     """Prüft das Abschlussergebnis; Fehlermeldungen gehen ans Modell zurück (englisch)."""
     _str(result, "message_de")
@@ -169,18 +179,21 @@ def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
             t["depends_on"] = _str_list(t.get("depends_on"), "task.depends_on")
         result["acceptance"] = _str_list(result.get("acceptance"), "result.acceptance")
     elif role == "Coder":
-        _str(result, "patch")
+        check_diff(_str(result, "patch"), "patch")
         result["files"] = _str_list(result.get("files"), "result.files")
     elif role == "Tester":
         plan = result.get("test_plan")
         if not isinstance(plan, list) or not plan:
             raise ProtocolError("result.test_plan must be a non-empty list.")
-        _str(result, "test_patch", required=False)
+        if _str(result, "test_patch", required=False).strip():
+            check_diff(result["test_patch"], "test_patch")
         # Tests wurden nicht ausgeführt – unabhängig davon, was das Modell behauptet.
         result["executed"] = False
     elif role == "Debugger":
         _str(result, "hypothesis")
-        _str(result, "fix_patch")
+        # Leer erlaubt: der Befund ist mit einer Codeänderung nicht zu beheben (Reparaturschleife endet dann).
+        if _str(result, "fix_patch", required=False).strip():
+            check_diff(result["fix_patch"], "fix_patch")
     elif role == "Reviewer":
         if result.get("verdict") not in ("changes_needed", "ready_for_user_review"):
             raise ProtocolError('result.verdict must be "changes_needed" or "ready_for_user_review".')

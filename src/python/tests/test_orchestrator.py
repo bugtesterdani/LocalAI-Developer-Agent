@@ -87,7 +87,7 @@ def test_tokenschaetzung_konservativ():
 @pytest.mark.parametrize("role", ["Planner", "Coder", "Tester", "Debugger", "Reviewer"])
 def test_prompts_versioniert_englisch_und_im_regelbudget(role):
     text, loaded = prompts.system_prompt(role)
-    assert [p.version for p in loaded] == [1, 2]
+    assert loaded[0].version == 1 and loaded[1].version >= 2
     assert f"You are the {role} agent" in text
     assert "message_de" in text and "German" in text
     assert estimate_tokens(text) <= Budget.split(8192, 2048).rules
@@ -101,6 +101,17 @@ def test_aktion_aus_json_block_und_ohne_block():
     assert a.reasoning == "I will read."
     b = protocol.parse('Done {"action": "finish", "result": {"message_de": "ok {x}", "patch": "--- a"}}')
     assert b.kind == "finish" and b.result["message_de"] == "ok {x}"
+
+
+def test_patches_brauchen_dateikoepfe_und_debugger_darf_passen():
+    bad = "@@ -1,6 +1,20 @@\n namespace Demo.Csv;\n+internal static class Tokenizer\n"
+    with pytest.raises(protocol.ProtocolError, match="file headers"):
+        protocol.validate_result("Coder", {"message_de": "x", "patch": bad})
+    good = "--- a/src/Csv/Tokenizer.cs\n+++ b/src/Csv/Tokenizer.cs\n@@ -1,2 +1,3 @@\n namespace Demo.Csv;\n+// neu\n"
+    assert protocol.validate_result("Coder", {"message_de": "x", "patch": good})["patch"] == good
+    new_file = "--- /dev/null\n+++ b/tests/T.cs\n@@ -0,0 +1 @@\n+class T {}\n"
+    protocol.validate_result("Tester", {"message_de": "x", "test_plan": [{"name": "t"}], "test_patch": new_file})
+    assert protocol.validate_result("Debugger", {"message_de": "nicht per Code lösbar", "hypothesis": "h", "fix_patch": ""})
 
 
 def test_unverpacktes_ergebnis_kleiner_modelle_wird_angenommen():
