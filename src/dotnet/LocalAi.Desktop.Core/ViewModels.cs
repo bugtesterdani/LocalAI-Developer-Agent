@@ -305,20 +305,38 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => Set(ref _isOrchestratorProblem, value);
     }
 
-    private Task SendChatAsync() => GuardAsync(async () =>
+    /// <summary>
+    /// Läuft auf dem UI-Thread (Befehl): Text sofort übernehmen, nicht erst über <see cref="Post"/> –
+    /// in der echten Oberfläche ist Post asynchron (Dispatcher.BeginInvoke).
+    /// </summary>
+    private Task SendChatAsync()
     {
-        string text = string.Empty;
-        Post(() =>
-        {
-            text = ChatInput.Trim();
-            ChatInput = string.Empty;
-        });
+        var text = ChatInput.Trim();
         if (text.Length == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
-        await _api.ChatSendAsync(text, _shutdown.Token).ConfigureAwait(false);
-    });
+        ChatInput = string.Empty;
+        return GuardAsync(async () =>
+        {
+            try
+            {
+                await _api.ChatSendAsync(text, _shutdown.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Nicht gesendet: Text zurück ins Eingabefeld, damit nichts verloren geht.
+                Post(() =>
+                {
+                    if (ChatInput.Length == 0)
+                    {
+                        ChatInput = text;
+                    }
+                });
+                throw;
+            }
+        });
+    }
 
     private Task CancelAgentAsync(AgentViewModel agent) => GuardAsync(async () =>
     {

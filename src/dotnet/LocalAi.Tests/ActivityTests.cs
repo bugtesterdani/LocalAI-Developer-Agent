@@ -196,6 +196,33 @@ public sealed class ActivityTests : IDisposable
         Assert.Equal("Coder", api.Cancelled[0]);
     }
 
+    [Fact]
+    public async Task Chat_senden_mit_asynchronem_UI_Thread_wie_im_echten_Fenster()
+    {
+        // Wie Dispatcher.BeginInvoke: Aufträge laufen erst später, nicht sofort.
+        var queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        var api = new ChatApi();
+        await using var main = new MainViewModel(api, api, queue.Enqueue, Guid.NewGuid().ToString("D"), throttle: false);
+        main.ChatInput = "Hallo Agenten";
+        main.SendChatCommand.Execute(null);
+        await WaitUntil(() => api.Sent.Count == 1);
+        Assert.Equal("Hallo Agenten", api.Sent[0]);
+        Assert.Equal(string.Empty, main.ChatInput);
+        api.Fail = true;
+        main.ChatInput = "geht verloren?";
+        main.SendChatCommand.Execute(null);
+        for (var i = 0; i < 100 && main.ChatInput.Length == 0; i++)
+        {
+            while (queue.TryDequeue(out var action))
+            {
+                action();
+            }
+            await Task.Delay(10, TestContext.Current.CancellationToken);
+        }
+        Assert.Equal("geht verloren?", main.ChatInput);
+        Assert.NotNull(main.ErrorText);
+    }
+
     [Fact, Trait("Pruefung", "SEC-22")]
     public async Task Haengender_Orchestrator_wird_angezeigt_und_Not_Aus_sperrt_Chat()
     {
@@ -248,8 +275,13 @@ public sealed class ActivityTests : IDisposable
         public Task<IReadOnlyList<ToolchainInfo>> ScanToolchainsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<ToolchainInfo>>([]);
         public Task RegisterToolchainAsync(string directory, string digest, CancellationToken ct) => Task.CompletedTask;
         public Task UnregisterToolchainAsync(string name, CancellationToken ct) => Task.CompletedTask;
+        public bool Fail { get; set; }
         public Task<string> ChatSendAsync(string text, CancellationToken ct)
         {
+            if (Fail)
+            {
+                throw new BrokerCallException(409, "Not-Aus ist aktiv – erst aufheben");
+            }
             Sent.Add(text);
             return Task.FromResult("run-1");
         }
