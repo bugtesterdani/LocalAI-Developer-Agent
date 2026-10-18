@@ -18,7 +18,7 @@ Dieser Ordner enthält zwei Vorlagen: `dotnet` (.NET SDK) und `python` (Python m
 5. Oberfläche starten → Bereich **TOOLCHAINS** → »Toolchain-Ordner prüfen« → je Toolchain **Registrieren**.
 6. Beim nächsten VM-Aufbau werden die Toolchains installiert, geprüft (`install.check`) und mit dem
    Hallo-Welt-Beispiel aus `selftest\` getestet. Die Kopfzeile zeigt danach z. B.
-   »Toolchains: dotnet 9.0.306 (Hallo-Welt ok), python 3.12.10 (Hallo-Welt ok)«.
+   »Toolchains: dotnet 9.0.306 (Hallo-Welt ok), python 3.15.0 (Hallo-Welt ok)«.
 
 Wird nach der Registrierung eine Datei verändert, hinzugefügt oder entfernt, bricht der nächste VM-Aufbau ab
 (»Hash weicht ab«). Dann erneut prüfen und registrieren.
@@ -32,10 +32,10 @@ Wird nach der Registrierung eine Datei verändert, hinzugefügt oder entfernt, b
 
 ## Python (`python`)
 
-- Datei: Windows-Installer 64 Bit, z. B. `python-3.12.10-amd64.exe` (python.org).
+- Datei: Windows-Installer 64 Bit, z. B. `python-3.15.0-amd64.exe` (python.org).
 - pytest offline als Wheels in `wheels\` – auf einem PC mit Internet im Toolchain-Ordner ausführen:
   ```powershell
-  python -m pip download pytest --only-binary=:all: --python-version 3.12 --platform win_amd64 -d wheels
+  python -m pip download pytest --only-binary=:all: --python-version 3.15 --platform win_amd64 -d wheels
   ```
 
 ## Format von `toolchain.json`

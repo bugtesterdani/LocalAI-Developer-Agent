@@ -58,7 +58,7 @@ tools/codegen/        Generatoren für Verträge, Testvektoren, Oberflächentext
 ## Voraussetzungen (Windows)
 
 - .NET 10 SDK
-- [uv](https://docs.astral.sh/uv/) (installiert bei Bedarf auch Python 3.12+)
+- [uv](https://docs.astral.sh/uv/) (installiert bei Bedarf auch Python; das Projekt ist auf 3.15 festgelegt, siehe `src/python/.python-version`)
 - Git
 
 ## Schnellstart

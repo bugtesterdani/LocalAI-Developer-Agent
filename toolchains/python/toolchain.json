@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "name": "python",
-  "version": "3.12.10",
-  "displayName": "Python 3.12.10 mit pytest",
+  "version": "3.15.0",
+  "displayName": "Python 3.15.0 mit pytest",
   "guestPath": "C:\\Toolchains\\python",
   "license": {
     "proprietary": false,
@@ -13,13 +13,13 @@
   ],
   "install": {
     "kind": "Installer",
-    "file": "python-3.12.10-amd64.exe",
+    "file": "python-3.15.0-amd64.exe",
     "arguments": [
       "/quiet", "InstallAllUsers=1", "TargetDir={guest}", "PrependPath=0", "Include_launcher=0",
       "Include_test=0", "Include_doc=0", "Include_tcltk=0", "Shortcuts=0", "AssociateFiles=0", "Include_pip=1"
     ],
     "expectedMinutes": 5,
-    "check": { "binary": "python", "arguments": ["--version"], "expectOutput": "3.12.10" }
+    "check": { "binary": "python", "arguments": ["--version"], "expectOutput": "3.15.0" }
   },
   "postInstall": [
     { "binary": "python", "arguments": ["-m", "pip", "install", "--no-index", "--find-links", "{source}\\wheels", "pytest"] }

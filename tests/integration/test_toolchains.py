@@ -17,11 +17,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 @pytest.fixture
 def setup(broker_factory, tmp_path):
     toolchains = tmp_path / "toolchains"
-    demo = toolchains / "python-3.12.10"
+    demo = toolchains / "python-3.15.0"
     demo.mkdir(parents=True)
     manifest = json.loads((ROOT / "toolchains" / "python" / "toolchain.json").read_text(encoding="utf-8"))
     (demo / "toolchain.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (demo / "python-3.12.10-amd64.exe").write_bytes(b"MZ installer")
+    (demo / "python-3.15.0-amd64.exe").write_bytes(b"MZ installer")
     (demo / "selftest").mkdir()
     (demo / "selftest" / "hello.py").write_text("print('Hallo aus der Sandbox (Python)')\n", encoding="utf-8")
     project_dir = tmp_path / "projekt"
@@ -59,7 +59,7 @@ def test_registrierung_nur_ueber_die_oberflaeche(setup):
 def test_veraenderter_ordner_wird_nicht_registriert(setup):
     ui = setup["broker"].ui()
     [info] = ui.toolchains_scan()
-    (setup["dir"] / "python-3.12.10-amd64.exe").write_bytes(b"MZ anderer installer")
+    (setup["dir"] / "python-3.15.0-amd64.exe").write_bytes(b"MZ anderer installer")
     with pytest.raises(BrokerError) as err:
         ui.toolchains_register(info.directory, info.digest)
     assert err.value.code == 422 and "verändert" in err.value.message

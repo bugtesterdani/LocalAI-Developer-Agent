@@ -17,10 +17,10 @@ Anleitung mit Download-Hinweisen: `toolchains\README.md`. Kurzfassung:
 
 1. `config\localai.json` → `"toolchains": { "directory": "D:\\Agent\\Toolchains" }` (Ordner nach Wunsch).
 2. `D:\Agent\Toolchains\dotnet\`: Inhalt von `toolchains\dotnet\` (Manifest + `selftest\`) und das **.NET-SDK-ZIP** (Binaries, Windows x64). Passt die Version nicht zu `dotnet-sdk-9.0.306-win-x64.zip`: in `toolchain.json` `version`, `displayName`, `install.file`, `install.check.expectOutput` anpassen.
-3. `D:\Agent\Toolchains\python\`: Inhalt von `toolchains\python\`, den **Python-Installer** (`python-3.12.10-amd64.exe` o. ä.) und pytest als Wheels in `wheels\`:
+3. `D:\Agent\Toolchains\python\`: Inhalt von `toolchains\python\`, den **Python-Installer** (`python-3.15.0-amd64.exe` o. ä.) und pytest als Wheels in `wheels\`:
    ```powershell
    cd D:\Agent\Toolchains\python
-   python -m pip download pytest --only-binary=:all: --python-version 3.12 --platform win_amd64 -d wheels
+   python -m pip download pytest --only-binary=:all: --python-version 3.15 --platform win_amd64 -d wheels
    ```
 4. `config\demo-project.json` → `"toolchains": ["dotnet", "python"]`.
 
@@ -51,7 +51,7 @@ Der Test `PowerShell_Skripte_sind_gueltig` prüft jetzt auch die Gastfunktionen 
 
 `"mode": "hyperv"`, Oberfläche starten (oder die Abnahme aus `pruefung-M2b.md` mit `$env:LOCALAI_HYPERV_TOOLCHAINS = "dotnet,python"`; sie übernimmt die Registrierungen aus der Oberfläche).
 
-- [ ] Nach dem Aufbau: »Offline-VM bereit – Selbsttest bestanden (… Toolchains: dotnet 9.0.306 (Hallo-Welt ok), python 3.12.10 (Hallo-Welt ok)); Aufbau N min«.
+- [ ] Nach dem Aufbau: »Offline-VM bereit – Selbsttest bestanden (… Toolchains: dotnet 9.0.306 (Hallo-Welt ok), python 3.15.0 (Hallo-Welt ok)); Aufbau N min«.
 - [ ] Aufbauzeit mit und ohne Toolchains notieren (bitte an Claude schicken).
 - [ ] Gegenprobe SEC-19/SEC-24: nach der Registrierung eine Datei verändern, Oberfläche neu starten → »gesperrt: Toolchain 'dotnet': Hash weicht ab: … – Aufbau abgebrochen«; es wird **keine** VM gebaut.
 - [ ] Gegenprobe: im Projekt eine nicht registrierte Toolchain wählen → »gesperrt: Toolchain '…' ist für das Projekt gewählt, aber nicht registriert«.
