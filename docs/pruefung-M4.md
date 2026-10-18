@@ -78,6 +78,26 @@ Prozessoren …), Python-Laufzeit/-Pakete, Toolchain-Registrierungen oder die To
 Update scheitert. Agenten können `Sandbox.Update` nie auslösen (der Broker kennt das Tool nicht; nur der Host hat den
 Sitzungsschlüssel). Einmalig nötig: ein Neuaufbau mit diesem Stand – ältere VMs können noch nicht aktualisiert werden.
 
+## Zeitgrenzen und „VM weiter verwenden“
+
+In `config\localai.json` unter `sandbox.hyperv` (alle optional, Minuten):
+
+```json
+"jobTimeoutMinutes": 5,
+"snapshotTimeoutMinutes": 30,
+"toolchainExtraMinutes": 5,
+"pauseOnNoAnswer": true
+```
+
+- `jobTimeoutMinutes`: Lesen, Patch, Repo-Index. `snapshotTimeoutMinutes`: Übernahme eines Projekts. Toolchain-Aktionen
+  warten `timeoutSeconds` aus dem Manifest plus `toolchainExtraMinutes`.
+- Bleibt eine Antwort aus, wird die VM mit `pauseOnNoAnswer: true` (Standard) **angehalten** statt gesperrt: Kopfzeile
+  rot „angehalten: keine Antwort auf Job …“, Knöpfe **VM weiter verwenden** und **VM neu aufbauen**. Der unbeantwortete
+  Auftrag wird nie automatisch wiederholt; „weiter verwenden“ verwirft eine verspätete Rückgabe und prüft erneut auf
+  Netzwerkkarten. Beim Beenden wird eine angehaltene VM mit `reuseVm` gespeichert und beim nächsten Start fortgesetzt.
+- `pauseOnNoAnswer: false` sperrt wie bisher sofort (Neuaufbau nötig). Netzwerkkarten oder ungültige Rückgaben sperren
+  immer.
+
 ## 1. Automatische Tests
 
 ```powershell

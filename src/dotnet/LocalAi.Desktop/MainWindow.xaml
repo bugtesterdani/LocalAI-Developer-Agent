@@ -45,6 +45,10 @@
                             Content="{loc:T StartFakeRun}"
                             Command="{Binding StartFakeRunCommand}" />
                     <Button Style="{StaticResource TopButton}"
+                            Content="{loc:T ContinueSandbox}"
+                            Command="{Binding ContinueSandboxCommand}"
+                            Visibility="{Binding IsSandboxPaused, Converter={StaticResource BoolToVis}}" />
+                    <Button Style="{StaticResource TopButton}"
                             Content="{loc:T RebuildSandbox}"
                             Command="{Binding RebuildSandboxCommand}"
                             Visibility="{Binding IsHyperV, Converter={StaticResource BoolToVis}}" />

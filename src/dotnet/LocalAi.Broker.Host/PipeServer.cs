@@ -42,6 +42,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.OrchestratorStatus] = [CallerRole.Ui],
         [M.OrchestratorStop] = [CallerRole.Ui],
         [M.SandboxRebuild] = [CallerRole.Ui],
+        [M.SandboxContinue] = [CallerRole.Ui],
     };
 
     public const int MaxChatChars = 16_000;
@@ -51,6 +52,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
 
     /// <summary>„VM neu aufbauen“ (nur Betriebsart hyperv).</summary>
     public Func<Task>? RebuildSandbox { get; init; }
+
+    /// <summary>„VM weiter verwenden“ nach ausgebliebener Antwort (nur hyperv).</summary>
+    public Func<Task<string>>? ContinueSandbox { get; init; }
 
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
@@ -353,6 +357,13 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 broker.PublishInfo("sandbox.status", "VM wird neu aufgebaut (auf Wunsch)");
                 await rebuild().ConfigureAwait(false);
                 return new JsonObject { ["rebuilding"] = true };
+            }
+            case M.SandboxContinue:
+            {
+                var resume = ContinueSandbox ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Gibt es nur in der Betriebsart hyperv");
+                var text = await resume().ConfigureAwait(false);
+                broker.PublishInfo("sandbox.status", text);
+                return new JsonObject { ["sandbox"] = text };
             }
             case M.OrchestratorStatus:
                 return Orchestrator.Status();

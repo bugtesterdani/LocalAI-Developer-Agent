@@ -85,6 +85,7 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
     Orchestrator = orchestrator,
     SandboxStatus = () => vm?.Status.Text,
     RebuildSandbox = vm is null ? null : vm.RebuildAsync,
+    ContinueSandbox = vm is null ? null : vm.ContinueAsync,
     Toolchains = toolchains,
     ToolchainCatalog = policy.Toolchains,
 };
@@ -216,7 +217,12 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
                 () => SandboxFingerprint.ComputeCode(settings, GuestPayloadSources.FromRepository(options.RepoRoot)),
                 zip => Task.Run(() => GuestPayloadBuilder.BuildUpdate(zip, GuestPayloadSources.FromRepository(options.RepoRoot),
                     settings.TransferDiskBytes, project.Toolchains ?? [], settings.LowIntegrityTools)));
-            var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance);
+            var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance)
+            {
+                JobTimeout = TimeSpan.FromMinutes(settings.JobTimeoutMinutes),
+                SnapshotTimeout = TimeSpan.FromMinutes(settings.SnapshotTimeoutMinutes),
+                ExecutionMargin = TimeSpan.FromMinutes(settings.ToolchainExtraMinutes),
+            };
             return (adapter, context, null, vm);
         }
         default:

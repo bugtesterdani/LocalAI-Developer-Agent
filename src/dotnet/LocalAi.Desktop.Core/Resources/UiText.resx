@@ -463,6 +463,12 @@ Liegt eine gültige Lizenz vor? Nur dann registrieren.</value>
   <data name="RebuildSandbox" xml:space="preserve">
     <value>VM neu aufbauen</value>
   </data>
+  <data name="ContinueSandbox" xml:space="preserve">
+    <value>VM weiter verwenden</value>
+  </data>
+  <data name="SandboxContinueInfo" xml:space="preserve">
+    <value>VM wird weiter verwendet – der unbeantwortete Auftrag wird nicht wiederholt.</value>
+  </data>
   <data name="SandboxRebuildConfirm" xml:space="preserve">
     <value>Die Sandbox-VM wird verworfen und neu aufgebaut (dauert einige Minuten, Administratorrechte werden angefragt). Ein gerade laufender Auftrag wird vorher abgeschlossen, danach ist bis zum Ende des Aufbaus keine Ausführung möglich.
 

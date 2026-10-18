@@ -26,6 +26,9 @@ public interface IBrokerUiApi
     Task<IReadOnlyList<ActivityEvent>> WaitActivityAsync(long afterSeq, int timeoutMs, CancellationToken ct);
     Task OrchestratorStopAsync(CancellationToken ct);
     Task RebuildSandboxAsync(CancellationToken ct);
+
+    /// <summary>„VM weiter verwenden“ nach ausgebliebener Antwort.</summary>
+    Task ContinueSandboxAsync(CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed record EventLine(string Time, string Text);
@@ -343,6 +346,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CancelRunCommand = new RelayCommand(CancelRunAsync);
         StopOrchestratorCommand = new RelayCommand(StopOrchestratorAsync);
         RebuildSandboxCommand = new RelayCommand(RebuildSandboxAsync, () => IsHyperV);
+        ContinueSandboxCommand = new RelayCommand(ContinueSandboxAsync, () => IsSandboxPaused);
         _activityBuffer = new ActivityBuffer(ApplyActivity, post, useTimer: throttle);
     }
 
@@ -355,6 +359,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand CancelRunCommand { get; }
     public RelayCommand StopOrchestratorCommand { get; }
     public RelayCommand RebuildSandboxCommand { get; }
+
+    public RelayCommand ContinueSandboxCommand { get; }
+
+    /// <summary>VM nach ausgebliebener Antwort angehalten: „VM weiter verwenden“ sichtbar.</summary>
+    public bool IsSandboxPaused => SandboxDetail?.StartsWith("angehalten", StringComparison.Ordinal) == true;
+
+    private async Task ContinueSandboxAsync()
+    {
+        await GuardAsync(async () =>
+        {
+            await _api.ContinueSandboxAsync(_shutdown.Token).ConfigureAwait(false);
+            Post(() => InfoText = UiText.Get("SandboxContinueInfo"));
+        }).ConfigureAwait(false);
+    }
 
     /// <summary>Betriebsart mit Offline-VM: Knopf „VM neu aufbauen“ sichtbar.</summary>
     public bool IsHyperV => SandboxMode == "hyperv";
@@ -616,12 +634,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 OnPropertyChanged(nameof(SandboxText));
                 OnPropertyChanged(nameof(IsSandboxProblem));
+                OnPropertyChanged(nameof(IsSandboxPaused));
+                ContinueSandboxCommand?.Refresh();
             }
         }
     }
 
     /// <summary>VM gesperrt: Kopfzeile rot.</summary>
-    public bool IsSandboxProblem => SandboxDetail?.StartsWith("gesperrt", StringComparison.Ordinal) == true;
+    public bool IsSandboxProblem => SandboxDetail?.StartsWith("gesperrt", StringComparison.Ordinal) == true || IsSandboxPaused;
 
     /// <summary>Entwicklungsmodus ohne VM: in der Oberfläche deutlich als unsicher markiert.</summary>
     public bool IsUnsafeSandbox => SandboxMode == "dev-local-unsafe";

@@ -218,6 +218,8 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
 
     public Task RebuildSandboxAsync(CancellationToken ct) => CallAsync(M.SandboxRebuild, null, ct);
 
+    public Task ContinueSandboxAsync(CancellationToken ct) => CallAsync(M.SandboxContinue, null, ct);
+
     public async ValueTask DisposeAsync()
     {
         await _stream.DisposeAsync().ConfigureAwait(false);

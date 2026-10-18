@@ -161,6 +161,8 @@ TEXTS = {
     "Event_run.cancelled": "Run abgebrochen",
     "Event_run.agentCancelled": "Agent abgebrochen",
     "RebuildSandbox": "VM neu aufbauen",
+    "ContinueSandbox": "VM weiter verwenden",
+    "SandboxContinueInfo": "VM wird weiter verwendet – der unbeantwortete Auftrag wird nicht wiederholt.",
     "SandboxRebuildConfirm": "Die Sandbox-VM wird verworfen und neu aufgebaut (dauert einige Minuten, Administratorrechte werden angefragt). Ein gerade laufender Auftrag wird vorher abgeschlossen, danach ist bis zum Ende des Aufbaus keine Ausführung möglich.\n\nJetzt neu aufbauen?",
     "SandboxRebuildInfo": "VM wird neu aufgebaut – Fortschritt in der Kopfzeile.",
 }

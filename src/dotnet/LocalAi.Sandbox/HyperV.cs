@@ -52,6 +52,22 @@ public sealed record HyperVSettings
     /// </summary>
     public bool LowIntegrityTools { get; init; } = true;
 
+    /// <summary>Wartezeit auf die Antwort eines normalen Jobs (Lesen, Patch, Index).</summary>
+    public int JobTimeoutMinutes { get; init; } = 5;
+
+    /// <summary>Wartezeit auf die Übernahme eines Snapshots (große Projekte).</summary>
+    public int SnapshotTimeoutMinutes { get; init; } = 30;
+
+    /// <summary>Zuschlag auf timeoutSeconds einer Toolchain-Aktion (Kopie, Übertragung).</summary>
+    public int ToolchainExtraMinutes { get; init; } = 5;
+
+    /// <summary>
+    /// Bleibt eine Antwort aus: VM anhalten statt sperren. Die Oberfläche bietet dann „VM weiter verwenden“ oder
+    /// „VM neu aufbauen“ an; die VM bleibt für reuseVm erhalten. false = sofort sperren (Neuaufbau nötig).
+    /// Netzwerkkarten oder ungültige Rückgaben sperren immer.
+    /// </summary>
+    public bool PauseOnNoAnswer { get; init; } = true;
+
     public long TransferDiskBytes => TransferDiskMB * 1024L * 1024L;
 
     private static readonly Regex VmNamePattern = new("^[A-Za-z0-9-]{1,40}$");
@@ -87,6 +103,9 @@ public enum SandboxState
     Ready,
     Locked,
     Removed,
+
+    /// <summary>Angehalten nach ausgebliebener Antwort; der Nutzer entscheidet: weiter verwenden oder neu aufbauen.</summary>
+    Paused,
 }
 
 public sealed record SandboxStatus(SandboxState State, string Text)
@@ -697,6 +716,41 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// „VM weiter verwenden“ nach ausgebliebener Antwort: verwirft eine verspätete Rückgabe (neues, leeres
+    /// Transfer-Laufwerk), prüft erneut auf Netzwerkkarten und gibt die VM wieder frei. Der unbeantwortete Job wird
+    /// nicht wiederholt.
+    /// </summary>
+    public async Task<string> ContinueAsync()
+    {
+        await _exchange.WaitAsync(_shutdown.Token).ConfigureAwait(false);
+        try
+        {
+            if (Status.State != SandboxState.Paused)
+            {
+                return Status.Text;
+            }
+            var (leftover, nics) = await CollectAsync(_shutdown.Token).ConfigureAwait(false);
+            if (nics != 0)
+            {
+                Lock($"VM hat {nics} Netzwerkkarte(n)");
+                return Status.Text;
+            }
+            var note = leftover is null ? "" : $" (verspätete Rückgabe zu Sequenz {leftover.Sequence} verworfen)";
+            SetStatus(SandboxState.Ready, $"Offline-VM bereit – nach Unterbrechung weiter verwendet{note}");
+            return Status.Text;
+        }
+        catch (Exception ex) when (ex is HyperVException or IOException or VhdxFormatException)
+        {
+            Lock(GuestReport.Clip(ex.Message));
+            return Status.Text;
+        }
+        finally
+        {
+            _exchange.Release();
+        }
+    }
+
     private async Task LifecycleAsync(CancellationToken ct)
     {
         try
@@ -903,8 +957,16 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             var wait = timeout;
             if (!await _signals.WaitForAsync($"result:{job.Sequence}", wait, cancellationToken).ConfigureAwait(false))
             {
-                // Zustand im Gast unklar: keine weiteren Jobs in dieser VM (Spezifikation: keine automatische Wiederholung).
-                Lock($"keine Antwort auf Job {job.Sequence} innerhalb von {wait.TotalSeconds:F0} s – VM neu aufbauen");
+                // Zustand im Gast unklar: keine automatische Wiederholung. Je nach Einstellung anhalten (Nutzer entscheidet)
+                // oder sperren.
+                var reason = $"keine Antwort auf Job {job.Sequence} ({job.Proposal.Tool}) innerhalb von {wait.TotalMinutes:F1} min";
+                if (_settings.PauseOnNoAnswer && !_updating)
+                {
+                    SetStatus(SandboxState.Paused, $"angehalten: {reason} – „VM weiter verwenden“ oder „VM neu aufbauen“ " +
+                                                   "(Gastprotokolle: scripts\\sandbox\\Get-LocalAiGuestLogs.ps1)");
+                    return new SandboxReply(null, $"Keine Antwort der Sandbox ({reason}) – Ergebnis unklar, Sandbox angehalten");
+                }
+                Lock($"{reason} – VM neu aufbauen");
                 return new SandboxReply(null, "Keine Antwort der Sandbox (Ergebnis unklar) – Sandbox gesperrt");
             }
             var (message, swapNics) = await CollectAsync(cancellationToken).ConfigureAwait(false);
@@ -981,7 +1043,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             return;
         }
         var kept = false;
-        if (ReuseEnabled && Status.IsReady)
+        if (ReuseEnabled && (Status.IsReady || Status.State == SandboxState.Paused))
         {
             try
             {

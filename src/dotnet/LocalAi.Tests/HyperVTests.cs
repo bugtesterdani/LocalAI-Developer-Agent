@@ -50,9 +50,10 @@ public sealed class HyperVTests : IAsyncLifetime
         return path;
     }
 
-    private async Task<(HyperVSandbox Vm, SimulatedHost Host, SandboxSession Session)> StartAsync(Action<SimulatedHost>? configure = null)
+    private async Task<(HyperVSandbox Vm, SimulatedHost Host, SandboxSession Session)> StartAsync(Action<SimulatedHost>? configure = null,
+        Func<HyperVSettings, HyperVSettings>? tweak = null)
     {
-        var settings = Settings();
+        var settings = tweak is null ? Settings() : tweak(Settings());
         var session = new SandboxSession("s-" + Guid.NewGuid().ToString("N")[..8]);
         var host = new SimulatedHost(settings, Path.Combine(_dir, "guest-sim"));
         configure?.Invoke(host);
@@ -421,7 +422,7 @@ public sealed class HyperVTests : IAsyncLifetime
     [Fact, Trait("Pruefung", "SEC-18")]
     public async Task Fehlende_Antwort_sperrt_ohne_Wiederholung()
     {
-        var (vm, host, session) = await StartAsync();
+        var (vm, host, session) = await StartAsync(tweak: s => s with { PauseOnNoAnswer = false });
         Assert.Equal(SandboxState.Ready, vm.Status.State);
         host.DropJobs = true;
         var job = DummyJob(session.NextSequence()) with { SessionId = session.SessionId };
@@ -432,6 +433,38 @@ public sealed class HyperVTests : IAsyncLifetime
             TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         Assert.Contains("nicht bereit", second.Rejection, StringComparison.Ordinal);
         Assert.Equal(1, host.JobsCopied);
+    }
+
+    [Fact, Trait("Pruefung", "SEC-12")]
+    public async Task Fehlende_Antwort_haelt_an_und_Nutzer_kann_weiter_verwenden()
+    {
+        var (vm, host, session) = await StartAsync();
+        host.DropJobs = true;
+        var job = DummyJob(session.NextSequence()) with { SessionId = session.SessionId };
+        var reply = await vm.ExchangeAsync(JobSigner.Sign(job, session.Key), null, TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.Contains("Ergebnis unklar", reply.Rejection, StringComparison.Ordinal);
+        Assert.Equal(SandboxState.Paused, vm.Status.State);
+        Assert.StartsWith("angehalten", vm.Status.Text, StringComparison.Ordinal);
+        // Angehalten: nichts wird ausgeführt, nichts wiederholt.
+        var blocked = await vm.ExchangeAsync(JobSigner.Sign(job with { Sequence = session.NextSequence() }, session.Key), null,
+            TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.Contains("nicht bereit", blocked.Rejection, StringComparison.Ordinal);
+        Assert.Equal(1, host.JobsCopied);
+
+        host.DropJobs = false;
+        var text = await vm.ContinueAsync();
+        Assert.Equal(SandboxState.Ready, vm.Status.State);
+        Assert.Contains("weiter verwendet", text, StringComparison.Ordinal);
+        var read = await ReadOnceAsync(vm, session, Project(), "weiter");
+        Assert.True(read.Status == ResultStatus.Succeeded, read.TargetResults[0].Message);
+
+        // Netzwerkkarte beim Weiterverwenden: gesperrt.
+        host.DropJobs = true;
+        await vm.ExchangeAsync(JobSigner.Sign(job with { Sequence = session.NextSequence() }, session.Key), null, TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        host.Nics = 1;
+        await vm.ContinueAsync();
+        Assert.Equal(SandboxState.Locked, vm.Status.State);
     }
 
     [Fact, Trait("Pruefung", "SEC-24")]

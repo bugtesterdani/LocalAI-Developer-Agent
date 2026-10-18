@@ -40,6 +40,7 @@ public static class PipeProtocol
         public const string OrchestratorStatus = "orchestrator.status";
         public const string OrchestratorStop = "orchestrator.stop";
         public const string SandboxRebuild = "sandbox.rebuild";
+        public const string SandboxContinue = "sandbox.continue";
     }
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)

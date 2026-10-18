@@ -227,6 +227,10 @@ public sealed record HostOptions
             KeepVmOnExit = e.TryGetProperty("keepVmOnExit", out var keep) && keep.ValueKind == JsonValueKind.True,
             ReuseVm = e.TryGetProperty("reuseVm", out var reuse) && reuse.ValueKind == JsonValueKind.True,
             LowIntegrityTools = !(e.TryGetProperty("lowIntegrityTools", out var low) && low.ValueKind == JsonValueKind.False),
+            JobTimeoutMinutes = Math.Clamp(Int("jobTimeoutMinutes") ?? defaults.JobTimeoutMinutes, 1, 600),
+            SnapshotTimeoutMinutes = Math.Clamp(Int("snapshotTimeoutMinutes") ?? defaults.SnapshotTimeoutMinutes, 1, 600),
+            ToolchainExtraMinutes = Math.Clamp(Int("toolchainExtraMinutes") ?? defaults.ToolchainExtraMinutes, 1, 600),
+            PauseOnNoAnswer = !(e.TryGetProperty("pauseOnNoAnswer", out var pause) && pause.ValueKind == JsonValueKind.False),
         };
     }
 
