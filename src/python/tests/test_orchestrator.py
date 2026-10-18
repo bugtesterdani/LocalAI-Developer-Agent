@@ -264,6 +264,9 @@ def test_persoenliche_einstellungen_ueberlagern_nur_einzelne_werte():
         assert config.stall_warning_seconds == 45 and len(config.profiles) == len(base["profiles"])
     lan = ModelsConfig.parse(merge(base, json.loads((repo_root() / "config" / "models.local.example.json").read_text("utf-8"))))
     assert lan.ollama_url == "http://192.168.178.39:11434" and lan.allow_lan and lan.require_calibration
+    # Ältere models.local.json mit eigener Profilliste (ohne roles): Rollen fallen auf vorhandene Profile zurück.
+    old_style = ModelsConfig.parse(merge(base, {"profiles": [base["profiles"][0]], "requireCalibration": False}))
+    assert old_style.roles["Planner"] == ["standard"]
     demo = ModelsConfig.parse(merge(base, json.loads((repo_root() / "config" / "models.demo.json").read_text("utf-8"))))
     assert demo.ollama_url.endswith(":11435") and not demo.require_calibration and demo.roles["Coder"] == ["standard"]
 

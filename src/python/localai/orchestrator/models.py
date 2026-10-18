@@ -145,11 +145,10 @@ class ModelsConfig:
             raise ConfigError("Keine Modellprofile konfiguriert")
         roles: dict[str, list[str]] = {}
         for role in ROLES:
-            names = raw.get("roles", {}).get(role) or [next(iter(profiles))]
-            for name in names:
-                if name not in profiles:
-                    raise ConfigError(f"Rolle {role}: unbekanntes Profil {name}")
-            roles[role] = list(names)
+            wanted = raw.get("roles", {}).get(role) or []
+            # Profile, die (z. B. durch eine eigene Profilliste in models.local.json) fehlen, werden übergangen.
+            names = [n for n in wanted if n in profiles] or [next(iter(profiles))]
+            roles[role] = names
         lim = raw.get("limits", {})
         limits = Limits(
             max_steps_per_task=int(lim.get("maxStepsPerTask", 20)),
