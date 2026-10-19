@@ -116,6 +116,9 @@ Die Pfade auf den neuen Rechner umstellen:
 - Die übrigen Werte (Zeitgrenzen, `pauseOnNoAnswer`, …) kannst du übernehmen; siehe `docs/pruefung-M4.md`.
   `buildTimeoutMinutes` wird bei großen Toolchains automatisch erhöht.
 - Zum ersten Ausprobieren ohne VM geht auch `"mode": "dev-local-unsafe"` (rot markiert, kein Build/Test).
+- Webabrufe (ab M6): ohne Abschnitt `web` eingeschaltet mit Standardwerten. Ausschalten mit
+  `"web": { "enabled": false }`; Grenzen und Befehl siehe `docs/pruefung-M6.md`. Der Rechner braucht dafür direkten
+  Internetzugang (HTTPS, Port 443) – ein Proxy wird bewusst nicht verwendet.
 
 ### `config\models.local.json` (Ollama)
 

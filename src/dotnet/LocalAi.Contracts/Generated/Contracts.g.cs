@@ -427,3 +427,55 @@ public sealed partial record TestReport(
     [property: JsonPropertyName("failures")] IReadOnlyList<TestCaseFailure> Failures,
     [property: JsonPropertyName("resultFiles"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ResultFiles = null,
     [property: JsonPropertyName("problems"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Problems = null);
+
+/// <summary>Hinweis des Content Gate (keine Sicherheitsgarantie).</summary>
+public sealed partial record WebWarning(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("excerpt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Excerpt = null);
+
+/// <summary>Ergebnis eines genehmigten Webabrufs nach dem Content Gate (Spezifikation §7). Der Text geht nur an die Oberfläche (Inhaltsfreigabe) und erst nach dieser Freigabe an den Agenten.</summary>
+public sealed partial record WebCapture(
+    [property: JsonPropertyName("captureId")] string CaptureId,
+    [property: JsonPropertyName("url")] string Url,
+    [property: JsonPropertyName("host")] string Host,
+    [property: JsonPropertyName("address")] string Address,
+    [property: JsonPropertyName("fetchedAt")] string FetchedAt,
+    [property: JsonPropertyName("status")] long Status,
+    [property: JsonPropertyName("contentType")] string ContentType,
+    [property: JsonPropertyName("rawBytes")] long RawBytes,
+    [property: JsonPropertyName("rawSha256")] string RawSha256,
+    [property: JsonPropertyName("textSha256")] string TextSha256,
+    [property: JsonPropertyName("sanitizerVersion")] string SanitizerVersion,
+    [property: JsonPropertyName("chars")] long Chars,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("links")] long Links,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<WebWarning> Warnings,
+    [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null,
+    [property: JsonPropertyName("text"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text = null,
+    [property: JsonPropertyName("releasedTo"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ReleasedTo = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter<ExportFileKind>))]
+public enum ExportFileKind
+{
+    Create,
+    Modify,
+    Delete,
+}
+
+public sealed partial record ExportFile(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("kind")] ExportFileKind Kind,
+    [property: JsonPropertyName("bytes")] long Bytes,
+    [property: JsonPropertyName("beforeSha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BeforeSha256 = null,
+    [property: JsonPropertyName("afterSha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AfterSha256 = null);
+
+/// <summary>Vorbereitete Übernahme (Workspace.Diff): Dateien aus der Sandbox liegen im Staging des Brokers; der Diff ist vom Broker gegen den aktuellen Projektordner berechnet.</summary>
+public sealed partial record ExportPreview(
+    [property: JsonPropertyName("stagingId")] string StagingId,
+    [property: JsonPropertyName("grantId")] string GrantId,
+    [property: JsonPropertyName("baseSnapshotId")] string BaseSnapshotId,
+    [property: JsonPropertyName("snapshotId")] string SnapshotId,
+    [property: JsonPropertyName("files")] IReadOnlyList<ExportFile> Files,
+    [property: JsonPropertyName("patch")] string Patch,
+    [property: JsonPropertyName("unchanged"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Unchanged = null);

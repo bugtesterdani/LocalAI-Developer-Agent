@@ -13,7 +13,8 @@ public sealed record ToolDefinition(
     IReadOnlySet<string> AllowedArguments,
     IReadOnlyList<FolderRight> RequiredRights,
     bool AllowRootTarget = false,
-    bool RequiresSnapshot = true);
+    bool RequiresSnapshot = true,
+    bool RequiresGrant = true);
 
 /// <summary>Ordnerrechte und bekannte Snapshots – vom Host bereitgestellt.</summary>
 public interface IPolicyContext
@@ -26,6 +27,15 @@ public interface IPolicyContext
 
     /// <summary>Installierte Toolchains der Sandbox; null = Toolchain-Aktionen gesperrt (alles außer hyperv).</summary>
     IToolchainCatalog? Toolchains => null;
+
+    /// <summary>Webabrufe (Web.Fetch/Web.Content); null = ausgeschaltet.</summary>
+    IWebCaptures? WebCaptures => null;
+
+    /// <summary>Vorbereitete Übernahmen (Workspace.ExportPatch); null = nicht verfügbar.</summary>
+    IExportStaging? Exports => null;
+
+    /// <summary>Ist <paramref name="snapshotId"/> aus <paramref name="baseId"/> abgeleitet (Patch.Apply-Kette)?</summary>
+    bool IsDerivedFrom(string snapshotId, string baseId, string grantId) => false;
 }
 
 /// <summary>
@@ -76,6 +86,18 @@ public sealed class ProposalPolicy
                 new HashSet<string> { "grantId", "patch" }, read),
             ["Repo.Index"] = new("Repo.Index", "1", 0, 0, false, new HashSet<string> { "grantId", "query", "maxChars" },
                 [FolderRight.List, FolderRight.Read]),
+            // M6: genau eine HTTPS-URL; Rohdaten bleiben in der Quarantäne (SEC-09). Einzelaufruf, ohne Ordner.
+            ["Web.Fetch"] = new("Web.Fetch", "1", 0, 0, false, new HashSet<string> { "url" }, [],
+                RequiresSnapshot: false, RequiresGrant: false),
+            // Zweite, eigene Entscheidung: exakt dieser bereinigte Text (Hash) an genau diesen Agenten.
+            ["Web.Content"] = new("Web.Content", "1", 0, 0, false, new HashSet<string> { "captureId", "textSha256" }, [],
+                RequiresSnapshot: false, RequiresGrant: false),
+            // Übernahme vorbereiten: Änderungen der Sandbox ins Staging des Brokers holen (nur lesend).
+            ["Workspace.Diff"] = new("Workspace.Diff", "1", 0, 0, false, new HashSet<string> { "grantId", "baseSnapshotId" },
+                [FolderRight.Read]),
+            // Übernahme in den Projektordner: Diff je Datei, abwählbar; Rechte je Änderungsart.
+            ["Workspace.ExportPatch"] = new("Workspace.ExportPatch", "1", 1, options.MaxTargetsPerProposal, true,
+                new HashSet<string> { "grantId", "stagingId", "patch" }, [FolderRight.Read], RequiresSnapshot: false),
         };
         foreach (var name in ToolchainTools.Actions.Keys)
         {
@@ -117,7 +139,7 @@ public sealed class ProposalPolicy
         }
 
         ValidateArguments(request.Arguments, tool);
-        var grant = ValidateGrant(request, tool);
+        var grant = tool.RequiresGrant ? ValidateGrant(request, tool) : null;
 
         var targets = request.Targets ?? throw Invalid("targets fehlt");
         if (targets.Count < tool.MinTargets || targets.Count > tool.MaxTargets)
@@ -159,13 +181,102 @@ public sealed class ProposalPolicy
         }
         if (tool.Name == "Patch.Apply")
         {
-            ValidatePatch(request.Arguments, grant, normalized);
+            ValidatePatch(request.Arguments, grant!, normalized);
+        }
+        else if (tool.Name is "Web.Fetch" or "Web.Content")
+        {
+            ValidateWeb(tool.Name, request.Arguments);
+        }
+        else if (tool.Name == "Workspace.Diff")
+        {
+            var baseId = StringArgument(request.Arguments, "baseSnapshotId");
+            if (baseId is null || !_context.HasSnapshot(baseId, grant!.GrantId))
+            {
+                throw new BrokerException(BrokerErrorCodes.Conflict, "baseSnapshotId ist für diesen Grant unbekannt");
+            }
+            if (baseId == request.SnapshotId)
+            {
+                throw new BrokerException(BrokerErrorCodes.Conflict, "Keine Änderungen: Snapshot entspricht dem Projektstand");
+            }
+            if (!_context.IsDerivedFrom(request.SnapshotId, baseId, grant.GrantId))
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden, "Snapshot ist nicht aus dem angegebenen Projektstand abgeleitet");
+            }
+        }
+        else if (tool.Name == "Workspace.ExportPatch")
+        {
+            ValidateExport(request.Arguments, grant!, normalized);
         }
         else if (ToolchainTools.Actions.ContainsKey(tool.Name))
         {
             ToolchainTools.Validate(tool.Name, request.Arguments, _context.Toolchains);
         }
         return normalized;
+    }
+
+    private static string? StringArgument(JsonElement arguments, string name) =>
+        arguments.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private void ValidateWeb(string tool, JsonElement arguments)
+    {
+        var captures = _context.WebCaptures
+                       ?? throw new BrokerException(BrokerErrorCodes.Forbidden, "Webabrufe sind ausgeschaltet (config/localai.json → web.enabled)");
+        if (tool == "Web.Fetch")
+        {
+            var url = StringArgument(arguments, "url");
+            var (normalized, _) = UrlPolicy.Validate(url);
+            if (normalized != url)
+            {
+                throw Invalid("url ohne Fragment (#…) angeben");
+            }
+            return;
+        }
+        var captureId = StringArgument(arguments, "captureId");
+        var sha = StringArgument(arguments, "textSha256");
+        var capture = (captureId is null ? null : captures.Find(captureId))
+                      ?? throw new BrokerException(BrokerErrorCodes.Conflict, "Webinhalt unbekannt oder abgelaufen – erneut abrufen");
+        if (sha is null || !ProposalHashing.IsSha256Hex(sha) || sha != capture.TextSha256)
+        {
+            throw new BrokerException(BrokerErrorCodes.Conflict, "textSha256 passt nicht zum bereinigten Text dieses Abrufs (SEC-10)");
+        }
+    }
+
+    /// <summary>Übernahme: Ziele = Dateien des Stagings, Diff = vom Broker berechneter Diff, Rechte je Änderungsart.</summary>
+    private void ValidateExport(JsonElement arguments, FolderGrant grant, IReadOnlyList<ToolTarget> targets)
+    {
+        var exports = _context.Exports
+                      ?? throw new BrokerException(BrokerErrorCodes.Forbidden, "Übernahme ist in dieser Betriebsart nicht verfügbar");
+        var stagingId = StringArgument(arguments, "stagingId");
+        var staging = (stagingId is null ? null : exports.Find(stagingId))
+                      ?? throw new BrokerException(BrokerErrorCodes.Conflict, "Übernahme unbekannt oder abgelaufen – Workspace.Diff erneut ausführen");
+        if (staging.GrantId != grant.GrantId)
+        {
+            throw new BrokerException(BrokerErrorCodes.Forbidden, "Übernahme gehört zu einem anderen Ordner");
+        }
+        if (StringArgument(arguments, "patch") != staging.Patch)
+        {
+            throw Invalid("patch muss genau der vom Broker berechnete Diff der Übernahme sein");
+        }
+        var files = staging.Files.ToDictionary(f => f.Path, StringComparer.Ordinal);
+        var paths = targets.Select(t => t.Path).ToHashSet(StringComparer.Ordinal);
+        if (!paths.SetEquals(files.Keys) || paths.Count != targets.Count)
+        {
+            throw Invalid("Ziele müssen genau die Dateien der Übernahme sein: " + string.Join(", ", files.Keys.Order(StringComparer.Ordinal)));
+        }
+        foreach (var file in staging.Files)
+        {
+            var right = file.Kind switch
+            {
+                ExportFileKind.Create => FolderRight.Create,
+                ExportFileKind.Delete => FolderRight.Delete,
+                _ => FolderRight.Modify,
+            };
+            if (!grant.Rights.Contains(right))
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden,
+                    $"Grant {grant.GrantId} hat nicht das Recht {right} für {file.Path} – in der Projektdatei freigeben");
+            }
+        }
     }
 
     /// <summary>Ziele = genau die Dateien des Patches; Rechte je Änderungsart (SEC-05).</summary>

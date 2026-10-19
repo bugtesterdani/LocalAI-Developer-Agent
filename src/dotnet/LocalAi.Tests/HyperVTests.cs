@@ -435,6 +435,42 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.Equal(1, host.JobsCopied);
     }
 
+    [Fact, Trait("Pruefung", "SEC-15")]
+    public async Task NotAus_schaltet_die_VM_waehrend_einer_Ausfuehrung_aus_und_sperrt()
+    {
+        var (vm, host, session) = await StartAsync();
+        Assert.Contains("keine laufende Ausführung", await vm.EmergencyStopAsync(), StringComparison.Ordinal);
+        Assert.Empty(host.StateActions);
+        Assert.Equal(SandboxState.Ready, vm.Status.State);
+
+        host.DropJobs = true; // Job „läuft“ in der VM (keine Antwort)
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var job = DummyJob(session.NextSequence()) with { SessionId = session.SessionId };
+        var running = vm.ExchangeAsync(JobSigner.Sign(job, session.Key), null, TimeSpan.FromSeconds(60), cts.Token);
+        for (var i = 0; i < 200 && host.JobsCopied == 0; i++)
+        {
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+        }
+        var text = await vm.EmergencyStopAsync();
+        Assert.Equal(["TurnOff"], host.StateActions);
+        Assert.Equal(SandboxState.Locked, vm.Status.State);
+        Assert.Contains("Not-Aus", text, StringComparison.Ordinal);
+        await cts.CancelAsync(); // wie der Broker: laufende Ausführung abbrechen
+        try
+        {
+            await running.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        // Gesperrt: nichts wird mehr ausgeführt, bis die VM neu aufgebaut ist.
+        host.DropJobs = false;
+        var after = await vm.ExchangeAsync(JobSigner.Sign(job with { Sequence = session.NextSequence() }, session.Key), null,
+            TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        Assert.Contains("nicht bereit", after.Rejection, StringComparison.Ordinal);
+        Assert.Equal(1, host.JobsCopied);
+    }
+
     [Fact, Trait("Pruefung", "SEC-12")]
     public async Task Fehlende_Antwort_haelt_an_und_Nutzer_kann_weiter_verwenden()
     {
@@ -731,7 +767,7 @@ public sealed class HyperVTests : IAsyncLifetime
         public Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken)
         {
             StateActions.Add(action);
-            if (action == "Save")
+            if (action is "Save" or "TurnOff")
             {
                 StopAll();
             }
@@ -739,7 +775,7 @@ public sealed class HyperVTests : IAsyncLifetime
             {
                 StartSupervised(_workerArgs);
             }
-            return Task.FromResult(new VmInfo(true, action == "Save" ? "Saved" : "Running", Nics));
+            return Task.FromResult(new VmInfo(true, action switch { "Save" => "Saved", "TurnOff" => "Off", _ => "Running" }, Nics));
         }
 
         public Task RemoveVmAsync(CancellationToken cancellationToken)

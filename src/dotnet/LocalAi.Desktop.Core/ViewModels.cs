@@ -29,9 +29,15 @@ public interface IBrokerUiApi
 
     /// <summary>„VM weiter verwenden“ nach ausgebliebener Antwort.</summary>
     Task ContinueSandboxAsync(CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>Bereinigter Text eines Webabrufs für die Inhaltsfreigabe (nur die Oberfläche sieht ihn vorher).</summary>
+    Task<WebCapture?> WebCaptureAsync(string captureId, CancellationToken ct) => Task.FromResult<WebCapture?>(null);
 }
 
-public sealed record EventLine(string Time, string Text);
+public sealed record EventLine(string Time, string Text)
+{
+    public string Text { get; init; } = InertText.Clean(Text, 4_000);
+}
 
 public sealed class TargetItemViewModel(ToolTarget target, Action selectionChanged, PatchFileKind? patchKind = null) : ObservableObject
 {
@@ -71,7 +77,8 @@ public sealed class TargetItemViewModel(ToolTarget target, Action selectionChang
 /// <summary>Freigabekarte für genau einen unveränderlichen Vorschlag.</summary>
 public sealed class ApprovalCardViewModel : ObservableObject
 {
-    private static readonly HashSet<string> NarrowableTools = new(StringComparer.Ordinal) { "File.ReadMany", "Patch.Apply" };
+    private static readonly HashSet<string> NarrowableTools = new(StringComparer.Ordinal) { "File.ReadMany", "Patch.Apply", "Workspace.ExportPatch" };
+    private static readonly HashSet<string> PatchTools = new(StringComparer.Ordinal) { "Patch.Apply", "Workspace.ExportPatch" };
 
     private readonly MainViewModel _owner;
     private readonly string? _patch;
@@ -82,7 +89,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
     {
         View = view;
         _owner = owner;
-        _patch = Proposal.Tool == "Patch.Apply" && Proposal.Arguments.ValueKind == JsonValueKind.Object
+        _patch = PatchTools.Contains(Proposal.Tool) && Proposal.Arguments.ValueKind == JsonValueKind.Object
                  && Proposal.Arguments.TryGetProperty("patch", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
         var kinds = new Dictionary<string, PatchFileKind>(StringComparer.Ordinal);
         if (_patch is not null)
@@ -107,6 +114,95 @@ public sealed class ApprovalCardViewModel : ObservableObject
         ApplySelectionCommand = new RelayCommand(() => RunBusy(() => _owner.NarrowAsync(this)), () => CanApplySelection);
         SelectAllVisibleCommand = new RelayCommand(() => SetVisible(true), () => IsBatch);
         DeselectAllVisibleCommand = new RelayCommand(() => SetVisible(false), () => IsBatch);
+        if (IsWebContent)
+        {
+            _ = LoadWebAsync();
+        }
+    }
+
+    // ------------------------------------------------------------------ Web (M6)
+    private WebCapture? _capture;
+    private string _webText = UiText.Get("WebLoading");
+
+    public bool IsWebFetch => Proposal.Tool == "Web.Fetch";
+
+    public bool IsWebContent => Proposal.Tool == "Web.Content";
+
+    private string Argument(string name) =>
+        Proposal.Arguments.ValueKind == JsonValueKind.Object && Proposal.Arguments.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString()! : "";
+
+    /// <summary>Erste Freigabe: genau diese URL mit festen Grenzen.</summary>
+    public string WebFetchText
+    {
+        get
+        {
+            if (!IsWebFetch)
+            {
+                return string.Empty;
+            }
+            var url = Argument("url");
+            var host = Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.IdnHost : "?";
+            return UiText.Format("WebFetchDetails", InertText.Clean(url, 2100), host);
+        }
+    }
+
+    /// <summary>Zweite Freigabe: exakt dieser bereinigte Text (angezeigt wird, was übergeben wird).</summary>
+    public string WebText
+    {
+        get => _webText;
+        private set => Set(ref _webText, value);
+    }
+
+    public string WebSourceText => _capture is null
+        ? string.Empty
+        : UiText.Format("WebSourceDetails", InertText.Clean(_capture.Url, 2100), _capture.Address, _capture.FetchedAt, _capture.ContentType,
+            _capture.Chars, _capture.Truncated ? UiText.Get("WebTruncated") : "", _capture.TextSha256, Proposal.Agent.ToString());
+
+    public bool HasWebWarnings => _capture?.Warnings.Count > 0;
+
+    public string WebWarningsText => _capture is null
+        ? string.Empty
+        : string.Join("\n", _capture.Warnings.Select(w => "• " + InertText.Clean(w.Message, 300)
+                                                            + (string.IsNullOrEmpty(w.Excerpt) ? "" : $" – „{InertText.Clean(w.Excerpt, 240)}“")));
+
+    /// <summary>Text liegt vor und sein Hash ist genau der des Vorschlags (sonst kein Erlauben möglich).</summary>
+    public bool WebReady { get; private set; }
+
+    private async Task LoadWebAsync()
+    {
+        try
+        {
+            var capture = await _owner.Api.WebCaptureAsync(Argument("captureId"), CancellationToken.None).ConfigureAwait(false);
+            var text = capture?.Text;
+            var sha = text is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+            _owner.Post(() =>
+            {
+                _capture = capture;
+                if (capture is null || text is null)
+                {
+                    WebText = UiText.Get("WebMissing");
+                }
+                else if (sha != Argument("textSha256") || capture.TextSha256 != sha)
+                {
+                    WebText = UiText.Get("WebHashMismatch");
+                }
+                else
+                {
+                    WebText = InertText.Clean(text, 250_000);
+                    WebReady = true;
+                }
+                OnPropertyChanged(nameof(WebSourceText));
+                OnPropertyChanged(nameof(HasWebWarnings));
+                OnPropertyChanged(nameof(WebWarningsText));
+                OnPropertyChanged(nameof(WebReady));
+                RefreshCommands();
+            });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _owner.Post(() => WebText = UiText.Format("WebLoadFailed", ex.Message));
+        }
     }
 
     public ProposalView View { get; }
@@ -120,7 +216,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
     public string Summary => Targets.Count == 1 ? Targets[0].Path : UiText.Format("SelectionCount", Targets.Count, Targets.Count);
     public string RoleText => Proposal.Agent.ToString();
     public string ToolText => $"{Proposal.Tool} (Version {Proposal.ToolVersion})";
-    public string PurposeText => Proposal.Purpose;
+    public string PurposeText => InertText.Clean(Proposal.Purpose, 2000);
     public string SnapshotText => Proposal.SnapshotId;
     public string SandboxText => Proposal.SandboxId;
     public string HashText => Sha256;
@@ -132,6 +228,10 @@ public sealed class ApprovalCardViewModel : ObservableObject
         {
             "Workspace.Snapshot" => "SideEffectsSnapshot",
             "Patch.Apply" => "SideEffectsPatch",
+            "Web.Fetch" => "SideEffectsWebFetch",
+            "Web.Content" => "SideEffectsWebContent",
+            "Workspace.Diff" => "SideEffectsExportPrepare",
+            "Workspace.ExportPatch" => "SideEffectsExport",
             "Repo.Index" => "SideEffectsIndex",
             _ when IsToolchain => "SideEffectsToolchain",
             _ => "SideEffectsRead",
@@ -156,7 +256,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
                 var section = PatchHeaders.Section(_patch, target.Path);
                 parts.Add(target.IsSelected ? section : $"{target.Path} {UiText.Get("PatchDeselected")}");
             }
-            return string.Join("\n\n", parts);
+            return InertText.Clean(string.Join("\n\n", parts));
         }
     }
 
@@ -218,10 +318,15 @@ public sealed class ApprovalCardViewModel : ObservableObject
     /// <summary>Auswahl weicht vom angezeigten Vorschlag ab: Erlauben ist gesperrt, bis sie übernommen wurde.</summary>
     public bool SelectionChanged => SelectedCount != TotalCount;
 
-    public bool CanApprove => !_busy && !SelectionChanged && !_owner.IsStopped;
+    public bool CanApprove => !_busy && !SelectionChanged && !_owner.IsStopped && (!IsWebContent || WebReady);
     public bool CanApplySelection => !_busy && IsBatch && SelectionChanged && SelectedCount > 0 && !_owner.IsStopped;
 
-    public string ApproveText => UiText.Get(IsBatch ? "ApproveSelectionOnce" : "ApproveOnce");
+    public string ApproveText => Proposal.Tool switch
+    {
+        "Web.Content" => UiText.Format("ApproveWebContent", UiText.AgentName(Proposal.Agent.ToString())),
+        "Workspace.ExportPatch" => UiText.Get(IsBatch ? "ApproveExportSelection" : "ApproveExport"),
+        _ => UiText.Get(IsBatch ? "ApproveSelectionOnce" : "ApproveOnce"),
+    };
 
     public string FilterText
     {
@@ -906,7 +1011,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void Post(Action action) => _post(action);
+    internal void Post(Action action) => _post(action);
+
+    internal IBrokerUiApi Api => _api;
 
     public async ValueTask DisposeAsync()
     {

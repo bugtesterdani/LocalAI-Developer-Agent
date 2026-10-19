@@ -71,6 +71,9 @@ public sealed record HostOptions
     public LocalAi.Sandbox.HyperVSettings? HyperV { get; init; }
     public string? ToolchainsDirectory { get; init; }
 
+    /// <summary>Web.Fetch (M6); null = ausgeschaltet (ohne Konfiguration: eingeschaltet mit Standardwerten).</summary>
+    public WebSettings? Web { get; init; }
+
     public static HostOptions Parse(string[] args)
     {
         var options = new HostOptions();
@@ -175,6 +178,7 @@ public sealed record HostOptions
                 Orchestrator = new ProcessCommand("uv", ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.orchestrator"], repoRoot),
             };
         }
+        options = options with { Web = ReadWeb(root, repoRoot) };
         if (root.TryGetProperty("toolchains", out var toolchains) && toolchains.TryGetProperty("directory", out var tcDir)
             && tcDir.ValueKind == JsonValueKind.String && tcDir.GetString()!.Length > 0)
         {
@@ -231,6 +235,29 @@ public sealed record HostOptions
             SnapshotTimeoutMinutes = Math.Clamp(Int("snapshotTimeoutMinutes") ?? defaults.SnapshotTimeoutMinutes, 1, 600),
             ToolchainExtraMinutes = Math.Clamp(Int("toolchainExtraMinutes") ?? defaults.ToolchainExtraMinutes, 1, 600),
             PauseOnNoAnswer = !(e.TryGetProperty("pauseOnNoAnswer", out var pause) && pause.ValueKind == JsonValueKind.False),
+        };
+    }
+
+    private static WebSettings? ReadWeb(JsonElement root, string repoRoot)
+    {
+        var command = new ProcessCommand("uv", ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.web"], repoRoot);
+        if (!root.TryGetProperty("web", out var web) || web.ValueKind != JsonValueKind.Object)
+        {
+            return new WebSettings { Command = command };
+        }
+        if (web.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.False)
+        {
+            return null;
+        }
+        int? Int(string name) => web.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
+        var defaults = new WebSettings { Command = command };
+        return new WebSettings
+        {
+            Command = web.TryGetProperty("command", out var c) && c.ValueKind == JsonValueKind.Object ? ReadCommand(c, repoRoot) : command,
+            MaxBytes = Math.Clamp(Int("maxBytes") ?? (int)defaults.MaxBytes, 1024, 16 * 1024 * 1024),
+            TimeoutSeconds = Math.Clamp(Int("timeoutSeconds") ?? defaults.TimeoutSeconds, 1, 120),
+            MaxChars = Math.Clamp(Int("maxChars") ?? defaults.MaxChars, 1000, 200_000),
+            LowIntegrity = !(web.TryGetProperty("lowIntegrity", out var low) && low.ValueKind == JsonValueKind.False),
         };
     }
 

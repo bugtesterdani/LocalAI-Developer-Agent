@@ -71,6 +71,25 @@ public sealed class SnapshotRegistry
 
     public string? ParentOf(string snapshotId) => _parents.TryGetValue(snapshotId, out var p) ? p : null;
 
+    /// <summary>Folgt der Kette abgeleiteter Snapshots bis zur Basis (höchstens 10.000 Schritte).</summary>
+    public bool IsDerivedFrom(string snapshotId, string baseId, string grantId)
+    {
+        if (!Contains(snapshotId, grantId) || !Contains(baseId, grantId))
+        {
+            return false;
+        }
+        var current = snapshotId;
+        for (var i = 0; i < 10_000 && current is not null; i++)
+        {
+            current = ParentOf(current);
+            if (current == baseId)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public bool Contains(string snapshotId, string grantId) =>
         _snapshots.TryGetValue(snapshotId, out var g) && g == grantId;
 }
@@ -85,6 +104,12 @@ public sealed class ProjectPolicyContext(ProjectConfig project, SnapshotRegistry
     public FolderGrant? FindGrant(string grantId) => project.Grants.FirstOrDefault(g => g.GrantId == grantId);
 
     public bool HasSnapshot(string snapshotId, string grantId) => snapshots.Contains(snapshotId, grantId);
+
+    public IWebCaptures? WebCaptures { get; init; }
+
+    public IExportStaging? Exports { get; init; }
+
+    public bool IsDerivedFrom(string snapshotId, string baseId, string grantId) => snapshots.IsDerivedFrom(snapshotId, baseId, grantId);
 }
 
 public static class ProjectLoader
@@ -218,7 +243,7 @@ public static class ResultValidator
         }
         var allowed = job.Proposal.Targets.Select(t => t.TargetId).ToHashSet(StringComparer.Ordinal);
         // Feste Ergebnisziele: Snapshot-ID (Import/Patch), Log und Testbericht (Toolchain.*), Repo-Map (Repo.Index).
-        allowed.UnionWith(["*", "snapshot", "log", "tests", "map"]);
+        allowed.UnionWith(["*", "snapshot", "log", "tests", "map", "changes"]);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         long chars = 0;
         foreach (var target in result.TargetResults)

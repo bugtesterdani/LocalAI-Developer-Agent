@@ -1,9 +1,9 @@
 ﻿#Requires -Version 5.1
 # Wiederverwendung der Sandbox-VM (Option reuseVm): startet bzw. setzt eine vorhandene VM fort oder speichert
-# ihren Zustand beim Beenden. Startet nie eine VM mit Netzwerkkarte. Ausgabe: JSON {state, nics}.
+# ihren Zustand beim Beenden; TurnOff schaltet sie beim Not-Aus sofort aus. Startet nie eine VM mit Netzwerkkarte. Ausgabe: JSON {state, nics}.
 param(
     [Parameter(Mandatory)][string]$VmName,
-    [Parameter(Mandatory)][ValidateSet('Start', 'Save')][string]$Action
+    [Parameter(Mandatory)][ValidateSet('Start', 'Save', 'TurnOff')][string]$Action
 )
 
 $ErrorActionPreference = 'Stop'

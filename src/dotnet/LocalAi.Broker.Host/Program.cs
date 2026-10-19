@@ -31,6 +31,7 @@ CountingTestAdapter? testAdapter;
 IToolAdapter adapter;
 IPolicyContext policy;
 HyperVSandbox? vm;
+SandboxParts parts;
 ToolchainRegistry? toolchains = null;
 try
 {
@@ -40,7 +41,8 @@ try
         toolchains = new ToolchainRegistry(Path.Combine(options.DataDirectory, "toolchains.json"), options.ToolchainsDirectory,
             project.Toolchains ?? [], clock);
     }
-    (adapter, policy, testAdapter, vm) = CreateSandbox(options, children, Guid.NewGuid().ToString("D"), project, toolchains);
+    parts = CreateSandbox(options, children, Guid.NewGuid().ToString("D"), project, toolchains);
+    (adapter, policy, testAdapter, vm) = (parts.Adapter, parts.Policy, parts.Test, parts.Vm);
 }
 catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or ChildProcessException or NotSupportedException)
 {
@@ -88,6 +90,22 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
     ContinueSandbox = vm is null ? null : vm.ContinueAsync,
     Toolchains = toolchains,
     ToolchainCatalog = policy.Toolchains,
+    WebCaptures = parts.Captures,
+    // Not-Aus (SEC-15): neben Dispatch-Sperre und Orchestrator auch Webabrufe und laufende Ausführung beenden.
+    StopExecution = async () =>
+    {
+        var notes = new List<string>();
+        if (parts.Web?.KillAll() is > 0 and var killed)
+        {
+            notes.Add($"{killed} Webabruf(e) beendet");
+        }
+        if (parts.StopExecution is not null)
+        {
+            notes.Add(await parts.StopExecution().ConfigureAwait(false));
+        }
+        return string.Join("; ", notes);
+    },
+    AfterRelease = parts.AfterRelease,
 };
 if (vm is not null)
 {
@@ -157,7 +175,18 @@ finally
 }
 return 0;
 
-static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, HyperVSandbox? Vm) CreateSandbox(
+static (WebToolAdapter? Web, WebCaptureStore? Store) CreateWeb(HostOptions options)
+{
+    if (options.Web is null)
+    {
+        return (null, null);
+    }
+    var store = new WebCaptureStore(Path.Combine(options.DataDirectory, "web"), options.Web, SystemClock.Instance);
+    store.Cleanup();
+    return (new WebToolAdapter(store, options.Web, Path.Combine(options.DataDirectory, "web.log")), store);
+}
+
+static SandboxParts CreateSandbox(
     HostOptions options, ChildProcesses children, string sessionId, ProjectConfig? loadedProject, ToolchainRegistry? toolchains)
 {
     switch (options.Mode)
@@ -165,18 +194,21 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
         case SandboxMode.Test:
         {
             var test = new CountingTestAdapter { Delay = options.TestAdapterDelay };
-            return (test, new TestPolicyContext(), test, null);
+            return new SandboxParts(test, new TestPolicyContext(), test, null);
         }
         case SandboxMode.None:
         {
             var project = loadedProject!;
-            return (new NoSandboxAdapter(), new ProjectPolicyContext(project, new SnapshotRegistry()), null, null);
+            return new SandboxParts(new NoSandboxAdapter(), new ProjectPolicyContext(project, new SnapshotRegistry()), null, null);
         }
         case SandboxMode.DevLocalUnsafe:
         {
             var project = loadedProject!;
             var registry = new SnapshotRegistry();
-            var context = new ProjectPolicyContext(project, registry);
+            var (web, store) = CreateWeb(options);
+            var export = new ExportStaging(Path.Combine(options.DataDirectory, "export"), new ProjectPolicyContext(project, registry), SystemClock.Instance);
+            export.Cleanup();
+            var context = new ProjectPolicyContext(project, registry) { WebCaptures = store, Exports = export };
             var session = new SandboxSession(sessionId);
             var dir = Path.Combine(options.DataDirectory, "sandbox-dev");
             // Wie der spätere VM-Neuaufbau: jede Sitzung beginnt mit leerem Arbeitsbereich.
@@ -188,17 +220,37 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
             var keyFile = Path.Combine(dir, "session.key");
             File.WriteAllText(keyFile, Convert.ToHexStringLower(session.Key));
             var worker = options.DevWorker ?? throw new InvalidDataException("sandbox.devWorker fehlt in config/localai.json");
-            children.Start(worker,
-                ["--inbox", transport.Inbox, "--outbox", transport.Outbox, "--work", Path.Combine(dir, "work"), "--key-file", keyFile],
-                new Dictionary<string, string>(), Path.Combine(options.DataDirectory, "worker.log"));
+            string[] workerArgs = ["--inbox", transport.Inbox, "--outbox", transport.Outbox, "--work", Path.Combine(dir, "work"), "--key-file", keyFile];
+            var workerLog = Path.Combine(options.DataDirectory, "worker.log");
+            var process = children.Start(worker, workerArgs, new Dictionary<string, string>(), workerLog);
             var adapter = new SandboxToolAdapter(session, transport, context, registry, Path.Combine(dir, "scratch"), SystemClock.Instance);
-            return (adapter, context, null, null);
+            return new SandboxParts(new RoutingToolAdapter(adapter, web, export), context, null, null, web, store,
+                StopExecution: () =>
+                {
+                    // Entwicklungsmodus: Worker samt laufendem Toolprozess beenden; nach „Aufheben“ neu starten.
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        return Task.FromResult("Entwicklungs-Worker beendet");
+                    }
+                    return Task.FromResult("");
+                },
+                AfterRelease: () =>
+                {
+                    if (process.HasExited)
+                    {
+                        process = children.Start(worker, workerArgs, new Dictionary<string, string>(), workerLog);
+                    }
+                });
         }
         case SandboxMode.HyperV:
         {
             var project = loadedProject!;
             var registry = new SnapshotRegistry();
             ProjectPolicyContext context;
+            var (web, store) = CreateWeb(options);
+            var export = new ExportStaging(Path.Combine(options.DataDirectory, "export"), new ProjectPolicyContext(project, registry), SystemClock.Instance);
+            export.Cleanup();
             var settings = options.HyperV ?? throw new InvalidDataException("sandbox.hyperv fehlt in config/localai.json");
             // Große Toolchains (C++-Build-Tools, HALCON) brauchen länger: Aufbauzeit mindestens Windows + 3× erwartete Installationszeit.
             var needed = ToolchainBuildTime.Minimum(toolchains!.Registrations, project.Toolchains ?? []);
@@ -206,7 +258,7 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
             {
                 settings = settings with { BuildTimeout = needed };
             }
-            context = new ProjectPolicyContext(project, registry, new RegisteredToolchainCatalog(toolchains!));
+            context = new ProjectPolicyContext(project, registry, new RegisteredToolchainCatalog(toolchains!)) { WebCaptures = store, Exports = export };
             // reuseVm: Sitzung der zuletzt sauber beendeten VM übernehmen (Schlüssel, Sequenz); sonst neue Sitzung.
             var session = HyperVSandbox.LoadReusableSession(settings) ?? new SandboxSession(sessionId);
             var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
@@ -229,7 +281,8 @@ static (IToolAdapter Adapter, IPolicyContext Policy, CountingTestAdapter? Test, 
                 SnapshotTimeout = TimeSpan.FromMinutes(settings.SnapshotTimeoutMinutes),
                 ExecutionMargin = TimeSpan.FromMinutes(settings.ToolchainExtraMinutes),
             };
-            return (adapter, context, null, vm);
+            return new SandboxParts(new RoutingToolAdapter(adapter, web, export), context, null, vm, web, store,
+                StopExecution: vm.EmergencyStopAsync);
         }
         default:
             throw new NotSupportedException($"Betriebsart {options.Mode} wird nicht unterstützt");
@@ -240,3 +293,14 @@ static ProjectConfig LoadProject(HostOptions options) =>
     options.ProjectPath is null
         ? new ProjectConfig(ContractJson.SchemaVersion, "kein-projekt", "Kein Projekt", [])
         : ProjectLoader.Load(options.ProjectPath, options.RepoRoot);
+
+/// <summary>Bausteine der Betriebsart: Adapter, Policy, optional VM und Webabruf, Not-Aus-Haken.</summary>
+internal sealed record SandboxParts(
+    IToolAdapter Adapter,
+    IPolicyContext Policy,
+    CountingTestAdapter? Test,
+    HyperVSandbox? Vm,
+    WebToolAdapter? Web = null,
+    WebCaptureStore? Captures = null,
+    Func<Task<string>>? StopExecution = null,
+    Action? AfterRelease = null);

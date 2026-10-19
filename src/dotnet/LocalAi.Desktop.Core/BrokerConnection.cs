@@ -220,6 +220,9 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
 
     public Task ContinueSandboxAsync(CancellationToken ct) => CallAsync(M.SandboxContinue, null, ct);
 
+    public async Task<WebCapture?> WebCaptureAsync(string captureId, CancellationToken ct) =>
+        ContractJson.Deserialize<WebCapture>(await CallAsync(M.WebCapture, new { captureId }, ct).ConfigureAwait(false));
+
     public async ValueTask DisposeAsync()
     {
         await _stream.DisposeAsync().ConfigureAwait(false);

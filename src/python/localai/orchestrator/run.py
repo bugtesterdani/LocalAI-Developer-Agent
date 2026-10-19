@@ -1,13 +1,18 @@
-"""Ablauf eines Runs (M4):
+"""Ablauf eines Runs (M4–M6):
 
 Snapshot → Repo-Map → Planner (DAG, Prüfläufe) → Coder/Tester parallel, Patches nach Freigabe in der Sandbox
 angewendet → Build/Test in der Sandbox → Debugger auf echten Fehlern (höchstens N Reparaturen, jeweils erneut
-geprüft) → Reviewer mit echtem Testbericht ↔ Debugger → Zusammenfassung.
+geprüft) → Reviewer mit echtem Testbericht ↔ Debugger → Zusammenfassung → Übernahme in den Projektordner (M6:
+Workspace.Diff, dann Workspace.ExportPatch – zwei Freigaben, Diff je Datei abwählbar).
 
 Alle fünf Rollen sind ab Runstart sichtbar (AC02). Mehrere Aufgaben laufen gleichzeitig, sofern Rollen und
 Schreibmengen es erlauben; GPU-Requests werden über einen fairen Slot vergeben, Toolvorschläge warten
 unabhängig davon auf die Nutzerentscheidung. Patches werden nacheinander angewendet (jeder auf den Stand des
-vorigen). Chatantworten an den Nutzer sind deutsch. Der Projektordner auf dem Host wird nie verändert.
+vorigen). Chatantworten an den Nutzer sind deutsch. Der Projektordner auf dem Host ändert sich nur durch die
+freigegebene Übernahme.
+
+Chatbefehle ohne laufenden Run: „übernehmen“ (Übernahme erneut anbieten) und „fortsetzen“ (unterbrochenen Run aus dem
+Runjournal mit neuen Freigaben fortsetzen).
 """
 
 from __future__ import annotations
@@ -22,15 +27,36 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any
 
-from localai.contracts import ActivityKind, AgentState, FolderRight, OrchestratorCommand, OrchestratorCommandKind
+from localai.contracts import (
+    ActivityKind,
+    AgentState,
+    FolderRight,
+    OrchestratorCommand,
+    OrchestratorCommandKind,
+)
 from localai.orchestrator import dag, hardware
 from localai.orchestrator.activity import ActivityReporter
 from localai.orchestrator.agents import Agent, AgentFailed, Assignment
 from localai.orchestrator.context import Evidence
 from localai.orchestrator.gateway import Cancelled, GatewayError, OllamaGateway
-from localai.orchestrator.models import ROLES, CalibrationStore, ConfigError, ModelsConfig, ProfileChoice, choose_profiles
+from localai.orchestrator.journal import RunJournal
+from localai.orchestrator.models import (
+    ROLES,
+    CalibrationStore,
+    ConfigError,
+    ModelsConfig,
+    ProfileChoice,
+    choose_profiles,
+)
 from localai.orchestrator.protocol import Action
-from localai.orchestrator.runtime import PRIORITY_REVIEW, PRIORITY_USER, AgentControls, FairGate, LimitReached, RunClock
+from localai.orchestrator.runtime import (
+    PRIORITY_REVIEW,
+    PRIORITY_USER,
+    AgentControls,
+    FairGate,
+    LimitReached,
+    RunClock,
+)
 from localai.orchestrator.tools import PatchOutcome, ToolBridge, ToolchainOutcome
 
 SEVERITY_DE = {"high": "hoch", "medium": "mittel", "low": "niedrig"}
@@ -40,6 +66,20 @@ MAX_CHAT = 15_000
 NOT_EXECUTED = re.compile(r"not\s+executed|nicht\s+ausgef(ü|ue)hrt|not\s+been\s+(run|executed)", re.I)
 _MAP_PROJECTS = re.compile(r"^Project/build files: (.*?)(?: \(\+\d+ more\))?$", re.M)
 _MAP_HEADER = re.compile(r"^Repo map of snapshot \S+ – \d+ files, (.*)$", re.M)
+EXPORT_COMMANDS = {"übernehmen", "uebernehmen", "übernahme"}
+RESUME_COMMANDS = {"fortsetzen", "weiter machen", "weitermachen"}
+NEW_COMMANDS = {"neu", "neu starten", "neu beginnen"}
+
+
+def chat_command(text: str) -> str | None:
+    word = text.strip().strip("/!.").strip().lower()
+    if word in EXPORT_COMMANDS:
+        return "export"
+    if word in RESUME_COMMANDS:
+        return "resume"
+    if word in NEW_COMMANDS:
+        return "new"
+    return None
 
 
 @dataclass
@@ -250,6 +290,10 @@ class Orchestrator:
         self.verify_steps: list[VerifyStep] = []
         self.applied: list[AppliedPatch] = []
         self._applied_lock = threading.Lock()
+        self.journal = RunJournal(data_dir)
+        self._plan_raw: list[dict[str, Any]] = []
+        self._first_goal = True
+        self._held_goal: str | None = None  # erstes Ziel, solange ein unterbrochener Run auf „fortsetzen“/„neu“ wartet
 
     # ------------------------------------------------------------------ Aufträge der Oberfläche
     def handle(self, command: OrchestratorCommand) -> None:
@@ -326,16 +370,38 @@ class Orchestrator:
         self.goals.put(None)
 
     def run_goal(self, goal: str) -> None:
+        command = chat_command(goal)
+        first, self._first_goal = self._first_goal, False
+        if command is None and first and RunJournal.resumable(self.journal.load()):
+            # Unterbrochener Run: nicht stillschweigend ersetzen – erst fragen.
+            self._held_goal = goal
+            self._resume_hint()
+            return
+        if command == "new":
+            if self._held_goal is None:
+                self.reporter.chat("Orchestrator", "Schreib mir einfach dein Ziel.")
+                return
+            goal, command = self._held_goal, None
+        if command != "export":
+            self._held_goal = None
         state = GoalState(goal, AgentControls(ROLES), RunClock(self.config.limits.max_active_minutes * 60))
         with self._lock:
             self.current = state
         try:
-            self._run(state)
+            if command == "export":
+                self._export_command(state)
+            elif command == "resume":
+                self._resume(state)
+            else:
+                self._run(state)
         except Cancelled as err:
-            self.reporter.chat("Orchestrator", f"Run abgebrochen: {err.reason}")
+            self._journal_status("cancelled")
+            self.reporter.chat("Orchestrator", f"Run abgebrochen: {err.reason}" + self._resume_suffix())
         except Exception as err:  # noqa: BLE001 – Fehler melden, Orchestrator bleibt bedienbar
+            self._journal_status("failed")
             self.reporter.event("Orchestrator", ActivityKind.Error, traceback.format_exc()[-4000:])
-            self.reporter.chat("Orchestrator", f"Interner Fehler im Orchestrator: {err}. Details im Aktivitätsfeed.")
+            self.reporter.chat("Orchestrator", f"Interner Fehler im Orchestrator: {err}. Details im Aktivitätsfeed."
+                               + self._resume_suffix())
         finally:
             with self._lock:
                 self.current = None
@@ -352,6 +418,23 @@ class Orchestrator:
         return agents
 
     def _run(self, state: GoalState) -> None:
+        agents = self._prepare_run(state)
+        if agents is None:
+            return
+        self.applied = []
+        bridge = self.bridge
+        assert bridge is not None
+        if not self.listing or self.listing_snapshot != bridge.snapshot_id:
+            self._start_evidence(state, bridge, agents["Planner"])
+        self._announce_capabilities(bridge)
+        plan_tasks, acceptance = self._plan(state, agents["Planner"])
+        if plan_tasks is None:
+            return
+        self._save_journal(state, plan_tasks, acceptance, "running")
+        self._execute(state, agents, plan_tasks, acceptance)
+
+    def _prepare_run(self, state: GoalState, fresh_snapshot: bool = False) -> dict[str, Agent] | None:
+        """Modelle, Agenten, Grant und Snapshot; None, wenn der Run nicht starten kann (Grund steht im Chat)."""
         reporter = self.reporter
         reporter.state("Orchestrator", AgentState.Generating, "Run startet: Modelle und Hardware prüfen")
         prep = self.prepare()
@@ -362,7 +445,7 @@ class Orchestrator:
                           + "\n\nKalibrierung: `uv run --project src/python python -m localai.orchestrator.calibrate` "
                           "(Anleitung: docs/pruefung-M3.md).")
             reporter.state("Orchestrator", AgentState.Failed, "Modelle nicht bereit")
-            return
+            return None
         if self.bridge is None:
             self.bridge = ToolBridge(self.client, reporter, self.run_id, state.clock, self.config.limits.max_sandbox_jobs)
         bridge = self.bridge
@@ -373,8 +456,10 @@ class Orchestrator:
         if bridge.grant is None and bridge.find_grant() is None:
             reporter.chat("Orchestrator", "Kein freigegebener Projektordner mit List- und Read-Recht. Bitte in "
                           "config/demo-project.json (bzw. deiner Projektdatei) einen Ordner freigeben.")
-            return
+            return None
         planner_cancel = state.controls.token("Planner")
+        if fresh_snapshot:
+            bridge.snapshot_id = bridge.base_snapshot_id = None
         if bridge.snapshot_id is None:
             reporter.state("Planner", AgentState.WaitingApproval, "Projektstand übernehmen (Snapshot)", "T0")
             try:
@@ -385,15 +470,8 @@ class Orchestrator:
             if snapshot is None:
                 reporter.chat("Orchestrator", "Ohne Snapshot kann ich nicht arbeiten. Schreib mir erneut, wenn du den "
                               "Snapshot freigeben möchtest.")
-                return
-        self.applied = []
-        if not self.listing or self.listing_snapshot != bridge.snapshot_id:
-            self._start_evidence(state, bridge, agents["Planner"])
-        self._announce_capabilities(bridge)
-        plan_tasks, acceptance = self._plan(state, agents["Planner"])
-        if plan_tasks is None:
-            return
-        self._execute(state, agents, plan_tasks, acceptance)
+                return None
+        return agents
 
     def _start_evidence(self, state: GoalState, bridge: ToolBridge, planner: Agent) -> None:
         """Repo-Map als angeheftete Startevidenz; ohne Index (abgelehnt/fehlgeschlagen) die Dateiliste."""
@@ -459,6 +537,7 @@ class Orchestrator:
                 self.reporter.chat("Planner", f"Kein Plan: {err}")
                 return None, []
             added_tester = ensure_tester_task(state.goal, result.result["tasks"], result.result.get("acceptance") or [])
+            self._plan_raw = [dict(t) for t in result.result["tasks"] if isinstance(t, dict)]
             try:
                 tasks = dag.build_plan(result.result["tasks"], self.bridge.snapshot_id or "", self.config.limits.max_tasks)
             except dag.PlanError as err:
@@ -642,6 +721,8 @@ class Orchestrator:
                     f.result()
                     locks.release(t)
                     busy.pop(t.role, None)
+                    self._save_journal(state, tasks, acceptance, "running")
+        self._save_journal(state, tasks, acceptance, "reviewing")
         self._review(state, agents, tasks, acceptance)
 
     # ------------------------------------------------------------------ Build/Test in der Sandbox
@@ -849,12 +930,185 @@ class Orchestrator:
             files = sorted({f for a in applied for f in a.files})
             lines.append(f"- {len(applied)} Patch(es) angewendet ({len(files)} Datei(en): {', '.join(files[:12])}"
                          f"{' …' if len(files) > 12 else ''}) → Stand {(bridge.snapshot_id or '?')[:12]} in der Sandbox")
-            lines.append("Dein Projektordner ist unverändert. Die Übernahme der Änderungen (Workspace.ExportPatch) folgt mit M6.")
+            lines.append("Dein Projektordner ist noch unverändert. Gleich folgt die Übernahme in zwei Freigaben: erst die "
+                         "Vorbereitung (nur lesen), dann der Diff je Datei – Dateien kannst du abwählen.")
         else:
             lines.append("Es wurde keine Änderung angewendet; dein Projektordner ist unverändert.")
         self.reporter.chat("Orchestrator", "\n".join(lines))
         self.previous_summary = "\n".join(lines)[:3000]
+        self.journal.update(status="done")
+        if applied and bridge is not None:
+            text = self._export(state)
+            self.previous_summary = (self.previous_summary + "\nÜbernahme: " + text)[:3000]
         self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")
+
+    # ------------------------------------------------------------------ Übernahme in den Projektordner (M6)
+    def _export(self, state: GoalState) -> str:
+        """Workspace.Diff (Vorbereitung) → Workspace.ExportPatch (Diff je Datei). Ergebnis als Chat und Rückgabetext."""
+        bridge = self.bridge
+        assert bridge is not None
+        text = self._export_inner(state, bridge)
+        self.reporter.chat("Orchestrator", text[:MAX_CHAT])
+        return text
+
+    def _export_inner(self, state: GoalState, bridge: ToolBridge) -> str:
+        rights = bridge.rights()
+        if FolderRight.Modify not in rights and FolderRight.Create not in rights:
+            return ("Übernahme nicht möglich: der Projektfreigabe fehlen die Rechte Modify/Create. Die Änderungen bleiben in "
+                    "der Sandbox; die Patches stehen oben im Chat.")
+        if bridge.snapshot_id is None or bridge.snapshot_id == bridge.base_snapshot_id:
+            return "Keine Änderungen in der Sandbox, die übernommen werden könnten."
+        cancel = state.controls.token("Reviewer")
+        self.reporter.state("Reviewer", AgentState.WaitingApproval, "Übernahme vorbereiten", "X1")
+        try:
+            preview, why = bridge.prepare_export("Reviewer", "X1", "Geänderte Dateien aus der Sandbox zur Übernahme vorbereiten "
+                                                 "(nur lesen; der Diff gegen deinen Projektordner folgt als eigene Freigabe)",
+                                                 cancel)
+            if preview is None:
+                return f"Übernahme nicht vorbereitet ({why}). Mit „übernehmen“ kannst du sie erneut anstoßen."
+            if not preview.files:
+                bridge.base_snapshot_id = bridge.snapshot_id
+                self.journal.update(exported=True)
+                return "Keine Unterschiede zu deinem Projektordner – nichts zu übernehmen."
+            purpose = (f"{len(preview.files)} Datei(en) in deinen Projektordner übernehmen – Ziel: {state.goal[:200]}")
+            outcome = bridge.export("Reviewer", "X2", preview, purpose, cancel)
+        except Cancelled:
+            state.controls.run.raise_if_cancelled()
+            return "Übernahme abgebrochen. Mit „übernehmen“ kannst du sie erneut anstoßen."
+        finally:
+            self.reporter.state("Reviewer", AgentState.Ready, "bereit")
+        if not outcome.applied:
+            return (f"Übernahme nicht durchgeführt ({outcome.note_de or outcome.state}); dein Projektordner ist unverändert. "
+                    "Mit „übernehmen“ kannst du sie erneut anstoßen.")
+        # Neue Basis: weitere Übernahmen zeigen nur noch spätere Änderungen (abgewählte Dateien bleiben in der Sandbox).
+        bridge.base_snapshot_id = bridge.snapshot_id
+        self.journal.update(exported=True)
+        written = [f for f in outcome.files if f not in outcome.deselected]
+        text = f"Übernommen: {len(written)} Datei(en) – {', '.join(written[:12])}{' …' if len(written) > 12 else ''}."
+        if outcome.deselected:
+            text += f" Abgewählt (nicht übernommen, bleiben nur in der Sandbox): {', '.join(outcome.deselected)}."
+        if outcome.note_de:
+            text += f"\n{outcome.note_de}"
+        return text
+
+    def _export_command(self, state: GoalState) -> None:
+        bridge = self.bridge
+        if bridge is None or bridge.grant is None or bridge.snapshot_id is None:
+            data = self.journal.load()
+            hint = (" Mit „fortsetzen“ stelle ich den Stand des letzten Runs in der Sandbox wieder her."
+                    if RunJournal.resumable(data) else "")
+            self.reporter.chat("Orchestrator", "In dieser Sitzung gibt es keine Änderungen in der Sandbox." + hint)
+            return
+        self._export(state)
+        self.reporter.state("Orchestrator", AgentState.Done, "wartet auf deine nächste Nachricht")
+
+    # ------------------------------------------------------------------ Runjournal und Fortsetzen (M6)
+    def _save_journal(self, state: GoalState, tasks: list[dag.Task], acceptance: list[str], status: str) -> None:
+        with self._applied_lock:
+            applied = [{"label": a.label, "patch": a.patch, "files": a.files} for a in self.applied]
+        self.journal.save({
+            "runId": self.run_id, "goal": state.goal, "status": status, "exported": False,
+            "plan": self._plan_raw, "acceptance": acceptance,
+            "verify": [{"toolchain": v.toolchain, "action": v.action, "parameters": v.parameters} for v in self.verify_steps],
+            "tasks": {t.task_id: {"state": t.state.value, "result": t.result if t.state == dag.TaskState.DONE else None,
+                                  "error": t.error, "steps": t.steps} for t in tasks},
+            "applied": applied,
+        })
+
+    def _journal_status(self, status: str) -> None:
+        data = self.journal.load()
+        if data is not None and data.get("status") not in ("done", None):
+            self.journal.update(status=status)
+
+    def _resume_suffix(self) -> str:
+        data = self.journal.load()
+        if data is not None and data.get("status") != "done":
+            return " Mit „fortsetzen“ kannst du den Run später fortsetzen (mit neuen Freigaben)."
+        return ""
+
+    def _resume_hint(self) -> None:
+        data = self.journal.load()
+        if not RunJournal.resumable(data):
+            return
+        assert data is not None
+        tasks = data.get("tasks") or {}
+        done = sum(1 for t in tasks.values() if isinstance(t, dict) and t.get("state") == dag.TaskState.DONE.value)
+        patches = len(data.get("applied") or [])
+        if data.get("status") == "done":
+            text = (f"Der letzte Run („{data['goal'][:120]}“) ist fertig, seine Änderungen ({patches} Patch(es)) wurden aber "
+                    "nicht in deinen Projektordner übernommen.")
+        else:
+            text = (f"Ein früherer Run wurde nicht abgeschlossen („{data['goal'][:120]}“, {done}/{len(tasks)} Aufgaben "
+                    f"erledigt, {patches} Patch(es) angewendet).")
+        if self._held_goal is not None:
+            text += f" Dein neues Ziel („{self._held_goal[:120]}“) habe ich noch nicht begonnen."
+        self.reporter.chat("Orchestrator", text + " Schreib „fortsetzen“, um ihn fortzusetzen (Snapshot und Patches werden dir "
+                           "erneut zur Freigabe vorgelegt – frühere Freigaben gelten nicht mehr), oder „neu“, um ihn zu "
+                           "verwerfen und mit deinem Ziel zu beginnen.")
+
+    def _resume(self, state: GoalState) -> None:
+        data = self.journal.load()
+        if not RunJournal.resumable(data):
+            self.reporter.chat("Orchestrator", "Es gibt keinen unterbrochenen Run zum Fortsetzen. Schreib mir einfach ein neues Ziel.")
+            return
+        assert data is not None
+        state.goal = data["goal"]
+        self.reporter.chat("Orchestrator", f"Ich setze den Run „{state.goal[:200]}“ fort. Zuerst ein neuer Snapshot deines "
+                           "Projektordners, dann lege ich die bereits angewendeten Patches erneut zur Freigabe vor.")
+        agents = self._prepare_run(state, fresh_snapshot=True)
+        if agents is None:
+            return
+        bridge = self.bridge
+        assert bridge is not None
+        self.applied = []
+        records = [a for a in data.get("applied") or [] if isinstance(a, dict) and a.get("patch")]
+        for n, record in enumerate(records, start=1):
+            label = f"Wiederherstellen {n}/{len(records)}: {record.get('label', '')}"[:200]
+            outcome = bridge.apply_patch("Coder", f"W{n}", str(record["patch"]).rstrip("\n") + "\n", label,
+                                         state.controls.token("Coder"))
+            if not outcome.applied:
+                self.reporter.chat("Orchestrator", f"{label}: nicht angewendet ({outcome.note_de or outcome.state}). Ich breche "
+                                   "das Fortsetzen hier ab; das Journal bleibt erhalten. Schreib „fortsetzen“ für einen neuen "
+                                   "Versuch oder ein neues Ziel.")
+                return
+            if outcome.deselected:
+                self.reporter.chat("Orchestrator", f"{label}: abgewählt – {', '.join(outcome.deselected)} fehlen im "
+                                   "wiederhergestellten Stand.")
+            with self._applied_lock:
+                self.applied.append(AppliedPatch(str(record.get("label", "")), str(record["patch"]),
+                                                 [f for f in outcome.files]))
+        self.listing = []
+        self._start_evidence(state, bridge, agents["Planner"])
+        if data.get("status") == "done":
+            self.journal.update(applied=[{"label": a.label, "patch": a.patch, "files": a.files} for a in self.applied])
+            self.previous_summary = f"Resumed run: {state.goal[:500]}"
+            self._export(state)
+            self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")
+            return
+        self._plan_raw = [t for t in data.get("plan") or [] if isinstance(t, dict)]
+        try:
+            tasks = dag.build_plan(self._plan_raw, bridge.snapshot_id or "", max(len(self._plan_raw), 1))
+        except (dag.PlanError, KeyError, TypeError, ValueError) as err:
+            self.reporter.chat("Orchestrator", f"Der gespeicherte Plan ist nicht lesbar ({err}). Bitte das Ziel neu senden.")
+            return
+        saved = data.get("tasks") or {}
+        for t in tasks:
+            entry = saved.get(t.task_id) if isinstance(saved, dict) else None
+            if isinstance(entry, dict) and entry.get("state") == dag.TaskState.DONE.value and isinstance(entry.get("result"), dict):
+                t.state, t.result, t.steps = dag.TaskState.DONE, entry["result"], int(entry.get("steps") or 0)
+        acceptance = [str(a) for a in data.get("acceptance") or []]
+        steps, problems = check_verify(data.get("verify") or [], bridge.toolchains())
+        self.verify_steps = steps or default_verify(bridge.toolchains(), self.projects, self.languages)
+        if problems:
+            self.reporter.event("Orchestrator", ActivityKind.Warning, "Prüfläufe aus dem Journal verworfen: " + "; ".join(problems))
+        open_tasks = [t for t in tasks if t.state != dag.TaskState.DONE]
+        self.reporter.chat("Orchestrator", f"Stand wiederhergestellt ({len(self.applied)} Patch(es)). Erledigt: "
+                           f"{', '.join(t.task_id for t in tasks if t.state == dag.TaskState.DONE) or 'keine'}; "
+                           f"jetzt: {', '.join(t.task_id for t in open_tasks) or 'Prüfung und Review'}.")
+        for t in open_tasks:
+            self.reporter.event(t.role, ActivityKind.Task, f"{t.task_id}: {t.title}", task_id=t.task_id, state=AgentState.Queued)
+        self._save_journal(state, tasks, acceptance, "running")
+        self._execute(state, agents, tasks, acceptance)
 
 
 STATE_RUN_DE = {"denied": "abgelehnt", "expired": "abgelaufen", "rejected": "vom Broker abgewiesen", "cancelled": "abgebrochen",

@@ -6,10 +6,17 @@ using LocalAi.Contracts;
 namespace LocalAi.Desktop.Core;
 
 /// <summary>Eine Zeile im Chat. Inhalte sind immer inerter Text (kein Markup, keine Links).</summary>
-public sealed record ChatEntry(string Time, string Sender, string Text, bool IsUser);
+public sealed record ChatEntry(string Time, string Sender, string Text, bool IsUser)
+{
+    /// <summary>Untrusted (Agenten, Webinhalte): inert und begrenzt (SEC-14).</summary>
+    public string Text { get; init; } = InertText.Clean(Text, 50_000);
+}
 
 /// <summary>Eintrag im Aktivitätsfeed eines Agenten (Zustände, Vorschläge, Warnungen, Kennzahlen).</summary>
-public sealed record FeedEntry(string Time, string Kind, string Text);
+public sealed record FeedEntry(string Time, string Kind, string Text)
+{
+    public string Text { get; init; } = InertText.Clean(Text, 20_000);
+}
 
 /// <summary>Live-Zustand eines Agenten (B17). Wird nur auf dem UI-Thread verändert.</summary>
 public sealed class AgentViewModel : ObservableObject
@@ -207,13 +214,13 @@ public sealed class AgentViewModel : ObservableObject
         if (_outputDirty)
         {
             _outputDirty = false;
-            _outputText = _output.ToString();
+            _outputText = InertText.Clean(_output.ToString());
             OnPropertyChanged(nameof(OutputText));
         }
         if (_thinkingDirty)
         {
             _thinkingDirty = false;
-            _thinkingText = _thinking.ToString();
+            _thinkingText = InertText.Clean(_thinking.ToString());
             OnPropertyChanged(nameof(ThinkingText));
             OnPropertyChanged(nameof(HasThinking));
         }

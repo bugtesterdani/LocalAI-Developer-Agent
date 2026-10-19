@@ -5,11 +5,11 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 
 - Spezifikation: [docs/Local-AI-Developer-Agent-Projektspezifikation.md](docs/Local-AI-Developer-Agent-Projektspezifikation.md)
 - Umsetzungsplan: [docs/Umsetzungsplan.md](docs/Umsetzungsplan.md)
-- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M5.md](docs/pruefung-M5.md) (vorher: [M4](docs/pruefung-M4.md), [M3](docs/pruefung-M3.md), [M2c](docs/pruefung-M2c.md), [M2b](docs/pruefung-M2b.md), [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
+- Prüfanleitung aktueller Meilenstein: [docs/pruefung-M6.md](docs/pruefung-M6.md) (vorher: [M5](docs/pruefung-M5.md), [M4](docs/pruefung-M4.md), [M3](docs/pruefung-M3.md), [M2c](docs/pruefung-M2c.md), [M2b](docs/pruefung-M2b.md), [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
 - Auf einem neuen Rechner einrichten: [docs/inbetriebnahme-neuer-rechner.md](docs/inbetriebnahme-neuer-rechner.md)
 - Anforderungen → Tests: [docs/sicherheit/anforderungen-tests.md](docs/sicherheit/anforderungen-tests.md)
 
-## Stand: Meilenstein M5 – alle Zielsprachen
+## Stand: Meilenstein M6 – Web, Übernahme, Not-Aus
 
 | Teil | Sprache | Status |
 |---|---|---|
@@ -25,6 +25,8 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 | Orchestrator, Model Gateway (Ollama), fünf Agenten, Live-Aktivität und Chat | Python / C# | M3, abgenommen |
 | Patch.Apply, Build/Test in der VM (`Toolchain.*`), Repo.Index/Repo-Map, Reparaturschleife | Python / C# | M4 |
 | Weitere Sprachen: C++ (MSVC/Clang, CMake, CTest), PowerShell (Pester, PSScriptAnalyzer), Batch (Harness), HDevelop (HDevEngine, XML-Prüfung nach Patches) | PowerShell / Python / C# | M5, **auf dem PC zu prüfen** |
+| Web: `Web.Fetch` → Quarantäne → Content Gate → `Web.Content` (zwei Freigaben, SSRF-Schutz, getrennte Prozesse niedriger Integrität) | Python / C# | M6, **auf dem PC zu prüfen** |
+| Übernahme in den Projektordner (`Workspace.Diff` → `Workspace.ExportPatch`, Diff je Datei, Sicherung), Not-Aus inkl. Webprozesse und VM, Fortsetzen ohne alte Freigaben | Python / C# | M6, **auf dem PC zu prüfen** |
 
 ### Sandbox-Modi (`config/localai.json` → `sandbox.mode`, oder `--mode`)
 
@@ -57,7 +59,7 @@ src/dotnet/           LocalAi.slnx
   LocalAi.Desktop.Core  ViewModels, Broker-Client, deutsche Texte (UiText.resx)
   LocalAi.Desktop       WPF-Oberfläche
   LocalAi.Tests         xUnit-Tests (Filter z. B. `dotnet test --filter Pruefung=SEC-23`)
-src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge, Sandbox-Worker mit Patch/Toolchain/Repo-Index, Orchestrator), Tests
+src/python/           Paket localai (Pipe-Client, Fake-Agent, Verträge, Sandbox-Worker mit Patch/Toolchain/Repo-Index, Orchestrator, Web-Fetcher und Content Gate), Tests
 tests/integration/    pytest gegen den echten Broker-Prozess
 tools/codegen/        Generatoren für Verträge, Testvektoren, Oberflächentexte
 ```

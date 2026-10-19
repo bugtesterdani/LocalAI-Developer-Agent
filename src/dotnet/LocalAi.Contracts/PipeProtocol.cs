@@ -41,6 +41,9 @@ public static class PipeProtocol
         public const string OrchestratorStop = "orchestrator.stop";
         public const string SandboxRebuild = "sandbox.rebuild";
         public const string SandboxContinue = "sandbox.continue";
+
+        /// <summary>Sanitisierter Text eines Webabrufs für die Inhaltsfreigabe – nur die Oberfläche (SEC-09).</summary>
+        public const string WebCapture = "web.capture";
     }
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)

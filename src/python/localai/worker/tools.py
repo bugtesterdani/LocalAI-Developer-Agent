@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from collections.abc import Callable
@@ -47,6 +48,9 @@ def _int_arg(args: dict[str, Any], name: str, default: int, low: int, high: int)
     return value
 
 
+MAX_DIFF_BYTES = 6 * 1024 * 1024  # Base64 im Ergebnis: < 8 Mio. Zeichen (ResultValidator)
+MAX_DIFF_FILES = 500
+
 Handler = Callable[[SandboxJob, SnapshotIndex], tuple[list[TargetResult], bool]]
 
 
@@ -63,6 +67,7 @@ class ToolRunner:
             "File.Search": self._search,
             "Patch.Apply": self._patch,
             "Repo.Index": self._index,
+            "Workspace.Diff": self._diff,
             **{name: self._toolchain for name in ACTIONS},
         }
 
@@ -267,6 +272,36 @@ class ToolRunner:
                                     content_sha256=derived.snapshot_id,
                                     message=f"abgeleitet von {index.snapshot_id[:12]}: {len(changes)} Datei(en) geändert"))
         return results, False
+
+    # ------------------------------------------------------------------ Workspace.Diff (Übernahme vorbereiten, B10)
+    def _diff(self, job: SandboxJob, index: SnapshotIndex) -> tuple[list[TargetResult], bool]:
+        """Geänderte Dateien zwischen Basis-Snapshot und aktuellem (abgeleitetem) Stand – nur lesend. Der Broker legt sie
+        im Staging ab und berechnet den Diff selbst gegen den Projektordner; geschrieben wird erst mit
+        Workspace.ExportPatch nach eigener Freigabe."""
+        base_id = job.proposal.arguments.get("baseSnapshotId")
+        if not isinstance(base_id, str):
+            raise ToolError("baseSnapshotId fehlt")
+        base = self.store.get(base_id, index.grant_id)
+        changes: list[dict[str, Any]] = []
+        total = 0
+        for rel in sorted(set(base.files) | set(index.files)):
+            before, after = base.files.get(rel), index.files.get(rel)
+            if before == after:
+                continue
+            entry: dict[str, Any] = {"path": rel, "kind": "Delete" if after is None else "Create" if before is None else "Modify"}
+            if after is not None:
+                data = index.resolve(rel).read_bytes()
+                total += len(data)
+                if total > MAX_DIFF_BYTES:
+                    raise ToolError(f"Änderungen zu groß für eine Übernahme (mehr als {MAX_DIFF_BYTES // (1024 * 1024)} MiB)")
+                entry["sha256"] = after[1]
+                entry["content"] = base64.b64encode(data).decode("ascii")
+            changes.append(entry)
+            if len(changes) > MAX_DIFF_FILES:
+                raise ToolError(f"Mehr als {MAX_DIFF_FILES} geänderte Dateien – Übernahme in Teilen nicht vorgesehen")
+        text = json.dumps({"baseSnapshotId": base.snapshot_id, "snapshotId": index.snapshot_id, "files": changes})
+        return [TargetResult(target_id="changes", status=ResultStatus.Succeeded, text=text, content_sha256=_sha(text),
+                             message=f"{len(changes)} geänderte Datei(en)")], False
 
     # ------------------------------------------------------------------ Toolchain.*
     def _toolchain(self, job: SandboxJob, index: SnapshotIndex) -> tuple[list[TargetResult], bool]:

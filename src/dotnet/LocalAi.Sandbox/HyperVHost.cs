@@ -198,9 +198,9 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
 
     public async Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken)
     {
-        if (action is not ("Start" or "Save"))
+        if (action is not ("Start" or "Save" or "TurnOff"))
         {
-            throw new ArgumentException("Start oder Save", nameof(action));
+            throw new ArgumentException("Start, Save oder TurnOff", nameof(action));
         }
         var result = await RunJsonAsync("Set-LocalAiVmState.ps1", ["-VmName", settings.VmName, "-Action", action], cancellationToken).ConfigureAwait(false);
         return new VmInfo(true, result.GetProperty("state").GetString() ?? "", result.GetProperty("nics").GetInt32());

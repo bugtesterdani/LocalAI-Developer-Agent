@@ -468,3 +468,60 @@ class TestReport(Contract):
     failures: list[TestCaseFailure] = Field(alias="failures")
     result_files: list[str] | None = Field(default=None, alias="resultFiles")
     problems: list[str] | None = Field(default=None, alias="problems")
+
+
+class WebWarning(Contract):
+    """Hinweis des Content Gate (keine Sicherheitsgarantie)."""
+
+    kind: str = Field(alias="kind")
+    message: str = Field(alias="message")
+    excerpt: str | None = Field(default=None, alias="excerpt")
+
+
+class WebCapture(Contract):
+    """Ergebnis eines genehmigten Webabrufs nach dem Content Gate (Spezifikation §7). Der Text geht nur an die Oberfläche (Inhaltsfreigabe) und erst nach dieser Freigabe an den Agenten."""
+
+    capture_id: str = Field(alias="captureId")
+    url: str = Field(alias="url")
+    host: str = Field(alias="host")
+    address: str = Field(alias="address")
+    fetched_at: str = Field(alias="fetchedAt")
+    status: StrictInt = Field(alias="status")
+    content_type: str = Field(alias="contentType")
+    raw_bytes: StrictInt = Field(alias="rawBytes")
+    raw_sha256: str = Field(alias="rawSha256")
+    text_sha256: str = Field(alias="textSha256")
+    sanitizer_version: str = Field(alias="sanitizerVersion")
+    chars: StrictInt = Field(alias="chars")
+    truncated: StrictBool = Field(alias="truncated")
+    title: str | None = Field(default=None, alias="title")
+    links: StrictInt = Field(alias="links")
+    warnings: list[WebWarning] = Field(alias="warnings")
+    text: str | None = Field(default=None, alias="text")
+    released_to: list[str] | None = Field(default=None, alias="releasedTo")
+
+
+class ExportFileKind(str, Enum):
+    Create = "Create"
+    Modify = "Modify"
+    Delete = "Delete"
+
+
+class ExportFile(Contract):
+    path: str = Field(alias="path")
+    kind: ExportFileKind = Field(alias="kind")
+    before_sha256: str | None = Field(default=None, alias="beforeSha256")
+    after_sha256: str | None = Field(default=None, alias="afterSha256")
+    bytes: StrictInt = Field(alias="bytes")
+
+
+class ExportPreview(Contract):
+    """Vorbereitete Übernahme (Workspace.Diff): Dateien aus der Sandbox liegen im Staging des Brokers; der Diff ist vom Broker gegen den aktuellen Projektordner berechnet."""
+
+    staging_id: str = Field(alias="stagingId")
+    grant_id: str = Field(alias="grantId")
+    base_snapshot_id: str = Field(alias="baseSnapshotId")
+    snapshot_id: str = Field(alias="snapshotId")
+    files: list[ExportFile] = Field(alias="files")
+    patch: str = Field(alias="patch")
+    unchanged: list[str] | None = Field(default=None, alias="unchanged")

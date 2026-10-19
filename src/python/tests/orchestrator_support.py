@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import threading
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Callable
 
-import json
-
 from localai.contracts import (
     ActivityEvent,
     ActivityReport,
+    ExportFile,
+    ExportFileKind,
+    ExportPreview,
     FolderGrant,
     FolderRight,
     OrchestratorCommand,
@@ -65,6 +68,11 @@ class FakeBroker:
     test_runs: list[tuple[int, int]] = field(default_factory=lambda: [(1, 1)])
     patch_failures: int = 0  # so viele Patch.Apply-Versuche passen „nicht“ (Hunk) – danach angewendet
     snapshots: int = 1
+    # M6: Webseiten je URL (Text nach dem Content Gate; „REDIRECT:<url>“ simuliert eine Weiterleitung)
+    web_pages: dict[str, str] = field(default_factory=dict)
+    changed: list[str] = field(default_factory=list)  # in der Sandbox geänderte Dateien (aus Patch.Apply)
+    export_skip: set[str] = field(default_factory=set)  # bei Workspace.ExportPatch abgewählte Pfade
+    exported: list[str] = field(default_factory=list)  # in den „Projektordner“ übernommene Dateien
     _results: dict = field(default_factory=dict)
 
     # -------------------------------------------------- Orchestrator-Methoden
@@ -124,6 +132,7 @@ class FakeBroker:
                                   ResultStatus.Failed, 1)
                 else:
                     self.snapshots += 1
+                    self.changed.extend(t.path for t in request.targets if t.path not in self.changed)
                     result = done([TargetResult(target_id=t.target_id, status=ResultStatus.Succeeded, message="1 Hunk(s)")
                                    for t in request.targets]
                                   + [TargetResult(target_id="snapshot", status=ResultStatus.Succeeded, text=f"snap-{self.snapshots}")])
@@ -137,6 +146,38 @@ class FakeBroker:
                                TargetResult(target_id="tests", status=ResultStatus.Succeeded,
                                             text=json.dumps(report.to_json_obj()), message=f"python test: Exitcode {exit_code}")],
                               exit_code=exit_code)
+            elif request.tool == "Web.Fetch":
+                url = request.arguments["url"]
+                page = self.web_pages.get(url, "")
+                host = url.split("/")[2]
+                if page.startswith("REDIRECT:"):
+                    info = {"redirect": page[9:], "status": 302, "url": url}
+                else:
+                    info = {"captureId": hashlib.md5(url.encode()).hexdigest(), "url": url, "host": host,
+                            "textSha256": hashlib.sha256(page.encode()).hexdigest(), "chars": len(page),
+                            "warnings": [{"kind": "injection", "message": "Text enthält Anweisungen an KI-Agenten"}]
+                            if "ignore" in page.lower() else []}
+                result = done([TargetResult(target_id="capture", status=ResultStatus.Succeeded, text=json.dumps(info))])
+            elif request.tool == "Web.Content":
+                page = next(t for u, t in self.web_pages.items()
+                            if hashlib.md5(u.encode()).hexdigest() == request.arguments["captureId"])
+                assert hashlib.sha256(page.encode()).hexdigest() == request.arguments["textSha256"]
+                result = done([TargetResult(target_id="text", status=ResultStatus.Succeeded, text=page)])
+            elif request.tool == "Workspace.Diff":
+                files = [ExportFile(path=p, kind=ExportFileKind.Create if p not in self.files else ExportFileKind.Modify,
+                                    after_sha256="0" * 64, bytes=10) for p in self.changed]
+                preview = ExportPreview(staging_id="stage-1", grant_id="p", base_snapshot_id=request.arguments["baseSnapshotId"],
+                                        snapshot_id=request.snapshot_id, files=files,
+                                        patch="".join(f"--- a/{p}\n+++ b/{p}\n@@ -1 +1 @@\n-x\n+y\n" for p in self.changed))
+                result = done([TargetResult(target_id="export", status=ResultStatus.Succeeded, text=json.dumps(preview.to_json_obj()))])
+            elif request.tool == "Workspace.ExportPatch":
+                kept = [t for t in request.targets if t.path not in self.export_skip]
+                self.exported.extend(t.path for t in kept)
+                result = done([TargetResult(target_id=t.target_id, status=ResultStatus.Succeeded, message="geändert") for t in kept]
+                              + [TargetResult(target_id="export", status=ResultStatus.Succeeded,
+                                              text=f"{len(kept)} Datei(en) übernommen; Sicherung: backup")])
+                result = result.model_copy(update={"skipped_target_ids": [t.target_id for t in request.targets
+                                                                          if t.path in self.export_skip] or None})
             else:
                 return None
             self._results[pid] = result
@@ -189,6 +230,10 @@ class FakeBroker:
     def chats(self, agent: str | None = None) -> list[str]:
         with self.lock:
             return [e.text or "" for e in self.events if e.kind.value == "Chat" and (agent is None or e.agent == agent)]
+
+    def summary(self) -> str:
+        """Letzte Zusammenfassung des Orchestrators (danach folgt ggf. noch die Übernahme)."""
+        return next((c for c in reversed(self.chats("Orchestrator")) if c.startswith("Zusammenfassung:")), "")
 
     def of(self, agent: str) -> list[ActivityEvent]:
         with self.lock:

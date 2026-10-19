@@ -44,13 +44,14 @@ class EditBlock:
 
 @dataclass
 class Action:
-    kind: str  # list | read | search | symbols | finish
+    kind: str  # list | read | search | symbols | fetch | finish
     reasoning: str
     path: str = "."
     depth: int = 3
     files: list[FileRef] = field(default_factory=list)
     query: str = ""
     reason: str = ""
+    url: str = ""
     result: dict[str, Any] = field(default_factory=dict)
     edits: list[EditBlock] = field(default_factory=list)  # SEARCH/REPLACE-Blöcke vor dem JSON
     diff_block: str = ""  # ```diff-Block außerhalb des JSON (Ersatz, wenn das Patchfeld fehlt)
@@ -251,12 +252,17 @@ def _action(data: dict[str, Any], reasoning: str) -> Action:
         if not isinstance(query, str) or not query.strip() or len(query) > 200:
             raise ProtocolError("symbols needs a non-empty query (a class, function or method name).")
         return Action("symbols", reasoning, query=query.strip(), reason=str(data.get("reason", "")))
+    if kind == "fetch":
+        url = data.get("url")
+        if not isinstance(url, str) or not url.strip().lower().startswith("https://") or len(url) > 2048:
+            raise ProtocolError('fetch needs "url": "https://..." (one public web page, at most 2048 characters).')
+        return Action("fetch", reasoning, url=url.strip().split("#", 1)[0], reason=str(data.get("reason", "")))
     if kind == "finish":
         result = data.get("result")
         if not isinstance(result, dict):
             raise ProtocolError('finish needs "result": { ... } as described for your role.')
         return Action("finish", reasoning, result=result)
-    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols" or "finish". A final result must be wrapped: '
+    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols", "fetch" or "finish". A final result must be wrapped: '
                         '{"action": "finish", "result": { ... }}.')
 
 

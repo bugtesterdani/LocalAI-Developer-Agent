@@ -412,7 +412,29 @@
                                             <TextBox Text="{Binding CommandText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsToolchain, Converter={StaticResource BoolToVis}}" />
 
-                                            <!-- Patch.Apply: vollständiger Diff je Datei, lesbar -->
+                                            <!-- Web.Fetch: genau eine URL mit Grenzen (erste Freigabe) -->
+                                            <TextBlock Text="{loc:T LabelWebFetch}" Style="{StaticResource FieldLabel}"
+                                                       Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebFetchText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                                     Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
+
+                                            <!-- Web.Content: exakt dieser bereinigte Text an genau diesen Agenten (zweite Freigabe) -->
+                                            <TextBlock Text="{loc:T LabelWebSource}" Style="{StaticResource FieldLabel}"
+                                                       Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebSourceText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                                     Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{loc:T LabelWebWarnings}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
+                                                       Visibility="{Binding HasWebWarnings, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebWarningsText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
+                                                     Visibility="{Binding HasWebWarnings, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{loc:T LabelWebText}" Style="{StaticResource FieldLabel}"
+                                                       Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebText, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                                                     TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="420" VerticalScrollBarVisibility="Auto"
+                                                     AutomationProperties.Name="{loc:T LabelWebText}"
+                                                     Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
+
+                                            <!-- Patch.Apply / Workspace.ExportPatch: vollständiger Diff je Datei, lesbar -->
                                             <TextBlock Text="{loc:T LabelPatch}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding HasPatch, Converter={StaticResource BoolToVis}}" />
                                             <TextBox Text="{Binding PatchText, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" FontSize="12"

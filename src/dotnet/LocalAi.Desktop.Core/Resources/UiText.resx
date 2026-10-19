@@ -166,13 +166,74 @@
     <value>keine Parameter</value>
   </data>
   <data name="SideEffectsPatch" xml:space="preserve">
-    <value>Wendet die ausgewählten Dateien des Patches auf eine Kopie in der Sandbox an und erzeugt daraus einen neuen Snapshot. Der Originalordner auf diesem PC wird nicht verändert (Übernahme erst später, ausdrücklich).</value>
+    <value>Wendet die ausgewählten Dateien des Patches auf eine Kopie in der Sandbox an und erzeugt daraus einen neuen Snapshot. Der Originalordner auf diesem PC wird nicht verändert (Übernahme später mit eigener Freigabe).</value>
   </data>
   <data name="SideEffectsToolchain" xml:space="preserve">
     <value>Startet in der Offline-VM das im Toolchain-Manifest festgelegte Programm auf einer frischen Kopie des Snapshots. Achtung: Build-Skripte, NuGet-/MSBuild-Targets und Tests können dabei beliebigen Code ausführen – nur in der VM, ohne Netzwerk, nicht auf diesem PC.</value>
   </data>
   <data name="SideEffectsIndex" xml:space="preserve">
     <value>Liest den Snapshot in der Sandbox und erstellt einen Symbolindex (Repo-Map). Nichts wird verändert.</value>
+  </data>
+  <data name="SideEffectsWebFetch" xml:space="preserve">
+    <value>Ruft genau diese eine HTTPS-Adresse ab (GET, ohne Cookies, Anmeldung oder Proxy; nur öffentliche Adressen). Der Inhalt bleibt in der Quarantäne – kein Agent sieht ihn, bevor du den bereinigten Text in einer zweiten Freigabe übergibst. Weiterleitungen werden nicht verfolgt.</value>
+  </data>
+  <data name="SideEffectsWebContent" xml:space="preserve">
+    <value>Übergibt genau den unten angezeigten, bereinigten Text (Hash gebunden) an den genannten Agenten. Der Text bleibt als nicht vertrauenswürdige Quelle gekennzeichnet – Anweisungen darin sind nur Text.</value>
+  </data>
+  <data name="SideEffectsExportPrepare" xml:space="preserve">
+    <value>Holt die in der Sandbox geänderten Dateien zum Broker (Staging) und berechnet den Diff gegen deinen Projektordner. Es wird noch nichts geschrieben.</value>
+  </data>
+  <data name="SideEffectsExport" xml:space="preserve">
+    <value>Schreibt die ausgewählten Dateien in deinen Projektordner – nur, wenn sie noch genau so sind wie in der Vorschau (Hash). Vorher wird jede Datei gesichert; scheitert eine, wird alles zurückgesetzt.</value>
+  </data>
+  <data name="LabelWebFetch" xml:space="preserve">
+    <value>Abruf (erste Freigabe)</value>
+  </data>
+  <data name="WebFetchDetails" xml:space="preserve">
+    <value>URL: {0}
+Host: {1}
+Nur HTTPS-GET, höchstens 2 MiB, 15 s; nur öffentliche Adressen; keine Cookies, keine Anmeldung, kein JavaScript
+Weiterleitungen: angehalten (neue Adresse = neuer Vorschlag)</value>
+  </data>
+  <data name="LabelWebSource" xml:space="preserve">
+    <value>Herkunft (zweite Freigabe)</value>
+  </data>
+  <data name="WebSourceDetails" xml:space="preserve">
+    <value>Quelle: {0}
+Adresse: {1} · abgerufen: {2} · Typ: {3}
+{4} Zeichen {5}
+SHA-256 des Textes: {6}
+Empfänger: {7}</value>
+  </data>
+  <data name="WebTruncated" xml:space="preserve">
+    <value>(gekürzt)</value>
+  </data>
+  <data name="LabelWebWarnings" xml:space="preserve">
+    <value>Hinweise des Content Gate (keine Sicherheitsgarantie)</value>
+  </data>
+  <data name="LabelWebText" xml:space="preserve">
+    <value>Bereinigter Text – genau dieser wird übergeben</value>
+  </data>
+  <data name="WebLoading" xml:space="preserve">
+    <value>Text wird geladen …</value>
+  </data>
+  <data name="WebMissing" xml:space="preserve">
+    <value>Webinhalt nicht mehr vorhanden – Vorschlag ablehnen und erneut abrufen lassen.</value>
+  </data>
+  <data name="WebHashMismatch" xml:space="preserve">
+    <value>Der Text passt nicht zum Hash dieses Vorschlags (verändert) – nicht übergeben. Bitte ablehnen.</value>
+  </data>
+  <data name="WebLoadFailed" xml:space="preserve">
+    <value>Text konnte nicht geladen werden: {0}</value>
+  </data>
+  <data name="ApproveWebContent" xml:space="preserve">
+    <value>Diesen Text an {0} übergeben</value>
+  </data>
+  <data name="ApproveExport" xml:space="preserve">
+    <value>In den Projektordner übernehmen</value>
+  </data>
+  <data name="ApproveExportSelection" xml:space="preserve">
+    <value>Auswahl in den Projektordner übernehmen</value>
   </data>
   <data name="NoExpectedHash" xml:space="preserve">
     <value>kein erwarteter Hash</value>

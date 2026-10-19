@@ -43,6 +43,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.OrchestratorStop] = [CallerRole.Ui],
         [M.SandboxRebuild] = [CallerRole.Ui],
         [M.SandboxContinue] = [CallerRole.Ui],
+        // Nur die Oberfläche sieht den Text eines Webabrufs vor der Inhaltsfreigabe (SEC-09).
+        [M.WebCapture] = [CallerRole.Ui],
     };
 
     public const int MaxChatChars = 16_000;
@@ -58,6 +60,15 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
 
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
+
+    /// <summary>Webabrufe (Inhaltsvorschau für die Inhaltsfreigabe); null = ausgeschaltet.</summary>
+    public IWebCaptures? WebCaptures { get; init; }
+
+    /// <summary>Not-Aus: laufende Webabrufe und Ausführung beenden; liefert eine kurze Beschreibung.</summary>
+    public Func<Task<string>>? StopExecution { get; init; }
+
+    /// <summary>Nach „Not-Aus aufheben“ (z. B. Entwicklungs-Worker neu starten).</summary>
+    public Action? AfterRelease { get; init; }
 
     /// <summary>In der Sandbox ausführbare Toolchains (nur hyperv); sonst null.</summary>
     public IToolchainCatalog? ToolchainCatalog { get; init; }
@@ -223,13 +234,28 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 return Node(await broker.WaitEventsAsync(after, TimeSpan.FromMilliseconds(timeoutMs), cancellationToken).ConfigureAwait(false));
             }
             case M.EmergencyStop:
+            {
                 broker.EmergencyStop();
                 // Not-Aus wirkt auch, wenn der Orchestrator hängt: Prozess wird beendet (SEC-22).
                 Orchestrator.Stop("Not-Aus");
-                return new JsonObject { ["stopped"] = true };
+                // SEC-15: laufende Webabrufe und Ausführung (VM bzw. Entwicklungs-Worker) beenden.
+                var detail = StopExecution is null ? "" : await StopExecution().ConfigureAwait(false);
+                if (detail.Length > 0)
+                {
+                    broker.PublishInfo("run.emergencyStop", "Not-Aus: " + detail);
+                }
+                return new JsonObject { ["stopped"] = true, ["detail"] = detail };
+            }
             case M.Release:
                 broker.ReleaseEmergencyStop();
+                AfterRelease?.Invoke();
                 return new JsonObject { ["stopped"] = false };
+            case M.WebCapture:
+            {
+                var store = WebCaptures ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Webabrufe sind ausgeschaltet");
+                var id = p.TryGetProperty("captureId", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString()! : "";
+                return Node(store.Find(id) ?? throw new BrokerException(BrokerErrorCodes.NotFound, "Webinhalt nicht gefunden oder abgelaufen"));
+            }
             case M.StartFakeAgent:
                 return StartFakeAgent();
             case M.ProjectGrants:

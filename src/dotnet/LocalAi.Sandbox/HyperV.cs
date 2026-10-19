@@ -760,6 +760,31 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Not-Aus (SEC-15): Läuft gerade ein Job (oder ist die VM angehalten), wird die VM sofort ausgeschaltet – damit
+    /// endet jeder Prozessbaum im Gast sicher. Danach ist die Sandbox gesperrt (Neuaufbau); ohne laufenden Job bleibt
+    /// sie bereit, es wird ohnehin nichts mehr versandt (Dispatch gesperrt).
+    /// </summary>
+    public async Task<string> EmergencyStopAsync()
+    {
+        var busy = _exchange.CurrentCount == 0 || Status.State == SandboxState.Paused;
+        if (!busy)
+        {
+            return "keine laufende Ausführung in der VM";
+        }
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            await _host.SetVmStateAsync("TurnOff", cts.Token).ConfigureAwait(false);
+            Lock("Not-Aus: VM während einer Ausführung ausgeschaltet – „VM neu aufbauen“");
+        }
+        catch (Exception ex) when (ex is HyperVException or OperationCanceledException or IOException)
+        {
+            Lock("Not-Aus: VM konnte nicht ausgeschaltet werden (" + GuestReport.Clip(ex.Message) + ") – in Hyper-V-Manager ausschalten");
+        }
+        return Status.Text;
+    }
+
     private async Task LifecycleAsync(CancellationToken ct)
     {
         try

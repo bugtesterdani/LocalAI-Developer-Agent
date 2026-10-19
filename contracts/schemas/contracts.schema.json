@@ -1267,6 +1267,183 @@
         "skipped",
         "failures"
       ]
+    },
+    "WebWarning": {
+      "type": "object",
+      "description": "Hinweis des Content Gate (keine Sicherheitsgarantie).",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "excerpt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ]
+    },
+    "WebCapture": {
+      "type": "object",
+      "description": "Ergebnis eines genehmigten Webabrufs nach dem Content Gate (Spezifikation §7). Der Text geht nur an die Oberfläche (Inhaltsfreigabe) und erst nach dieser Freigabe an den Agenten.",
+      "properties": {
+        "captureId": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "fetchedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "integer"
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "rawBytes": {
+          "type": "integer"
+        },
+        "rawSha256": {
+          "type": "string"
+        },
+        "textSha256": {
+          "type": "string"
+        },
+        "sanitizerVersion": {
+          "type": "string"
+        },
+        "chars": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        },
+        "links": {
+          "type": "integer"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WebWarning"
+          }
+        },
+        "text": {
+          "type": "string"
+        },
+        "releasedTo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "captureId",
+        "url",
+        "host",
+        "address",
+        "fetchedAt",
+        "status",
+        "contentType",
+        "rawBytes",
+        "rawSha256",
+        "textSha256",
+        "sanitizerVersion",
+        "chars",
+        "truncated",
+        "links",
+        "warnings"
+      ]
+    },
+    "ExportFileKind": {
+      "type": "string",
+      "enum": [
+        "Create",
+        "Modify",
+        "Delete"
+      ]
+    },
+    "ExportFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExportFileKind"
+        },
+        "beforeSha256": {
+          "type": "string"
+        },
+        "afterSha256": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "kind",
+        "bytes"
+      ]
+    },
+    "ExportPreview": {
+      "type": "object",
+      "description": "Vorbereitete Übernahme (Workspace.Diff): Dateien aus der Sandbox liegen im Staging des Brokers; der Diff ist vom Broker gegen den aktuellen Projektordner berechnet.",
+      "properties": {
+        "stagingId": {
+          "type": "string"
+        },
+        "grantId": {
+          "type": "string"
+        },
+        "baseSnapshotId": {
+          "type": "string"
+        },
+        "snapshotId": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExportFile"
+          }
+        },
+        "patch": {
+          "type": "string"
+        },
+        "unchanged": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "stagingId",
+        "grantId",
+        "baseSnapshotId",
+        "snapshotId",
+        "files",
+        "patch"
+      ]
     }
   }
 }
