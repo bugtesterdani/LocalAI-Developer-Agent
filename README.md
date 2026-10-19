@@ -6,6 +6,7 @@ Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in 
 - Spezifikation: [docs/Local-AI-Developer-Agent-Projektspezifikation.md](docs/Local-AI-Developer-Agent-Projektspezifikation.md)
 - Umsetzungsplan: [docs/Umsetzungsplan.md](docs/Umsetzungsplan.md)
 - Prüfanleitung aktueller Meilenstein: [docs/pruefung-M5.md](docs/pruefung-M5.md) (vorher: [M4](docs/pruefung-M4.md), [M3](docs/pruefung-M3.md), [M2c](docs/pruefung-M2c.md), [M2b](docs/pruefung-M2b.md), [M2a](docs/pruefung-M2a.md), [M1](docs/pruefung-M1.md))
+- Auf einem neuen Rechner einrichten: [docs/inbetriebnahme-neuer-rechner.md](docs/inbetriebnahme-neuer-rechner.md)
 - Anforderungen → Tests: [docs/sicherheit/anforderungen-tests.md](docs/sicherheit/anforderungen-tests.md)
 
 ## Stand: Meilenstein M5 – alle Zielsprachen
