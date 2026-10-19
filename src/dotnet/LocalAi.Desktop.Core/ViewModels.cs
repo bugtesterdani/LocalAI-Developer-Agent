@@ -32,6 +32,18 @@ public interface IBrokerUiApi
 
     /// <summary>Bereinigter Text eines Webabrufs für die Inhaltsfreigabe (nur die Oberfläche sieht ihn vorher).</summary>
     Task<WebCapture?> WebCaptureAsync(string captureId, CancellationToken ct) => Task.FromResult<WebCapture?>(null);
+
+    /// <summary>Versions- und Offline-Manifest (M7).</summary>
+    Task<JsonElement> ManifestAsync(CancellationToken ct) => Task.FromResult(default(JsonElement));
+
+    /// <summary>Audit-Journal prüfen: Hashkette und Freigabeinvarianten (AC03).</summary>
+    Task<JsonElement> AuditVerifyAsync(CancellationToken ct) => Task.FromResult(default(JsonElement));
+
+    /// <summary>Diagnosepaket erstellen; Protokolle nur nach ausdrücklicher Auswahl.</summary>
+    Task<JsonElement> DiagnosticsExportAsync(bool includeLogs, CancellationToken ct) => Task.FromResult(default(JsonElement));
+
+    /// <summary>Sicherung (Journal, Registrierungen, Kalibrierung, Konfiguration) erstellen.</summary>
+    Task<JsonElement> BackupCreateAsync(CancellationToken ct) => Task.FromResult(default(JsonElement));
 }
 
 public sealed record EventLine(string Time, string Text)
@@ -496,8 +508,82 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StopOrchestratorCommand = new RelayCommand(StopOrchestratorAsync);
         RebuildSandboxCommand = new RelayCommand(RebuildSandboxAsync, () => IsHyperV);
         ContinueSandboxCommand = new RelayCommand(ContinueSandboxAsync, () => IsSandboxPaused);
+        RefreshManifestCommand = new RelayCommand(RefreshManifestAsync);
+        VerifyAuditCommand = new RelayCommand(VerifyAuditAsync);
+        ExportDiagnosticsCommand = new RelayCommand(ExportDiagnosticsAsync);
+        CreateBackupCommand = new RelayCommand(CreateBackupAsync);
         _activityBuffer = new ActivityBuffer(ApplyActivity, post, useTimer: throttle);
     }
+
+    // ------------------------------------------------------------------ System (M7): Manifest, Audit, Diagnose, Sicherung
+
+    private string _manifestText = UiText.Get("SystemNotLoaded");
+    private string _manifestProblems = "";
+    private string _systemResultText = "";
+    private bool _includeLogs;
+
+    public RelayCommand RefreshManifestCommand { get; }
+    public RelayCommand VerifyAuditCommand { get; }
+    public RelayCommand ExportDiagnosticsCommand { get; }
+    public RelayCommand CreateBackupCommand { get; }
+
+    public string ManifestText
+    {
+        get => _manifestText;
+        private set => Set(ref _manifestText, value);
+    }
+
+    /// <summary>Fehlende Offline-Voraussetzungen (rot); leer = vollständig.</summary>
+    public string ManifestProblemsText
+    {
+        get => _manifestProblems;
+        private set => Set(ref _manifestProblems, value);
+    }
+
+    public string SystemResultText
+    {
+        get => _systemResultText;
+        private set => Set(ref _systemResultText, value);
+    }
+
+    /// <summary>Protokolle ins Diagnosepaket aufnehmen (können Pfade und Codeausschnitte enthalten).</summary>
+    public bool IncludeLogs
+    {
+        get => _includeLogs;
+        set => Set(ref _includeLogs, value);
+    }
+
+    private Task RefreshManifestAsync() => GuardAsync(async () =>
+    {
+        var manifest = await _api.ManifestAsync(_shutdown.Token).ConfigureAwait(false);
+        var (text, problems) = SystemReport.FormatManifest(manifest);
+        Post(() =>
+        {
+            ManifestText = text;
+            ManifestProblemsText = problems;
+        });
+    });
+
+    private Task VerifyAuditAsync() => GuardAsync(async () =>
+    {
+        var report = await _api.AuditVerifyAsync(_shutdown.Token).ConfigureAwait(false);
+        var text = SystemReport.FormatAudit(report);
+        Post(() => SystemResultText = text);
+    });
+
+    private Task ExportDiagnosticsAsync() => GuardAsync(async () =>
+    {
+        var result = await _api.DiagnosticsExportAsync(IncludeLogs, _shutdown.Token).ConfigureAwait(false);
+        var text = UiText.Format(IncludeLogs ? "DiagnosticsDoneWithLogs" : "DiagnosticsDone", SystemReport.PathOf(result));
+        Post(() => SystemResultText = text);
+    });
+
+    private Task CreateBackupAsync() => GuardAsync(async () =>
+    {
+        var result = await _api.BackupCreateAsync(_shutdown.Token).ConfigureAwait(false);
+        var text = UiText.Format("BackupDone", SystemReport.PathOf(result));
+        Post(() => SystemResultText = text);
+    });
 
     // ------------------------------------------------------------------ Chat und Live-Aktivität (M3)
 
@@ -883,6 +969,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         // Hashes großer Toolchains zu berechnen dauert: im Hintergrund, die Oberfläche ist sofort bedienbar.
         _ = Task.Run(ScanToolchainsAsync);
+        _ = Task.Run(RefreshManifestAsync);
     }
 
     internal async Task DecideAsync(ApprovalCardViewModel card, bool approve)

@@ -11,4 +11,4 @@ Ablauf (jeweils eigener Prozess, unter Windows mit eingeschränktem Token auf ni
 Der Broker gibt den Text erst nach einer zweiten, eigenen Freigabe an einen Agenten weiter (``Web.Content``).
 """
 
-SANITIZER_VERSION = "1"
+SANITIZER_VERSION = "2"

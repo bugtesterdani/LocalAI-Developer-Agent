@@ -25,6 +25,36 @@ catch (Exception ex) when (ex is ArgumentException or JsonException or IOExcepti
 }
 Directory.CreateDirectory(options.DataDirectory);
 
+if (options.RestoreFrom is not null)
+{
+    // Runbook „Backup / Restore“: nur bei beendetem Broker; Freigaben werden nie wiederhergestellt.
+    try
+    {
+        Console.Out.WriteLine(BackupArchive.Restore(options.RestoreFrom, options.DataDirectory, DateTimeOffset.Now));
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or InvalidDataException or AuditTamperException or UnauthorizedAccessException
+                                   or System.Text.Json.JsonException or Microsoft.Data.Sqlite.SqliteException)
+    {
+        Console.Error.WriteLine($"FEHLER: Wiederherstellung abgebrochen, nichts geändert: {ex.Message}");
+        return 6;
+    }
+}
+if (options.VerifyJournal)
+{
+    try
+    {
+        var report = AuditCheck.Verify(Path.Combine(options.DataDirectory, "audit.db"));
+        Console.Out.WriteLine(report.ToJson().ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        return report.Ok ? 0 : 5;
+    }
+    catch (Exception ex) when (ex is AuditTamperException or Microsoft.Data.Sqlite.SqliteException or IOException)
+    {
+        Console.Error.WriteLine($"FEHLER: {ex.Message}");
+        return 3;
+    }
+}
+
 var children = new ChildProcesses();
 var clock = SystemClock.Instance;
 CountingTestAdapter? testAdapter;
@@ -33,6 +63,7 @@ IPolicyContext policy;
 HyperVSandbox? vm;
 SandboxParts parts;
 ToolchainRegistry? toolchains = null;
+IReadOnlyList<string> projectToolchains = [];
 try
 {
     var project = options.Mode == SandboxMode.Test ? null : LoadProject(options);
@@ -42,6 +73,7 @@ try
             project.Toolchains ?? [], clock);
     }
     parts = CreateSandbox(options, children, Guid.NewGuid().ToString("D"), project, toolchains);
+    projectToolchains = project?.Toolchains ?? [];
     (adapter, policy, testAdapter, vm) = (parts.Adapter, parts.Policy, parts.Test, parts.Vm);
 }
 catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or ChildProcessException or NotSupportedException)
@@ -106,7 +138,17 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
         return string.Join("; ", notes);
     },
     AfterRelease = parts.AfterRelease,
+    BuildManifest = () => VersionManifest.Build(options, toolchains, projectToolchains),
 };
+try
+{
+    // Versionsmanifest bei jedem Start (Runbook „Normaler Start“); Fehler hier verhindern den Start nicht.
+    VersionManifest.Write(VersionManifest.Build(options, toolchains, projectToolchains), options.DataDirectory);
+}
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+{
+    Console.Error.WriteLine($"WARNUNG: manifest.json nicht geschrieben: {ex.Message}");
+}
 if (vm is not null)
 {
     // Aufbau im Hintergrund; Fortschritt als Ereignis an die Oberfläche und ins Journal.

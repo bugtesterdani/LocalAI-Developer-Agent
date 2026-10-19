@@ -68,6 +68,7 @@ _MAP_PROJECTS = re.compile(r"^Project/build files: (.*?)(?: \(\+\d+ more\))?$", 
 _MAP_HEADER = re.compile(r"^Repo map of snapshot \S+ – \d+ files, (.*)$", re.M)
 EXPORT_COMMANDS = {"übernehmen", "uebernehmen", "übernahme"}
 RESUME_COMMANDS = {"fortsetzen", "weiter machen", "weitermachen"}
+DISCARD_WEB_COMMANDS = {"webinhalt verwerfen", "webinhalte verwerfen", "web verwerfen", "webinhalt verdächtig"}
 NEW_COMMANDS = {"neu", "neu starten", "neu beginnen"}
 
 
@@ -79,6 +80,8 @@ def chat_command(text: str) -> str | None:
         return "resume"
     if word in NEW_COMMANDS:
         return "new"
+    if word in DISCARD_WEB_COMMANDS:
+        return "discard_web"
     return None
 
 
@@ -100,6 +103,7 @@ class Verification:
     text_en: str  # Evidenz für Debugger/Reviewer
     summary_de: str  # Chat
     snapshot_id: str | None = None
+    procurement: list[str] = field(default_factory=list)  # fehlende Offlinepakete (Runbook: Job stoppen, Nutzer beschafft)
 
 
 @dataclass
@@ -107,6 +111,7 @@ class AppliedPatch:
     label: str
     patch: str
     files: list[str]
+    task_id: str = ""
 
 
 def repo_facts(map_text: str) -> tuple[list[str], dict[str, int]]:
@@ -294,6 +299,9 @@ class Orchestrator:
         self._plan_raw: list[dict[str, Any]] = []
         self._first_goal = True
         self._held_goal: str | None = None  # erstes Ziel, solange ein unterbrochener Run auf „fortsetzen“/„neu“ wartet
+        self._discard_requested = False  # „webinhalt verwerfen“ während eines Runs
+        self._discarded_urls: list[str] = []
+        self._live: tuple[list[dag.Task], list[str]] | None = None  # laufender Plan (für Journal beim Abbruch)
 
     # ------------------------------------------------------------------ Aufträge der Oberfläche
     def handle(self, command: OrchestratorCommand) -> None:
@@ -305,6 +313,10 @@ class Orchestrator:
                 return
             if current is None:
                 self.goals.put(text)
+            elif chat_command(text) == "discard_web":
+                # Runbook „Inhalt verdächtig“: Run anhalten, betroffene Aufgaben und Patches verwerfen.
+                self._discard_requested = True
+                current.controls.cancel_run("Webinhalt als verdächtig verworfen")
             else:
                 current.notes.append(text)
                 current.clock.user_interaction()
@@ -371,6 +383,7 @@ class Orchestrator:
 
     def run_goal(self, goal: str) -> None:
         command = chat_command(goal)
+        self._live = None
         first, self._first_goal = self._first_goal, False
         if command is None and first and RunJournal.resumable(self.journal.load()):
             # Unterbrochener Run: nicht stillschweigend ersetzen – erst fragen.
@@ -392,11 +405,19 @@ class Orchestrator:
                 self._export_command(state)
             elif command == "resume":
                 self._resume(state)
+            elif command == "discard_web":
+                self._discard_web_content()
             else:
                 self._run(state)
         except Cancelled as err:
+            if self._live is not None:
+                self._save_journal(state, self._live[0], self._live[1], "cancelled")
             self._journal_status("cancelled")
-            self.reporter.chat("Orchestrator", f"Run abgebrochen: {err.reason}" + self._resume_suffix())
+            if self._discard_requested:
+                self._discard_requested = False
+                self._discard_web_content()
+            else:
+                self.reporter.chat("Orchestrator", f"Run abgebrochen: {err.reason}" + self._resume_suffix())
         except Exception as err:  # noqa: BLE001 – Fehler melden, Orchestrator bleibt bedienbar
             self._journal_status("failed")
             self.reporter.event("Orchestrator", ActivityKind.Error, traceback.format_exc()[-4000:])
@@ -652,7 +673,7 @@ class Orchestrator:
             result["apply"] = outcome
             if outcome.applied:
                 with self._applied_lock:
-                    self.applied.append(AppliedPatch(label, patch, outcome.files))
+                    self.applied.append(AppliedPatch(label, patch, outcome.files, task_id))
                 return None
             max_retries = self.config.limits.max_patch_retries
             if outcome.feedback and retries["n"] < max_retries:
@@ -690,6 +711,7 @@ class Orchestrator:
         self.reporter.chat(task.role, text[:MAX_CHAT])
 
     def _execute(self, state: GoalState, agents: dict[str, Agent], tasks: list[dag.Task], acceptance: list[str]) -> None:
+        self._live = (tasks, acceptance)
         locks = dag.WriteLocks()
         busy: dict[str, dag.Task] = {}
         futures: dict[cf.Future, dag.Task] = {}
@@ -754,6 +776,7 @@ class Orchestrator:
                 break
         ran = any(o.ran for _, o in results)
         ok = bool(results) and all(o.ok for _, o in results)
+        procurement: list[str] = []
         en = [f"## Sandbox build/test results (snapshot {(head or '?')[:12]})"]
         de = [f"Prüfung in der Sandbox (Stand {(head or '?')[:12]}):"]
         for step, o in results:
@@ -774,9 +797,14 @@ class Orchestrator:
                 if f.stack_trace:
                     en.append("    " + "\n    ".join(f.stack_trace.strip().splitlines()[:6]))
                 de.append(f"  - {f.name}: {(f.message or '').strip().splitlines()[0][:200] if f.message else ''}")
+            for problem in r.problems or []:
+                if problem.startswith("Beschaffungsvorschlag"):
+                    procurement.append(problem)
+                    de.append(f"  - {problem}")
+                    en.append(f"  MISSING OFFLINE PACKAGE (not fixable by code changes; the user must provide it): {problem}")
             if not o.ok:
                 en.append("  Log excerpt:\n" + "\n".join("  " + ln for ln in o.log[-6000:].splitlines()))
-        return Verification(ran, ok, "\n".join(en), "\n".join(de), head)
+        return Verification(ran, ok, "\n".join(en), "\n".join(de), head, procurement)
 
     # ------------------------------------------------------------------ Review ↔ Debugger
     def _change_evidence(self) -> list[Evidence]:
@@ -824,6 +852,12 @@ class Orchestrator:
         while True:
             state.controls.run.raise_if_cancelled()
             # 1. Echte Build-/Testfehler zuerst reparieren.
+            if verification.ran and not verification.ok and verification.procurement:
+                verdict = "angehalten: Offlinepakete fehlen"
+                self.reporter.chat("Orchestrator", "Build/Tests scheitern an fehlenden Offlinepaketen – das kann kein Agent durch "
+                                   "Codeänderungen beheben. Bitte beschaffen und die Toolchain neu registrieren, dann „fortsetzen“ "
+                                   "oder das Ziel erneut senden:\n- " + "\n- ".join(verification.procurement))
+                break
             if verification.ran and not verification.ok:
                 if attempt >= max_attempts:
                     verdict = f"Tests nach {attempt} Reparaturversuchen weiterhin fehlerhaft"
@@ -915,6 +949,9 @@ class Orchestrator:
 
     def _summary(self, state: GoalState, tasks: list[dag.Task], verdict: str, verification: Verification | None,
                  repairs: int) -> None:
+        if self._live is not None:
+            self._save_journal(state, self._live[0], self._live[1], "reviewing")
+        self._live = None
         lines = ["Zusammenfassung:"]
         for t in tasks:
             extra = f" – {t.error}" if t.error and t.state != dag.TaskState.DONE else ""
@@ -936,8 +973,9 @@ class Orchestrator:
             lines.append("Es wurde keine Änderung angewendet; dein Projektordner ist unverändert.")
         self.reporter.chat("Orchestrator", "\n".join(lines))
         self.previous_summary = "\n".join(lines)[:3000]
-        self.journal.update(status="done")
-        if applied and bridge is not None:
+        blocked = verdict.startswith("angehalten: Offlinepakete")
+        self.journal.update(status="blocked" if blocked else "done")
+        if applied and bridge is not None and not blocked:
             text = self._export(state)
             self.previous_summary = (self.previous_summary + "\nÜbernahme: " + text)[:3000]
         self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")
@@ -1005,7 +1043,7 @@ class Orchestrator:
     # ------------------------------------------------------------------ Runjournal und Fortsetzen (M6)
     def _save_journal(self, state: GoalState, tasks: list[dag.Task], acceptance: list[str], status: str) -> None:
         with self._applied_lock:
-            applied = [{"label": a.label, "patch": a.patch, "files": a.files} for a in self.applied]
+            applied = [{"label": a.label, "patch": a.patch, "files": a.files, "taskId": a.task_id} for a in self.applied]
         self.journal.save({
             "runId": self.run_id, "goal": state.goal, "status": status, "exported": False,
             "plan": self._plan_raw, "acceptance": acceptance,
@@ -1013,7 +1051,49 @@ class Orchestrator:
             "tasks": {t.task_id: {"state": t.state.value, "result": t.result if t.state == dag.TaskState.DONE else None,
                                   "error": t.error, "steps": t.steps} for t in tasks},
             "applied": applied,
+            "captures": list(self.bridge.released) if self.bridge else [],
+            "discardedUrls": list(self._discarded_urls),
         })
+
+    def _discard_web_content(self) -> None:
+        """Runbook „Inhalt verdächtig“: Capture-IDs protokollieren, alle Aufgaben, die den Webtext gesehen haben (und ihre
+        Abhängigen), sowie jeden Patch ab dem ersten betroffenen verwerfen; „fortsetzen“ baut aus sauberer Evidenz neu auf."""
+        data = self.journal.load()
+        captures = [c for c in (data or {}).get("captures") or [] if isinstance(c, dict)]
+        if data is None or not captures:
+            self.reporter.chat("Orchestrator", "Im aktuellen bzw. letzten Run wurde kein Webinhalt übergeben – nichts zu verwerfen.")
+            return
+        plan = [t for t in data.get("plan") or [] if isinstance(t, dict)]
+        tainted = {str(c.get("taskId", "")) for c in captures}
+        changed = True
+        while changed:  # Abhängige Aufgaben haben Ergebnisse der betroffenen gesehen
+            changed = False
+            for t in plan:
+                if str(t.get("id")) not in tainted and any(str(d) in tainted for d in t.get("depends_on") or []):
+                    tainted.add(str(t.get("id")))
+                    changed = True
+        applied = [a for a in data.get("applied") or [] if isinstance(a, dict)]
+        first = next((i for i, a in enumerate(applied) if str(a.get("taskId", "")) in tainted), None)
+        kept = applied if first is None else applied[:first]
+        dropped = [] if first is None else applied[first:]
+        # Spätere Patches bauen auf dem betroffenen Stand auf: deren Aufgaben ebenfalls neu.
+        tainted |= {str(a.get("taskId", "")) for a in dropped if a.get("taskId")}
+        tasks = {k: v for k, v in (data.get("tasks") or {}).items() if k not in tainted}
+        urls = list(dict.fromkeys([*(data.get("discardedUrls") or []), *(str(c.get("url", "")) for c in captures)]))
+        self._discarded_urls = urls
+        ids = ", ".join(str(c.get("captureId", ""))[:12] for c in captures)
+        self.reporter.event("Orchestrator", ActivityKind.Warning, f"Webinhalt verworfen – Capture-IDs: {ids}")
+        self.journal.update(status="cancelled", exported=False, applied=kept, tasks=tasks, captures=[], discardedUrls=urls)
+        if self.bridge is not None:
+            self.bridge.released = []
+        redo = sorted(t for t in tainted if t)
+        text = (f"Webinhalt verworfen (Capture-IDs {ids}). Betroffen und neu zu bearbeiten: {', '.join(redo) or '–'}; "
+                f"{len(dropped)} Patch(es) verworfen, {len(kept)} bleiben. Mit „fortsetzen“ baue ich den Stand ohne diese "
+                "Inhalte neu auf (neuer Snapshot, neue Freigaben); die Seiten werden den Agenten als gesperrt mitgeteilt.")
+        if data.get("exported"):
+            text += (" Achtung: Die Änderungen waren bereits in deinen Projektordner übernommen – bitte dort prüfen (Sicherung "
+                     "der Originale unter %LOCALAPPDATA%\\LocalAi\\broker\\export).")
+        self.reporter.chat("Orchestrator", text)
 
     def _journal_status(self, status: str) -> None:
         data = self.journal.load()
@@ -1053,6 +1133,12 @@ class Orchestrator:
             return
         assert data is not None
         state.goal = data["goal"]
+        self._discarded_urls = [str(u) for u in data.get("discardedUrls") or []]
+        if self._discarded_urls:
+            state.notes.append("Do not fetch these web pages again; the user rejected their content as suspicious: "
+                               + ", ".join(self._discarded_urls[:10]))
+        if self.bridge is not None:
+            self.bridge.released = []
         self.reporter.chat("Orchestrator", f"Ich setze den Run „{state.goal[:200]}“ fort. Zuerst ein neuer Snapshot deines "
                            "Projektordners, dann lege ich die bereits angewendeten Patches erneut zur Freigabe vor.")
         agents = self._prepare_run(state, fresh_snapshot=True)
@@ -1076,11 +1162,12 @@ class Orchestrator:
                                    "wiederhergestellten Stand.")
             with self._applied_lock:
                 self.applied.append(AppliedPatch(str(record.get("label", "")), str(record["patch"]),
-                                                 [f for f in outcome.files]))
+                                                 [f for f in outcome.files], str(record.get("taskId", ""))))
         self.listing = []
         self._start_evidence(state, bridge, agents["Planner"])
         if data.get("status") == "done":
-            self.journal.update(applied=[{"label": a.label, "patch": a.patch, "files": a.files} for a in self.applied])
+            self.journal.update(applied=[{"label": a.label, "patch": a.patch, "files": a.files, "taskId": a.task_id}
+                                         for a in self.applied])
             self.previous_summary = f"Resumed run: {state.goal[:500]}"
             self._export(state)
             self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")

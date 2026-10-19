@@ -228,6 +228,57 @@ Weiterleitungen: angehalten (neue Adresse = neuer Vorschlag)</value>
   <data name="WebResponseHeaders" xml:space="preserve">
     <value>Kopfzeilen der Antwort:</value>
   </data>
+  <data name="TabSystem" xml:space="preserve">
+    <value>SYSTEM</value>
+  </data>
+  <data name="SystemNotLoaded" xml:space="preserve">
+    <value>Manifest noch nicht geladen.</value>
+  </data>
+  <data name="SystemVersions" xml:space="preserve">
+    <value>Versionen und Offline-Voraussetzungen</value>
+  </data>
+  <data name="SystemMissing" xml:space="preserve">
+    <value>Fehlende Voraussetzungen</value>
+  </data>
+  <data name="SystemRefresh" xml:space="preserve">
+    <value>Neu prüfen</value>
+  </data>
+  <data name="SystemActions" xml:space="preserve">
+    <value>Prüfung, Diagnose und Sicherung</value>
+  </data>
+  <data name="VerifyAudit" xml:space="preserve">
+    <value>Audit-Journal prüfen</value>
+  </data>
+  <data name="ExportDiagnostics" xml:space="preserve">
+    <value>Diagnosepaket erstellen</value>
+  </data>
+  <data name="IncludeLogs" xml:space="preserve">
+    <value>Protokolle einschließen (können Pfade, Befehle und Codeausschnitte enthalten)</value>
+  </data>
+  <data name="CreateBackup" xml:space="preserve">
+    <value>Sicherung erstellen</value>
+  </data>
+  <data name="SystemHint" xml:space="preserve">
+    <value>Das Diagnosepaket enthält Versionen, Zustände je Werkzeug, Ereignis-IDs, Speicherwerte und Hashes – keinen Code, keine Webinhalte, keine Vorschlagsargumente. Die Sicherung enthält Audit-Journal, Toolchain-Registrierungen, Kalibrierung, Runjournal und Konfiguration, aber nie Freigaben. Wiederherstellen bei beendetem Programm: LocalAi.Broker.Host --restore &lt;zip&gt;.</value>
+  </data>
+  <data name="AuditOk" xml:space="preserve">
+    <value>Audit-Journal in Ordnung: Hashkette intakt, jede Ausführung hatte genau eine passende Erlaubnis.</value>
+  </data>
+  <data name="AuditProblems" xml:space="preserve">
+    <value>Audit-Journal mit Befunden:</value>
+  </data>
+  <data name="AuditCounts" xml:space="preserve">
+    <value>{0} Einträge · {1} Sitzungen · {2} Vorschläge · {3} erlaubt · {4} abgelehnt · {5} ausgeführt · {6} Not-Aus</value>
+  </data>
+  <data name="DiagnosticsDone" xml:space="preserve">
+    <value>Diagnosepaket erstellt (ohne Protokolle): {0}</value>
+  </data>
+  <data name="DiagnosticsDoneWithLogs" xml:space="preserve">
+    <value>Diagnosepaket erstellt (mit Protokollen): {0}</value>
+  </data>
+  <data name="BackupDone" xml:space="preserve">
+    <value>Sicherung erstellt: {0}</value>
+  </data>
   <data name="LabelWebSource" xml:space="preserve">
     <value>Herkunft (zweite Freigabe)</value>
   </data>

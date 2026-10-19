@@ -464,3 +464,23 @@ def test_unerwarteter_fehler_wird_gemeldet_statt_abzusturzen(tmp_path, store, mo
     monkeypatch.setattr(indexer, "build", lambda _i: (_ for _ in ()).throw(PermissionError("gesperrt")))
     result = ToolRunner(store, indexer=indexer).run(job(proposal("Repo.Index", [], base.snapshot_id), 1), None)
     assert result.status == ResultStatus.Failed and "PermissionError" in result.target_results[0].message
+
+
+@pytest.mark.parametrize("log,expected", [
+    ("error NU1101: Unable to find package Newtonsoft.Json. No packages exist with this id in source(s): offline",
+     "NuGet-Paket Newtonsoft.Json fehlt"),
+    ("error NU1102: Unable to find package xunit.v3 with version (>= 3.1.0)", "NuGet-Paket xunit.v3 (Version 3.1.0) fehlt"),
+    ("ERROR: Could not find a version that satisfies the requirement hypothesis==6.100 (from versions: none)\n"
+     "ERROR: No matching distribution found for hypothesis==6.100", "Python-Paket hypothesis (Version 6.100) fehlt"),
+    ('CMake Error: Could not find a package configuration file provided by "fmt" (requested version 10.2)', "CMake-Paket fmt (Version 10.2) fehlt"),
+    ("Import-Module: The specified module 'Pester' was not loaded because no valid module file was found", "PowerShell-Modul Pester fehlt"),
+])
+def test_beschaffungsvorschlag_aus_dem_log(log, expected):
+    from localai.worker.execution import procurement_hints
+    hints = procurement_hints(log)
+    assert hints and hints[0].startswith("Beschaffungsvorschlag:") and expected in hints[0], hints
+
+
+def test_kein_beschaffungsvorschlag_bei_normalem_fehler():
+    from localai.worker.execution import procurement_hints
+    assert procurement_hints("FAILED tests/test_calc.py::test_add - assert 3 == 4") == []

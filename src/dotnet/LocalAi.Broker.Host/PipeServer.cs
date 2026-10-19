@@ -45,6 +45,10 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.SandboxContinue] = [CallerRole.Ui],
         // Nur die Oberfläche sieht den Text eines Webabrufs vor der Inhaltsfreigabe (SEC-09).
         [M.WebCapture] = [CallerRole.Ui],
+        [M.SystemManifest] = [CallerRole.Ui],
+        [M.AuditVerify] = [CallerRole.Ui],
+        [M.DiagnosticsExport] = [CallerRole.Ui],
+        [M.BackupCreate] = [CallerRole.Ui],
     };
 
     public const int MaxChatChars = 16_000;
@@ -69,6 +73,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
 
     /// <summary>Nach „Not-Aus aufheben“ (z. B. Entwicklungs-Worker neu starten).</summary>
     public Action? AfterRelease { get; init; }
+
+    /// <summary>Versions- und Offline-Manifest (AC01) – bei Aufruf neu erstellt.</summary>
+    public Func<JsonObject>? BuildManifest { get; init; }
 
     /// <summary>In der Sandbox ausführbare Toolchains (nur hyperv); sonst null.</summary>
     public IToolchainCatalog? ToolchainCatalog { get; init; }
@@ -259,6 +266,50 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 broker.ReleaseEmergencyStop();
                 AfterRelease?.Invoke();
                 return new JsonObject { ["stopped"] = false };
+            case M.SystemManifest:
+            {
+                var manifest = (BuildManifest ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Kein Manifest verfügbar"))();
+                VersionManifest.Write(manifest, options.DataDirectory);
+                return manifest;
+            }
+            case M.AuditVerify:
+            {
+                var path = Path.Combine(options.DataDirectory, "audit.db");
+                try
+                {
+                    return AuditCheck.Verify(path).ToJson();
+                }
+                catch (AuditTamperException ex)
+                {
+                    return new JsonObject { ["ok"] = false, ["problems"] = new JsonArray(ex.Message) };
+                }
+            }
+            case M.DiagnosticsExport:
+            {
+                var includeLogs = p.TryGetProperty("includeLogs", out var il) && il.ValueKind == JsonValueKind.True;
+                AuditReport? audit = null;
+                string? auditError = null;
+                try
+                {
+                    audit = AuditCheck.Verify(Path.Combine(options.DataDirectory, "audit.db"));
+                }
+                catch (Exception ex) when (ex is AuditTamperException or IOException or Microsoft.Data.Sqlite.SqliteException)
+                {
+                    auditError = ex.Message;
+                }
+                var manifest = BuildManifest?.Invoke() ?? new JsonObject();
+                var events = await broker.WaitEventsAsync(0, TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
+                var file = DiagnosticsExport.Create(options.DataDirectory, manifest, audit, auditError, broker.StateCounts(), events, includeLogs,
+                    DateTimeOffset.Now);
+                broker.PublishInfo("run.diagnosticsExported", $"Diagnosepaket erstellt: {file}" + (includeLogs ? " (mit Protokollen)" : ""));
+                return new JsonObject { ["path"] = file, ["includeLogs"] = includeLogs };
+            }
+            case M.BackupCreate:
+            {
+                var file = BackupArchive.Create(options.DataDirectory, options.ConfigPath, options.ProjectPath, options.RepoRoot, DateTimeOffset.Now);
+                broker.PublishInfo("run.backupCreated", $"Sicherung erstellt: {file}");
+                return new JsonObject { ["path"] = file };
+            }
             case M.WebCapture:
             {
                 var store = WebCaptures ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Webabrufe sind ausgeschaltet");

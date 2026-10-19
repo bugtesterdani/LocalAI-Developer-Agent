@@ -66,6 +66,7 @@ class FakeBroker:
         "name": "python", "actions": {"test": {"parameters": {"path": {"type": "Path"}}, "timeoutSeconds": 600}}}])
     # Ergebnis je Testlauf nacheinander: (Exitcode, fehlgeschlagene Tests); danach immer grün.
     test_runs: list[tuple[int, int]] = field(default_factory=lambda: [(1, 1)])
+    report_problems: list[str] = field(default_factory=list)  # z. B. Beschaffungsvorschläge im Testbericht
     patch_failures: int = 0  # so viele Patch.Apply-Versuche passen „nicht“ (Hunk) – danach angewendet
     snapshots: int = 1
     # M6: Webseiten je URL (Text nach dem Content Gate; „REDIRECT:<url>“ simuliert eine Weiterleitung)
@@ -140,7 +141,8 @@ class FakeBroker:
                 exit_code, failed = self.test_runs.pop(0) if self.test_runs else (0, 0)
                 report = TestReport(format=TestResultFormat.JUnit, exit_code=exit_code, timed_out=False, total=3,
                                     passed=3 - failed, failed=failed, skipped=0,
-                                    failures=[{"name": "tests.test_calc.test_empty", "message": "TypeError: unsupported operand"}][:failed])
+                                    failures=[{"name": "tests.test_calc.test_empty", "message": "TypeError: unsupported operand"}][:failed],
+                                    problems=list(self.report_problems) if exit_code else [])
                 log = "FAILED tests/test_calc.py::test_empty - TypeError" if failed else "3 passed"
                 result = done([TargetResult(target_id="log", status=ResultStatus.Succeeded, text=log),
                                TargetResult(target_id="tests", status=ResultStatus.Succeeded,

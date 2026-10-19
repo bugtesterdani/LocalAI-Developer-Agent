@@ -71,6 +71,15 @@ public sealed record HostOptions
     public LocalAi.Sandbox.HyperVSettings? HyperV { get; init; }
     public string? ToolchainsDirectory { get; init; }
 
+    /// <summary>Gelesene config/localai.json (für Versionsmanifest, Sicherung).</summary>
+    public string? ConfigPath { get; init; }
+
+    /// <summary>--restore &lt;zip&gt;: Sicherung wiederherstellen und beenden (Broker darf nicht laufen).</summary>
+    public string? RestoreFrom { get; init; }
+
+    /// <summary>--verify-journal: Audit-Journal prüfen (Hashkette + Freigabeinvarianten), Bericht ausgeben, beenden.</summary>
+    public bool VerifyJournal { get; init; }
+
     /// <summary>Web.Fetch (M6); null = ausgeschaltet (ohne Konfiguration: eingeschaltet mit Standardwerten).</summary>
     public WebSettings? Web { get; init; }
 
@@ -93,6 +102,8 @@ public sealed record HostOptions
                 case "--config": configPath = Next(); break;
                 case "--mode": mode = ParseMode(Next()); break;
                 case "--project": project = Path.GetFullPath(Next()); break;
+                case "--restore": options = options with { RestoreFrom = Path.GetFullPath(Next()) }; break;
+                case "--verify-journal": options = options with { VerifyJournal = true }; break;
                 default: throw new ArgumentException($"Unbekannte Option: {args[i]}");
             }
         }
@@ -157,7 +168,7 @@ public sealed record HostOptions
         using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
         var root = doc.RootElement;
         var repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, ".."));
-        options = options with { RepoRoot = repoRoot };
+        options = options with { RepoRoot = repoRoot, ConfigPath = Path.GetFullPath(configPath) };
         if (root.TryGetProperty("fakeAgent", out var agent))
         {
             options = options with { FakeAgent = ReadCommand(agent, repoRoot) };

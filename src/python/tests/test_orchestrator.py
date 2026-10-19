@@ -1183,3 +1183,55 @@ def test_neu_verwirft_unterbrochenen_run_und_startet_das_gehaltene_ziel(ollama, 
     assert saved["goal"] == "Neues Ziel" and saved["status"] == "done"
     orch.stop()
     thread.join(5)
+
+
+# ---------------------------------------------------------------------- M7: Runbook
+
+def test_fehlende_offlinepakete_halten_an_ohne_reparatur(ollama, tmp_path):
+    hint = "Beschaffungsvorschlag: NuGet-Paket xunit.v3 (Version 3.1.0) fehlt in der Offline-Quelle"
+    broker = FakeBroker(test_runs=[(1, 0)], report_problems=[hint])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: finished(broker), timeout=60)
+    chats = broker.chats("Orchestrator")
+    assert any("fehlenden Offlinepaketen" in c and "xunit.v3" in c for c in chats)
+    assert not broker.chats("Debugger"), "kein Reparaturversuch – Code kann fehlende Pakete nicht ersetzen"
+    assert "Workspace.Diff" not in [p.tool for p in broker.proposals.values()], "keine Übernahme eines ungeprüften Stands"
+    assert json.loads((tmp_path / "run-journal.json").read_text(encoding="utf-8"))["status"] == "blocked"
+    orch.stop()
+    thread.join(5)
+
+
+def test_webinhalt_verwerfen_und_sauber_neu_aufbauen(ollama, tmp_path):
+    """Runbook „Inhalt verdächtig“: Capture-IDs protokolliert, betroffene Aufgaben und Patches verworfen, Neuaufbau."""
+    url = "https://docs.example.org/calc"
+    broker = FakeBroker(web_pages={url: INJECTION_PAGE}, test_runs=[])
+    seen: list[str] = []
+    ollama.responder = _coder_fetches(url, seen)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: finished(broker), timeout=60)
+    journal = tmp_path / "run-journal.json"
+    before = json.loads(journal.read_text(encoding="utf-8"))
+    assert before["captures"] and before["captures"][0]["taskId"] == "T1"
+    order = [a["taskId"] for a in before["applied"]]
+    broker.send(OrchestratorCommandKind.Chat, "Webinhalt verwerfen")
+    text = wait_for(lambda: next((c for c in broker.chats("Orchestrator") if c.startswith("Webinhalt verworfen")), None), timeout=10)
+    capture = before["captures"][0]["captureId"]
+    assert capture[:12] in text and "T1" in text
+    assert any(capture[:12] in (e.text or "") for e in broker.events if e.kind == ActivityKind.Warning), "Capture-ID protokolliert"
+    after = json.loads(journal.read_text(encoding="utf-8"))
+    kept = order[:order.index("T1")]
+    assert [a["taskId"] for a in after["applied"]] == kept and "T1" not in after["tasks"]
+    assert after["status"] == "cancelled" and after["discardedUrls"] == [url] and not after["captures"]
+
+    n = len(broker.proposals)
+    broker.send(OrchestratorCommandKind.Chat, "fortsetzen")
+    wait_for(lambda: sum(1 for c in broker.chats("Orchestrator") if c.startswith("Zusammenfassung")) == 2, timeout=60)
+    resumed = list(broker.proposals.values())[n:]
+    assert resumed[0].tool == "Workspace.Snapshot"
+    assert sum(1 for p in resumed if p.task_id.startswith("W")) == len(kept), "nur saubere Patches wiederhergestellt"
+    coder_prompts = [s for s in seen[-3:]]
+    assert any("Do not fetch these web pages again" in s and url in s for s in coder_prompts)
+    orch.stop()
+    thread.join(5)

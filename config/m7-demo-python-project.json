@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "projectId": "m7-demo-python",
+  "name": "M7-Demo: Kontakte (Python)",
+  "grants": [
+    {
+      "grantId": "kontakte",
+      "root": "samples/m7-demo-python",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": ["dotnet", "python"]
+}

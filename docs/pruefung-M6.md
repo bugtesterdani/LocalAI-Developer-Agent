@@ -5,7 +5,7 @@ Freigaben und einem Content Gate dazwischen. Am Ende eines Runs werden die Ände
 Projektordner übernommen** (Diff je Datei, abwählbar, mit Sicherung). Der **Not-Aus** beendet jetzt auch Webabrufe und
 die laufende Ausführung in der VM. Ein unterbrochener Run lässt sich **fortsetzen**, ohne dass alte Freigaben gelten.
 
-Abnahme laut Plan: SEC-08 bis SEC-11, SEC-14, SEC-15.
+Abnahme laut Plan: SEC-08 bis SEC-11, SEC-14, SEC-15 (dazu die Übernahme, AC08).
 
 ## Was ist neu
 
@@ -93,12 +93,12 @@ $env:LOCALAI_M6_ABNAHME = "1"
 uv run --project src/python pytest -s tests/integration/test_m6_abnahme.py
 ```
 
-- [ ] **SEC-11:** Kopie von `samples\m4-python` (unter `%LOCALAPPDATA%\LocalAi\abnahme\m6-projekt`) → Patch → pytest
+- [ ] **AC08 (Übernahme):** Kopie von `samples\m4-python` (unter `%LOCALAPPDATA%\LocalAi\abnahme\m6-projekt`) → Patch → pytest
   in der VM grün → Vorbereitung zeigt `rechner/core.py` (Modify) und `tests/test_teilen.py` (Create) → Übernahme mit
   abgewählter Testdatei: nur `core.py` geändert, Original in der Sicherung; ein manipulierter Patch wird abgewiesen (422).
 - [ ] **SEC-08/09:** Abruf von `LOCALAI_M6_URL`: nach der ersten Freigabe kein Text, Quarantäne als *Low* gekennzeichnet;
   Text erst nach der zweiten Freigabe; falscher Hash → 409.
-- [ ] **SEC-10:** private/lokale URLs, IP-Schreibweisen (`0x7f000001`, `2130706433`), Port 8443, Zugangsdaten → abgewiesen,
+- [ ] **SEC-11:** private/lokale URLs, IP-Schreibweisen (`0x7f000001`, `2130706433`), Port 8443, Zugangsdaten → abgewiesen,
   ohne Vorschlag; `https://localtest.me/` (DNS → 127.0.0.1) scheitert beim Abruf; `https://google.com/` → Weiterleitung
   gemeldet, nicht verfolgt.
 - [ ] **SEC-15:** langer Test (`time.sleep(900)`) läuft in der VM → Not-Aus → Ergebnis nach wenigen Sekunden „nicht

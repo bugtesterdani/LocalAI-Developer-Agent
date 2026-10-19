@@ -95,10 +95,21 @@ public sealed class AuditJournal : IDisposable
     }
 
     /// <summary>Prüft ein Journal vollständig (auch während der Broker läuft). Gibt die Anzahl der Einträge zurück.</summary>
-    public static int Verify(string path)
+    public static int Verify(string path) => ReadVerified(path).Count;
+
+    /// <summary>Liest alle Einträge nur lesend und prüft dabei die Hashkette (auch während der Broker läuft).</summary>
+    public static IReadOnlyList<JournalEntry> ReadVerified(string path)
     {
         using var connection = Open(path, readOnly: true);
-        return ReadAndVerify(connection).Count;
+        return ReadAndVerify(connection);
+    }
+
+    /// <summary>Konsistente Kopie im laufenden Betrieb (SQLite-Online-Backup), z. B. für die Sicherung.</summary>
+    public static void BackupTo(string path, string target)
+    {
+        using var source = Open(path, readOnly: true);
+        using var destination = Open(target, readOnly: false);
+        source.BackupDatabase(destination);
     }
 
     private static List<JournalEntry> ReadAndVerify(SqliteConnection connection)

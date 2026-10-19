@@ -207,7 +207,7 @@
                                             </TextBlock>
                                             <TextBlock Text="{Binding Time}" Foreground="#6B7280" Margin="8,0,0,0" />
                                         </StackPanel>
-                                        <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                        <TextBox AutomationProperties.Name="{Binding Text}" Text="{Binding Text, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -310,7 +310,7 @@
                                                     <StackPanel>
                                                         <TextBlock Text="{Binding TitleText}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                                         <TextBlock Text="{Binding StatusText}" Foreground="#374151" TextWrapping="Wrap" />
-                                                        <TextBox Text="{Binding DetailText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontSize="11" />
+                                                        <TextBox AutomationProperties.Name="{Binding TitleText}" Text="{Binding DetailText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontSize="11" />
                                                         <TextBlock Text="{Binding ProblemsText}" Foreground="#B91C1C" TextWrapping="Wrap"
                                                                    Visibility="{Binding ProblemsText, Converter={StaticResource EmptyToCollapsed}}" />
                                                     </StackPanel>
@@ -321,6 +321,36 @@
                                 </ItemsControl>
                             </ScrollViewer>
                         </DockPanel>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabSystem}">
+                        <!-- System (M7): Versions-/Offline-Manifest, Audit-Prüfung, Diagnosepaket, Sicherung -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="{loc:T SystemRefresh}" Command="{Binding RefreshManifestCommand}" Padding="8,2" />
+                                    <TextBlock Text="{loc:T SystemVersions}" Style="{StaticResource SectionHeader}" />
+                                </DockPanel>
+                                <TextBlock Text="{loc:T SystemMissing}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
+                                           Visibility="{Binding ManifestProblemsText, Converter={StaticResource EmptyToCollapsed}}" />
+                                <TextBox Text="{Binding ManifestProblemsText, Mode=OneWay}" Style="{StaticResource CopyableValue}" Foreground="#B91C1C"
+                                         AutomationProperties.Name="{loc:T SystemMissing}"
+                                         Visibility="{Binding ManifestProblemsText, Converter={StaticResource EmptyToCollapsed}}" />
+                                <TextBox Text="{Binding ManifestText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas" FontSize="12"
+                                         AutomationProperties.Name="{loc:T SystemVersions}" Margin="0,4,0,0" />
+
+                                <TextBlock Text="{loc:T SystemActions}" Style="{StaticResource SectionHeader}" Margin="0,12,0,4" />
+                                <TextBlock Text="{loc:T SystemHint}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="11" />
+                                <WrapPanel Margin="0,6,0,0">
+                                    <Button Content="{loc:T VerifyAudit}" Command="{Binding VerifyAuditCommand}" Padding="8,2" Margin="0,0,6,4" />
+                                    <Button Content="{loc:T CreateBackup}" Command="{Binding CreateBackupCommand}" Padding="8,2" Margin="0,0,6,4" />
+                                    <Button Content="{loc:T ExportDiagnostics}" Command="{Binding ExportDiagnosticsCommand}" Padding="8,2" Margin="0,0,6,4" />
+                                </WrapPanel>
+                                <CheckBox Content="{loc:T IncludeLogs}" IsChecked="{Binding IncludeLogs}" Margin="0,2,0,0" />
+                                <TextBox Text="{Binding SystemResultText, Mode=OneWay}" Style="{StaticResource CopyableValue}" Margin="0,8,0,0"
+                                         AutomationProperties.Name="{loc:T SystemActions}" />
+                            </StackPanel>
+                        </ScrollViewer>
                 </TabItem>
             </TabControl>
 
@@ -370,7 +400,7 @@
                                             <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="Bold" />
 
                                             <TextBlock Text="{loc:T LabelPurpose}" Style="{StaticResource FieldLabel}" />
-                                            <TextBox Text="{Binding PurposeText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                            <TextBox AutomationProperties.Name="{loc:T LabelPurpose}" Text="{Binding PurposeText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
 
                                             <Grid Margin="0,4,0,0">
                                                 <Grid.ColumnDefinitions>
@@ -379,69 +409,69 @@
                                                 </Grid.ColumnDefinitions>
                                                 <StackPanel Grid.Column="0">
                                                     <TextBlock Text="{loc:T LabelRole}" Style="{StaticResource FieldLabel}" />
-                                                    <TextBox Text="{Binding RoleText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                                    <TextBox AutomationProperties.Name="{loc:T LabelRole}" Text="{Binding RoleText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
                                                     <TextBlock Text="{loc:T LabelTool}" Style="{StaticResource FieldLabel}" />
-                                                    <TextBox Text="{Binding ToolText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                                    <TextBox AutomationProperties.Name="{loc:T LabelTool}" Text="{Binding ToolText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
                                                     <TextBlock Text="{loc:T LabelValidUntil}" Style="{StaticResource FieldLabel}" />
-                                                    <TextBox Text="{Binding ValidUntilText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                                    <TextBox AutomationProperties.Name="{loc:T LabelValidUntil}" Text="{Binding ValidUntilText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="1">
                                                     <TextBlock Text="{loc:T LabelSnapshot}" Style="{StaticResource FieldLabel}" />
-                                                    <TextBox Text="{Binding SnapshotText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                                    <TextBox AutomationProperties.Name="{loc:T LabelSnapshot}" Text="{Binding SnapshotText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
                                                     <TextBlock Text="{loc:T LabelSandbox}" Style="{StaticResource FieldLabel}" />
-                                                    <TextBox Text="{Binding SandboxText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                                    <TextBox AutomationProperties.Name="{loc:T LabelSandbox}" Text="{Binding SandboxText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
                                                     <TextBlock Text="{loc:T LabelParent}" Style="{StaticResource FieldLabel}"
                                                                Visibility="{Binding HasParent, Converter={StaticResource BoolToVis}}" />
-                                                    <TextBox Text="{Binding ParentText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
+                                                    <TextBox AutomationProperties.Name="{loc:T LabelParent}" Text="{Binding ParentText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
                                                              Visibility="{Binding HasParent, Converter={StaticResource BoolToVis}}" />
                                                 </StackPanel>
                                             </Grid>
 
                                             <TextBlock Text="{loc:T LabelHash}" Style="{StaticResource FieldLabel}" />
-                                            <TextBox Text="{Binding HashText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas" />
+                                            <TextBox AutomationProperties.Name="{loc:T LabelHash}" Text="{Binding HashText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas" />
 
                                             <TextBlock Text="{loc:T LabelSideEffects}" Style="{StaticResource FieldLabel}" />
-                                            <TextBox Text="{Binding SideEffectsText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
+                                            <TextBox AutomationProperties.Name="{loc:T LabelSideEffects}" Text="{Binding SideEffectsText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
 
                                             <TextBlock Text="{loc:T LabelArguments}" Style="{StaticResource FieldLabel}" />
-                                            <TextBox Text="{Binding ArgumentsText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas" />
+                                            <TextBox AutomationProperties.Name="{loc:T LabelArguments}" Text="{Binding ArgumentsText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas" />
 
                                             <!-- Toolchain.*: Toolchain, Aktion und typisierte Parameter in Klartext -->
                                             <TextBlock Text="{loc:T LabelCommand}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsToolchain, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding CommandText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelCommand}" Text="{Binding CommandText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsToolchain, Converter={StaticResource BoolToVis}}" />
 
                                             <!-- Web.Fetch: genau eine URL mit Grenzen (erste Freigabe) -->
                                             <TextBlock Text="{loc:T LabelWebFetch}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebFetchText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebFetch}" Text="{Binding WebFetchText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebDataWarnings}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
                                                        Visibility="{Binding HasWebDataWarnings, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebDataWarningsText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebDataWarnings}" Text="{Binding WebDataWarningsText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
                                                      Visibility="{Binding HasWebDataWarnings, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebData}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebDataText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebData}" Text="{Binding WebDataText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebRequest}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebRequestText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebRequest}" Text="{Binding WebRequestText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
 
                                             <!-- Web.Content: exakt dieser bereinigte Text an genau diesen Agenten (zweite Freigabe) -->
                                             <TextBlock Text="{loc:T LabelWebSource}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebSourceText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebSource}" Text="{Binding WebSourceText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebResponse}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebResponseText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebResponse}" Text="{Binding WebResponseText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebWarnings}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
                                                        Visibility="{Binding HasWebWarnings, Converter={StaticResource BoolToVis}}" />
-                                            <TextBox Text="{Binding WebWarningsText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
+                                            <TextBox AutomationProperties.Name="{loc:T LabelWebWarnings}" Text="{Binding WebWarningsText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
                                                      Visibility="{Binding HasWebWarnings, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebText}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />

@@ -52,6 +52,24 @@ public sealed partial class DesktopTests
         Assert.True(missing.Count == 0, "Unbekannte Bindings: " + string.Join(", ", missing));
     }
 
+    [Fact, Trait("Pruefung", "AC10")]
+    public void Bedienelemente_sind_fuer_Screenreader_benannt_und_Ablehnen_hat_den_Fokus()
+    {
+        var doc = XDocument.Parse(File.ReadAllText(XamlPath()));
+        XNamespace wpf = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        static bool Named(XElement e) => e.Attributes().Any(a => a.Name.LocalName == "AutomationProperties.Name" && a.Value.Length > 0);
+        var unnamedText = doc.Descendants(wpf + "TextBox").Where(e => e.Attribute("Text") is not null && !Named(e)).ToList();
+        Assert.True(unnamedText.Count == 0, "Textfelder ohne Namen: " + string.Join(", ", unnamedText.Select(e => e.Attribute("Text")!.Value)));
+        var unnamedButtons = doc.Descendants(wpf + "Button").Where(e => e.Attribute("Content") is null && !Named(e)).ToList();
+        Assert.Empty(unnamedButtons);
+        // Keine implizite Zustimmung: die Karte fokussiert „Ablehnen“, Erlauben hat keine Tastenkürzel/IsDefault.
+        var text = File.ReadAllText(XamlPath());
+        Assert.Contains("FocusManager.FocusedElement=\"{Binding ElementName=DenyButton}\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(doc.Descendants(wpf + "Button"), b => b.Attribute("IsDefault")?.Value == "True"
+                                                                     && (b.Attribute("Command")?.Value.Contains("Approve", StringComparison.Ordinal) ?? false));
+        Assert.DoesNotContain(doc.Descendants(wpf + "KeyBinding"), k => k.Attribute("Command")?.Value.Contains("Approve", StringComparison.Ordinal) ?? false);
+    }
+
     [Fact, Trait("Pruefung", "AC16")]
     public void Zustandstexte_sind_vollstaendig_deutsch()
     {

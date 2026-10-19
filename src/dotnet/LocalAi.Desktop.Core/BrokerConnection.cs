@@ -223,6 +223,15 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
     public async Task<WebCapture?> WebCaptureAsync(string captureId, CancellationToken ct) =>
         ContractJson.Deserialize<WebCapture>(await CallAsync(M.WebCapture, new { captureId }, ct).ConfigureAwait(false));
 
+    public Task<JsonElement> ManifestAsync(CancellationToken ct) => CallAsync(M.SystemManifest, null, ct);
+
+    public Task<JsonElement> AuditVerifyAsync(CancellationToken ct) => CallAsync(M.AuditVerify, null, ct);
+
+    public Task<JsonElement> DiagnosticsExportAsync(bool includeLogs, CancellationToken ct) =>
+        CallAsync(M.DiagnosticsExport, new { includeLogs }, ct);
+
+    public Task<JsonElement> BackupCreateAsync(CancellationToken ct) => CallAsync(M.BackupCreate, null, ct);
+
     public async ValueTask DisposeAsync()
     {
         await _stream.DisposeAsync().ConfigureAwait(false);

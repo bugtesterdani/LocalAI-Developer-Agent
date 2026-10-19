@@ -44,6 +44,10 @@ public static class PipeProtocol
 
         /// <summary>Sanitisierter Text eines Webabrufs für die Inhaltsfreigabe – nur die Oberfläche (SEC-09).</summary>
         public const string WebCapture = "web.capture";
+        public const string SystemManifest = "system.manifest";
+        public const string AuditVerify = "audit.verify";
+        public const string DiagnosticsExport = "diagnostics.export";
+        public const string BackupCreate = "backup.create";
     }
 
     public static async Task<byte[]?> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)

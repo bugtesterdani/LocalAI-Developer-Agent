@@ -111,7 +111,7 @@ public sealed class M6Tests : IDisposable
         public WebCapture? Find(string captureId) => null;
     }
 
-    [Fact, Trait("Pruefung", "SEC-10")]
+    [Fact, Trait("Pruefung", "SEC-11")]
     public void Hostliste_begrenzt_Webabrufe()
     {
         Assert.Equal("*.microsoft.com", UrlPolicy.NormalizeAllowedHost(" *.Microsoft.COM. "));
@@ -215,7 +215,7 @@ public sealed class M6Tests : IDisposable
         Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("proxy").ValueKind);
     }
 
-    [Fact, Trait("Pruefung", "SEC-10")]
+    [Fact, Trait("Pruefung", "AC04"), Trait("Pruefung", "SEC-08")]
     public void Ausgehende_Anfrage_wird_genau_gezeigt_und_Datenabfluss_markiert()
     {
         var text = WebRequestPreview.RequestText("https://docs.python.org/3/library/fractions.html?highlight=x", "über Proxy p:1");
@@ -307,7 +307,7 @@ public sealed class M6Tests : IDisposable
 
     // ------------------------------------------------------------------ Übernahme (B10)
 
-    [Fact, Trait("Pruefung", "B10")]
+    [Fact, Trait("Pruefung", "B10"), Trait("Pruefung", "AC08")]
     public void Diff_zeigt_Aenderungen_mit_Kontext()
     {
         var diff = LineDiff.Unified("src/a.py", "a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nX\ne\nf\ng\nh\n");
@@ -353,7 +353,7 @@ public sealed class M6Tests : IDisposable
         JsonSerializer.SerializeToElement(new { grantId = "g", stagingId = preview.StagingId, patch = preview.Patch }),
         paths.Select((p, i) => new ToolTarget($"t{i + 1}", p)).ToList(), "-", 1, "sbx", "2026-10-19T09:00:00Z", "2026-10-19T09:05:00Z");
 
-    [Fact, Trait("Pruefung", "B10")]
+    [Fact, Trait("Pruefung", "B10"), Trait("Pruefung", "AC08")]
     public async Task Uebernahme_schreibt_nur_nach_Freigabe_und_nur_unveraenderte_Dateien()
     {
         var (staging, policy, root) = Export();
@@ -393,7 +393,7 @@ public sealed class M6Tests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "weg.py")));
     }
 
-    [Fact, Trait("Pruefung", "B10")]
+    [Fact, Trait("Pruefung", "B10"), Trait("Pruefung", "AC08")]
     public void Uebernahme_braucht_Rechte_je_Aenderungsart_und_abgeleiteten_Snapshot()
     {
         var (staging, policy, _) = Export(FolderRight.List, FolderRight.Read, FolderRight.Modify);
@@ -406,7 +406,7 @@ public sealed class M6Tests : IDisposable
         Assert.Equal(BrokerErrorCodes.Conflict, Code(() => policy.Validate(Request("Workspace.Diff", new { grantId = "g", baseSnapshotId = "fremd" }, "neu"))));
     }
 
-    [Fact, Trait("Pruefung", "B10")]
+    [Fact, Trait("Pruefung", "B10"), Trait("Pruefung", "AC08")]
     public void Staging_lehnt_falsche_Hashes_und_Pfadausbrueche_ab()
     {
         var (staging, _, _) = Export();

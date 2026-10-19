@@ -211,6 +211,18 @@ public sealed class ApprovalBroker : IAsyncDisposable
 
     // ------------------------------------------------------------------ UI
 
+    /// <summary>Anzahl Vorschläge je Werkzeug und Zustand (Diagnose, ohne Argumente oder Inhalte).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> StateCounts()
+    {
+        lock (_gate)
+        {
+            return _entries.Values
+                .GroupBy(e => e.Proposal.Tool, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => (IReadOnlyDictionary<string, int>)g.GroupBy(e => e.State.ToString())
+                    .ToDictionary(s => s.Key, s => s.Count(), StringComparer.Ordinal), StringComparer.Ordinal);
+        }
+    }
+
     public IReadOnlyList<ProposalView> Pending()
     {
         lock (_gate)

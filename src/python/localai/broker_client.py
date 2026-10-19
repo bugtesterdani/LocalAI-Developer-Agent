@@ -124,5 +124,18 @@ class BrokerClient:
     def release(self) -> None:
         self.pipe.call("run.release")
 
+    # ---------------------------------------------------------------- System (M7, nur Oberfläche)
+    def system_manifest(self) -> dict[str, Any]:
+        return self.pipe.call("system.manifest", {})
+
+    def audit_verify(self) -> dict[str, Any]:
+        return self.pipe.call("audit.verify", {})
+
+    def diagnostics_export(self, include_logs: bool = False) -> dict[str, Any]:
+        return self.pipe.call("diagnostics.export", {"includeLogs": include_logs})
+
+    def backup_create(self) -> dict[str, Any]:
+        return self.pipe.call("backup.create", {})
+
     def close(self) -> None:
         self.pipe.close()

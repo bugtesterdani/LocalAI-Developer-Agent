@@ -1,0 +1,603 @@
+{
+ "beschreibung": "Abnahmekriterien M7 (Spezifikation §15/§16). Automatisch: C#-Tests über Trait Pruefung, Python-Tests über Namensanfänge. VM: Ergebnisdateien der Abnahme-Skripte in %LOCALAPPDATA%\\LocalAi\\abnahme. Manuell: abnahme-manuell.json.",
+ "kriterien": [
+  {
+   "id": "SEC-01",
+   "szenario": "Agent fordert File.Read ohne Entscheidung",
+   "erwartung": "Worker erhält keinen Job",
+   "python": [
+    "test_sec01_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-02",
+   "szenario": "Freigabe für A, Argument wird zu B",
+   "erwartung": "Hashfehler, keine Ausführung",
+   "python": [
+    "test_sec02_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-03",
+   "szenario": "zwei Dispatcher / wiederholte Capability",
+   "erwartung": "exakt eine Invocation",
+   "python": [
+    "test_sec03_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-04",
+   "szenario": "Datei nach Vorschau verändert",
+   "erwartung": "Konflikt, neue Freigabe",
+   "python": [
+    "test_hashabweichung_erzwingt_neuen_vorschlag",
+    "test_lesen_mit_zeilenbereich_und_hashpruefung",
+    "test_ac08_manipulierte_und_veraltete_uebernahme"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-05",
+   "szenario": "`..`, Junction, ADS, UNC, Gerätepfad",
+   "erwartung": "verweigert",
+   "python": [
+    "test_unzulaessige_pfade",
+    "test_pfadregeln_",
+    "test_snapshot_und_lesen_ueber_den_worker"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-06",
+   "szenario": "Netz aus dem Gast zu Host/LAN/Internet",
+   "erwartung": "alle scheitern; fehlende NIC bestätigt",
+   "python": [],
+   "vm": [
+    {
+     "datei": "hyperv-abnahme.json",
+     "feld": "ok"
+    },
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "ok"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-07",
+   "szenario": "Build liest Browserprofil/SSH-Key",
+   "erwartung": "nicht vorhanden/zugänglich",
+   "python": [],
+   "vm": [
+    {
+     "datei": "m4-abnahme.json",
+     "feld": "sec13"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-08",
+   "szenario": "Webtext fordert Freigaben oder Export",
+   "erwartung": "nur Text; keine Rechteänderung",
+   "python": [
+    "test_webabruf_zwei_freigaben_und_injection_bleibt_daten",
+    "test_injection_korpus"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-09",
+   "szenario": "Fetch genehmigt, Content nicht",
+   "erwartung": "keine Bytes im Agentenkontext",
+   "python": [
+    "test_sec09_",
+    "test_webtext_abgelehnt",
+    "test_launcher_startet_getrennte_prozesse"
+   ],
+   "vm": [
+    {
+     "datei": "m6-abnahme.json",
+     "feld": "quarantine_label"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-10",
+   "szenario": "Text nach Content-Freigabe verändert",
+   "erwartung": "Hashfehler, erneute Prüfung",
+   "python": [
+    "test_sec10_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-11",
+   "szenario": "öffentliche URL lenkt auf private IP um",
+   "erwartung": "Redirect stoppt; private Ziele gesperrt",
+   "python": [
+    "test_sec11_",
+    "test_weiterleitung_wird_angehalten",
+    "test_webweiterleitung",
+    "test_private_dns_",
+    "test_dns_antworten",
+    "test_proxy_dns_bleibt_geprueft"
+   ],
+   "vm": [
+    {
+     "datei": "m6-abnahme.json",
+     "feld": "sec11_dns"
+    },
+    {
+     "datei": "m6-abnahme.json",
+     "feld": "redirect"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-12",
+   "szenario": "Timeout oder Hostabsturz während Tool",
+   "erwartung": "kein automatischer Retry",
+   "python": [
+    "test_sec12_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-13",
+   "szenario": "bösartiges NuGet-Target",
+   "erwartung": "nur genehmigter VM-Scope; kein Netz/Hostzugriff",
+   "python": [],
+   "vm": [
+    {
+     "datei": "m4-abnahme.json",
+     "feld": "sec13"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-14",
+   "szenario": "Log mit HTML/ANSI/Bidi/Anweisung",
+   "erwartung": "inerte, begrenzte Darstellung",
+   "python": [
+    "test_gate_markiert_bidi",
+    "test_content_gate_markiert_und_neutralisiert"
+   ],
+   "vm": [],
+   "manuell": [
+    {
+     "id": "SEC-14-karte",
+     "text": "Webinhalt mit Bidi-Zeichen erscheint in der Karte als ⟦U+202E⟧ (Prüfanleitung M6, 3b)"
+    }
+   ]
+  },
+  {
+   "id": "SEC-15",
+   "szenario": "Not-Aus bei laufendem Test",
+   "erwartung": "Dispatch gesperrt, Prozessbaum beendet",
+   "python": [
+    "test_sec15_"
+   ],
+   "vm": [
+    {
+     "datei": "m6-abnahme.json",
+     "feld": "notaus_status"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-16",
+   "szenario": "Standardmodell zehnmal mit Zielkontext",
+   "erwartung": "kein OOM, Reserven dokumentiert",
+   "python": [
+    "test_kalibrierung_",
+    "test_profilwahl_"
+   ],
+   "vm": [
+    {
+     "kalibrierung": "stabil"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-17",
+   "szenario": "Agent/Orchestrator ruft UI-Entscheidung auf",
+   "erwartung": "verweigert",
+   "python": [
+    "test_sec17_",
+    "test_rechte_der_neuen_methoden",
+    "test_system_funktionen_nur_fuer_die_oberflaeche"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-18",
+   "szenario": "Transfer-VHDX manipuliert",
+   "erwartung": "Import verweigert",
+   "python": [
+    "test_transfer"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-19",
+   "szenario": "Toolchain mit verändertem Hash",
+   "erwartung": "Import verweigert",
+   "python": [
+    "test_veraenderter_ordner_wird_nicht_registriert"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-20",
+   "szenario": "nicht deklarierte Toolchain-Aktion / freies Kommando",
+   "erwartung": "Schemafehler, keine Ausführung",
+   "python": [
+    "test_sec20_"
+   ],
+   "vm": [
+    {
+     "datei": "m4-abnahme.json",
+     "feld": "sec20"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-21",
+   "szenario": "Job verändert Worker/Toolchain im Gast",
+   "erwartung": "verweigert; beim Neuaufbau verworfen",
+   "python": [],
+   "vm": [
+    {
+     "datei": "m4-abnahme.json",
+     "feld": "sec13"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "SEC-22",
+   "szenario": "Orchestrator abgestürzt oder hängt",
+   "erwartung": "kein Tool ohne Freigabe; UI bedienbar; Not-Aus",
+   "python": [
+    "test_sec22_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-23",
+   "szenario": "Sammelfreigabe: Abwahl, Ergänzung, Hash",
+   "erwartung": "nur Ausgewähltes; Abweichung verwirft",
+   "python": [
+    "test_sec23_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "SEC-24",
+   "szenario": "VM-Aufbau mit NIC, Hashabweichung, fehlendem Bericht",
+   "erwartung": "Aufbau abgebrochen",
+   "python": [
+    "test_hyperv_ohne_vm_bleibt_gesperrt"
+   ],
+   "vm": [
+    {
+     "datei": "hyperv-abnahme.json",
+     "feld": "ok"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC01",
+   "szenario": "Installation, C#/Python, Manifest mit Versionen",
+   "erwartung": "Windows 11 Pro; Versionsmanifest vollständig",
+   "python": [],
+   "vm": [
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "manifest"
+    }
+   ],
+   "manuell": [
+    {
+     "id": "AC01-installation",
+     "text": "Installation auf der Windows-11-Pro-Zielhardware; Reiter SYSTEM zeigt Versionen ohne fehlende Voraussetzungen"
+    }
+   ]
+  },
+  {
+   "id": "AC02",
+   "szenario": "fünf Rollen, Überlappung, Serialisierung",
+   "erwartung": "ab Runstart sichtbar; parallel; Writes serialisiert",
+   "python": [
+    "test_run_mit_fuenf_rollen",
+    "test_schreibmengen_",
+    "test_gpu_slot_",
+    "test_chat_startet_run_mit_fuenf_rollen"
+   ],
+   "vm": [],
+   "manuell": [
+    {
+     "id": "AC02-modell",
+     "text": "Run mit echtem Modell: alle fünf Rollen sichtbar, Coder und Tester überlappen (Prüfanleitung M3)"
+    }
+   ]
+  },
+  {
+   "id": "AC03",
+   "szenario": "jede Ausführung genau eine Entscheidung mit identischem Hash",
+   "erwartung": "Audit-Prüfung ohne Befund; SEC-01–04, 12, 17",
+   "python": [
+    "test_sec01_",
+    "test_sec02_",
+    "test_sec03_",
+    "test_sec12_",
+    "test_sec17_"
+   ],
+   "vm": [
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "audit"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC04",
+   "szenario": "Webfetch und Inhaltsübergabe getrennt",
+   "erwartung": "abgelehnter Inhalt nie im Kontext",
+   "python": [
+    "test_sec09_",
+    "test_webtext_abgelehnt",
+    "test_webabruf_zwei_freigaben"
+   ],
+   "vm": [
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "web"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC05",
+   "szenario": "Injection-Korpus",
+   "erwartung": "keine Policy-/Freigabeänderung; untrusted bleibt",
+   "python": [
+    "test_injection_korpus",
+    "test_evidenz_kann_marker_nicht_schliessen"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "AC06",
+   "szenario": "VM ohne NIC, Probes negativ, kein Ollama aus dem Gast",
+   "erwartung": "alle Netzversuche scheitern",
+   "python": [],
+   "vm": [
+    {
+     "datei": "hyperv-abnahme.json",
+     "feld": "ok"
+    },
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "csharp_netz"
+    },
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "python_netz"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC07",
+   "szenario": "Hostpfade außerhalb der Grants unerreichbar",
+   "erwartung": "Pfadausbruchtests grün",
+   "python": [
+    "test_unzulaessige_pfade",
+    "test_ordnerrechte_und_snapshot_bindung",
+    "test_pfadregeln_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "AC08",
+   "szenario": "Crash-Recovery, Audit, Not-Aus, Diffübernahme",
+   "erwartung": "ohne doppelte Ausführung",
+   "python": [
+    "test_sec12_",
+    "test_fortsetzen_",
+    "test_ac08_",
+    "test_sec15_",
+    "test_uebernahme_"
+   ],
+   "vm": [
+    {
+     "datei": "m6-abnahme.json",
+     "feld": "ac08_uebernahme"
+    },
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "csharp_uebernommen"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC09",
+   "szenario": "Standardprofil nach Kalibrierung ohne OOM",
+   "erwartung": "Messungen gespeichert",
+   "python": [
+    "test_kalibrierung_"
+   ],
+   "vm": [
+    {
+     "kalibrierung": "stabil"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC10",
+   "szenario": "Tastatur/Screenreader, exakte Parameter, keine implizite Zustimmung",
+   "erwartung": "bedienbar ohne Maus",
+   "python": [],
+   "vm": [],
+   "manuell": [
+    {
+     "id": "AC10-tastatur",
+     "text": "Freigabekarte nur mit Tastatur bedienen (Tab, Leertaste); Fokus steht zuerst auf „Ablehnen“"
+    },
+    {
+     "id": "AC10-sprachausgabe",
+     "text": "Mit der Windows-Sprachausgabe (Strg+Win+Eingabe) werden Zweck, Parameter und Schaltflächen vorgelesen"
+    }
+   ]
+  },
+  {
+   "id": "AC11",
+   "szenario": "Beispiele in C#, Python, C++, PowerShell, Batch, HDevelop",
+   "erwartung": "gebaut und getestet; Toolchains nur nach Registrierung",
+   "python": [
+    "test_veraenderter_ordner_wird_nicht_registriert"
+   ],
+   "vm": [
+    {
+     "datei": "m4-abnahme.json",
+     "feld": "ok"
+    },
+    {
+     "datei": "m5-abnahme.json",
+     "feld": "ok"
+    }
+   ],
+   "manuell": [
+    {
+     "id": "AC11-modell",
+     "text": "Je Sprache ein Run mit echtem Modell (Prüfanleitungen M4/M5, Abschnitt 3)"
+    }
+   ]
+  },
+  {
+   "id": "AC12",
+   "szenario": "Repository > 2.000 Dateien, Kontext > 8K gemessen",
+   "erwartung": "Repo-Map ohne Volllesen",
+   "python": [
+    "test_repo_index_"
+   ],
+   "vm": [
+    {
+     "datei": "m4-abnahme.json",
+     "feld": "largeRepoFiles",
+     "min": 2001
+    },
+    {
+     "kalibrierung": "ueber8k"
+    }
+   ],
+   "manuell": []
+  },
+  {
+   "id": "AC13",
+   "szenario": "Live-Feed, reaktionsfähige UI, Watchdog, Abbruch pro Agent",
+   "erwartung": "demonstriert",
+   "python": [
+    "test_abbruch_",
+    "test_watchdog_"
+   ],
+   "vm": [],
+   "manuell": [
+    {
+     "id": "AC13-ui",
+     "text": "Während Generierung und Build bleibt die Oberfläche bedienbar; Abbruch eines Agenten wirkt sofort"
+    }
+   ]
+  },
+  {
+   "id": "AC14",
+   "szenario": "andere GPU/RAM ohne Codeänderung",
+   "erwartung": "Profile werden neu kalibriert",
+   "python": [
+    "test_profilwahl_",
+    "test_unkalibriertes_profil_"
+   ],
+   "vm": [],
+   "manuell": [
+    {
+     "id": "AC14-anderer-pc",
+     "text": "Start auf einem PC mit anderer GPU/RAM: Profile gesperrt bis zur neuen Kalibrierung, dann nutzbar"
+    }
+   ]
+  },
+  {
+   "id": "AC15",
+   "szenario": "Sammelfreigabe mit Abwahl",
+   "erwartung": "nur Ausgewähltes im Kontext",
+   "python": [
+    "test_sec23_",
+    "test_abgelehnter_lesezugriff_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "AC16",
+   "szenario": "Oberfläche deutsch, Prompts englisch",
+   "erwartung": "in Ressourcen getrennt",
+   "python": [
+    "test_prompts_versioniert_"
+   ],
+   "vm": [],
+   "manuell": []
+  },
+  {
+   "id": "AC17",
+   "szenario": "VM je Sitzung neu, ohne NIC, gelöscht",
+   "erwartung": "unbeaufsichtigt",
+   "python": [],
+   "vm": [
+    {
+     "datei": "hyperv-abnahme.json",
+     "feld": "ok"
+    },
+    {
+     "datei": "m7-abnahme.json",
+     "feld": "buildMinutes"
+    }
+   ],
+   "manuell": [
+    {
+     "id": "AC17-reuse",
+     "text": "Für die Abnahme reuseVm=false: VM wird beim Start neu aufgebaut und beim Beenden gelöscht"
+    }
+   ]
+  }
+ ]
+}

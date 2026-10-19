@@ -11,7 +11,7 @@ Optional: ``$env:LOCALAI_M6_URL`` (öffentliche Seite, Standard https://example.
 
 Geprüft wird ohne Modell, direkt über den Broker (jede Aktion ein genehmigter Vorschlag):
 
-1. SEC-11: Kopie von samples/m4-python → Snapshot → Patch → pytest in der VM grün → Workspace.Diff → Übernahme mit
+1. AC08 (Übernahme): Kopie von samples/m4-python → Snapshot → Patch → pytest in der VM grün → Workspace.Diff → Übernahme mit
    Abwahl einer Datei; nur die freigegebene Datei ändert sich, das Original liegt in der Sicherung; manipulierte
    Übernahme wird abgewiesen.
 2. SEC-08/09/10: echter Abruf (Fetcher und Content Gate als getrennte Prozesse niedriger Integrität, Quarantäne als
@@ -101,8 +101,8 @@ def test_m6_abnahme():
             time.sleep(5)
         summary["buildMinutes"] = round((time.monotonic() - started) / 60, 1)
 
-        # 1. SEC-11 Übernahme
-        log("SEC-11: Snapshot, Patch, pytest, Übernahme …")
+        # 1. AC08 Übernahme
+        log("AC08: Snapshot, Patch, pytest, Übernahme …")
         snap = run(ui, orch, request("Workspace.Snapshot", {"grantId": "py", "root": str(project_dir)}, []))
         assert snap.state == ProposalState.Succeeded, snap
         base_id = snap.result.target_results[0].text
@@ -135,8 +135,8 @@ def test_m6_abnahme():
         note = next(r.text for r in out.result.target_results if r.target_id == "export")
         backup = pathlib.Path(note.split("Sicherung: ", 1)[1].strip())
         assert (backup / "rechner" / "core.py").read_bytes() == original
-        summary["sec11"] = {"exported": ["rechner/core.py"], "backup": str(backup)}
-        log("SEC-11 ok")
+        summary["ac08_uebernahme"] = {"exported": ["rechner/core.py"], "backup": str(backup)}
+        log("AC08 ok")
 
         # 2. SEC-08/09/10 Web
         if WEB:
@@ -171,11 +171,11 @@ def test_m6_abnahme():
             with pytest.raises(BrokerError) as err:
                 orch.submit(request("Web.Content", {"captureId": capture["captureId"], "textSha256": "0" * 64}, []))
             assert err.value.code == 409
-            log("SEC-10: DNS auf private Adresse …")
+            log("SEC-11: DNS auf private Adresse …")
             out = run(ui, orch, request("Web.Fetch", {"url": "https://localtest.me/"}, []), timeout=120)
             message = " ".join(r.message or "" for r in out.result.target_results) if out.result else ""
             assert out.state != ProposalState.Succeeded and ("öffentlich" in message or "public" in message.lower()), (out.state, message)
-            summary["sec10_dns"] = message[:200]
+            summary["sec11_dns"] = message[:200]
             out = run(ui, orch, request("Web.Fetch", {"url": "https://google.com/"}, []), timeout=120)
             info = json.loads(next(r.text for r in out.result.target_results if r.target_id == "capture")) if out.result else {}
             summary["redirect"] = info.get("redirect", "")

@@ -1,6 +1,6 @@
 """M6 mit echtem Broker, echtem Worker (dev-local-unsafe) und echtem Content Gate:
 
-* Übernahme (SEC-11): Workspace.Diff → Vorschau im Staging des Brokers → Workspace.ExportPatch mit Abwahl je Datei;
+* Übernahme (AC08, B10): Workspace.Diff → Vorschau im Staging des Brokers → Workspace.ExportPatch mit Abwahl je Datei;
   nur freigegebene Dateien ändern sich, Originale werden gesichert; manipulierte oder veraltete Übernahmen scheitern.
 * Web (SEC-08/09/10): URL-Prüfung im Broker, Abruf in die Quarantäne (Netz hier simuliert, Gate echt), Text erst
   nach zweiter Freigabe, Hash-Bindung; nachträglich veränderter Text wird nicht übergeben.
@@ -134,9 +134,9 @@ def export_request(preview, paths=None):
                            paths))
 
 
-# ---------------------------------------------------------------------- Übernahme (SEC-11)
+# ---------------------------------------------------------------------- Übernahme (AC08, B10)
 
-def test_sec11_uebernahme_mit_abwahl_und_sicherung(tmp_path, broker_factory):
+def test_ac08_uebernahme_mit_abwahl_und_sicherung(tmp_path, broker_factory):
     _b, ui, orch, project, base, head = sandbox_with_patch(tmp_path, broker_factory)
     with pytest.raises(BrokerError) as err:
         orch.submit(as_reviewer(req("Workspace.Diff", {"grantId": "p", "baseSnapshotId": base}, [], base)))
@@ -159,7 +159,7 @@ def test_sec11_uebernahme_mit_abwahl_und_sicherung(tmp_path, broker_factory):
     assert (backup / "src" / "calc.py").read_bytes() == ORIGINAL
 
 
-def test_sec11_manipulierte_und_veraltete_uebernahme(tmp_path, broker_factory):
+def test_ac08_manipulierte_und_veraltete_uebernahme(tmp_path, broker_factory):
     _b, ui, orch, project, base, head = sandbox_with_patch(tmp_path, broker_factory)
     preview = prepare(ui, orch, base, head)
     forged = export_request(preview)
@@ -195,7 +195,7 @@ def test_uebernahme_ohne_schreibrecht_abgewiesen(tmp_path, broker_factory):
 @pytest.mark.parametrize("url", ["http://docs.example.org/", "https://127.0.0.1/", "https://localhost/", "https://10.1.2.3/x",
                                  "https://[::1]/", "https://user:pw@docs.example.org/", "https://docs.example.org:8443/",
                                  "https://0x7f000001/", "https://intranet/", "https://drucker.local/", "file:///C:/geheim.txt"])
-def test_sec10_url_pruefung_im_broker(tmp_path, broker_factory, url):
+def test_sec11_url_pruefung_im_broker(tmp_path, broker_factory, url):
     b, _project = setup(tmp_path, broker_factory)
     with pytest.raises(BrokerError) as err:
         b.orchestrator().submit(req("Web.Fetch", {"url": url}))

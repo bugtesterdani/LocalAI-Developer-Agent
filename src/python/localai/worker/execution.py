@@ -464,6 +464,39 @@ def _parse_nunit(root: ET.Element, report: _Counts) -> None:
 _ERRORISH = re.compile(r"error|fail|exception|traceback|assert|warning CS|fehler", re.I)
 
 
+_MISSING = [
+    # NuGet (dotnet restore offline): NU1101 unbekanntes Paket, NU1102 Version fehlt, NU1103 nur Vorabversionen
+    (re.compile(r"NU110[123]\b[^\n]*?(?:package|Paket)\s+[\"'„]?([A-Za-z0-9_.\-]+)[\"'“]?(?:[^\n]*?\(>= ?([^)\s]+)\))?", re.I),
+     "NuGet-Paket {0}{1} fehlt in der Offline-Quelle – auf dem Host mit scripts/toolchains/Get-NuGetOfflinePackages.ps1 "
+     "in den packages-Ordner der Toolchain laden und die Toolchain neu registrieren"),
+    # pip (Wheelhouse)
+    (re.compile(r"(?:No matching distribution found for|Could not find a version that satisfies the requirement)\s+([A-Za-z0-9_.\-\[\]]+)"
+                r"(?:[=<>!~]=?\s*([^\s;,)]+))?", re.I),
+     "Python-Paket {0}{1} fehlt im Wheelhouse – auf dem Host mit pip download in den wheels-Ordner der Toolchain laden und "
+     "die Toolchain neu registrieren"),
+    # CMake find_package
+    (re.compile(r'Could not find a package configuration file provided by\s+"([^"]+)"(?:\s*\(requested\s+version\s+([^)\s]+)\))?', re.I),
+     "CMake-Paket {0}{1} fehlt – als vorgebautes vcpkg-Paket in packages/ der Toolchain ablegen und neu registrieren"),
+    # PowerShell-Modul
+    (re.compile(r"(?:module|Modul)\s+[\"'„]([A-Za-z0-9_.\-]+)[\"'“]\s+(?:was not loaded|wurde nicht geladen)", re.I),
+     "PowerShell-Modul {0}{1} fehlt – mit Save-Module in modules/ der Toolchain ablegen und neu registrieren"),
+]
+
+
+def procurement_hints(text: str, limit: int = 5) -> list[str]:
+    """Runbook „Offlinepaket fehlt“: fehlende Pakete aus dem Log als Beschaffungsvorschlag (nie automatisch geholt)."""
+    hints: list[str] = []
+    for pattern, template in _MISSING:
+        for m in pattern.finditer(text):
+            version = f" (Version {m.group(2)})" if m.lastindex and m.lastindex >= 2 and m.group(2) else ""
+            hint = "Beschaffungsvorschlag: " + template.format(m.group(1).rstrip("."), version)
+            if hint not in hints:
+                hints.append(hint)
+            if len(hints) >= limit:
+                return hints
+    return hints
+
+
 def log_excerpt(data: bytes, limit: int = 24_000) -> str:
     """Fehlerzeilen zuerst, dann das Ende der Ausgabe – innerhalb von ``limit`` Zeichen."""
     text = data.decode("utf-8", errors="replace").replace("\r\n", "\n")
@@ -630,6 +663,11 @@ class Executor:
             message += f"; Tests: {report.total}, bestanden {report.passed}, fehlgeschlagen {report.failed}, übersprungen {report.skipped}"
         if truncated:
             message += "; Ausgabe gekürzt"
+        if exit_code != 0:
+            hints = procurement_hints(b"".join(logs).decode("utf-8", errors="replace"))
+            report.problems.extend(hints)
+            if hints:
+                message += f"; {len(hints)} Beschaffungsvorschlag/-vorschläge (fehlende Offlinepakete)"
         command = shown[0].split(" ") if len(shown) == 1 else [x for i, step in enumerate(shown) for x in ((["→"] if i else []) + [step])]
         return ExecResult(report, log_excerpt(b"".join(logs)), message, seconds, command)
 
