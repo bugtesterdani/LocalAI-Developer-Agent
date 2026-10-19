@@ -206,6 +206,7 @@ def test_sec10_url_pruefung_im_broker(tmp_path, broker_factory, url):
 def test_sec09_webtext_erst_nach_zweiter_freigabe(tmp_path, broker_factory):
     b, _project = setup(tmp_path, broker_factory)
     ui, orch = b.ui(), b.orchestrator()
+    assert ui.status()["web"]["route"].startswith("direkt") and ui.status()["web"]["proxy"] is None
     fetched = approve_and_wait(ui, orch, orch.submit(req("Web.Fetch", {"url": "https://docs.example.org/rechner"})))
     assert fetched.state == ProposalState.Succeeded, fetched
     capture = json.loads(next(r.text for r in fetched.result.target_results if r.target_id == "capture"))

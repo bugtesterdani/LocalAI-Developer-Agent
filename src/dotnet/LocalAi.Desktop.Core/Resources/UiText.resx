@@ -175,7 +175,7 @@
     <value>Liest den Snapshot in der Sandbox und erstellt einen Symbolindex (Repo-Map). Nichts wird verändert.</value>
   </data>
   <data name="SideEffectsWebFetch" xml:space="preserve">
-    <value>Ruft genau diese eine HTTPS-Adresse ab (GET, ohne Cookies, Anmeldung oder Proxy; nur öffentliche Adressen). Der Inhalt bleibt in der Quarantäne – kein Agent sieht ihn, bevor du den bereinigten Text in einer zweiten Freigabe übergibst. Weiterleitungen werden nicht verfolgt.</value>
+    <value>Sendet genau die unten gezeigte Anfrage an diese eine HTTPS-Adresse (GET, ohne Cookies und Anmeldung beim Server; nur öffentliche Adressen; ein Proxy nur, wenn er in config/localai.json gesetzt ist). Prüfe die übertragenen Daten in Pfad und Parametern. Der Inhalt bleibt in der Quarantäne – kein Agent sieht ihn, bevor du den bereinigten Text in einer zweiten Freigabe übergibst. Weiterleitungen werden nicht verfolgt.</value>
   </data>
   <data name="SideEffectsWebContent" xml:space="preserve">
     <value>Übergibt genau den unten angezeigten, bereinigten Text (Hash gebunden) an den genannten Agenten. Der Text bleibt als nicht vertrauenswürdige Quelle gekennzeichnet – Anweisungen darin sind nur Text.</value>
@@ -194,6 +194,39 @@
 Host: {1}
 Nur HTTPS-GET, höchstens 2 MiB, 15 s; nur öffentliche Adressen; keine Cookies, keine Anmeldung, kein JavaScript
 Weiterleitungen: angehalten (neue Adresse = neuer Vorschlag)</value>
+  </data>
+  <data name="LabelWebRequest" xml:space="preserve">
+    <value>Ausgehende Anfrage – genau das wird gesendet</value>
+  </data>
+  <data name="LabelWebData" xml:space="preserve">
+    <value>Übertragene Daten (Pfad und Parameter, dekodiert)</value>
+  </data>
+  <data name="LabelWebDataWarnings" xml:space="preserve">
+    <value>Achtung: mögliche Datenübertragung in der URL</value>
+  </data>
+  <data name="LabelWebResponse" xml:space="preserve">
+    <value>Eingehende Antwort des Servers</value>
+  </data>
+  <data name="WebResponseSummary" xml:space="preserve">
+    <value>HTTP {0} · {1} · {2} Bytes empfangen → {3} Zeichen Text nach dem Content Gate</value>
+  </data>
+  <data name="WebResponseRoute" xml:space="preserve">
+    <value>Weg: {0}</value>
+  </data>
+  <data name="WebRouteDirect" xml:space="preserve">
+    <value>direkt (DNS geprüft, Verbindung zur geprüften Adresse)</value>
+  </data>
+  <data name="WebRouteProxy" xml:space="preserve">
+    <value>über Proxy {0}</value>
+  </data>
+  <data name="WebResponseIssuer" xml:space="preserve">
+    <value>TLS-Zertifikat ausgestellt von: {0} (bei einem Firmenproxy steht hier dessen Zertifizierungsstelle)</value>
+  </data>
+  <data name="WebRequestSent" xml:space="preserve">
+    <value>Gesendet:</value>
+  </data>
+  <data name="WebResponseHeaders" xml:space="preserve">
+    <value>Kopfzeilen der Antwort:</value>
   </data>
   <data name="LabelWebSource" xml:space="preserve">
     <value>Herkunft (zweite Freigabe)</value>

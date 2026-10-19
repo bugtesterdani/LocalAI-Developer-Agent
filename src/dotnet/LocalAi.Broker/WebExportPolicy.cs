@@ -12,6 +12,9 @@ public interface IWebCaptures
     /// <summary>Größenlimit eines Abrufs (Standard 2 MiB).</summary>
     long MaxBytes { get; }
 
+    /// <summary>Erlaubte Hosts (<c>web.allowedHosts</c>); leer = alle öffentlichen.</summary>
+    IReadOnlyList<string> AllowedHosts => [];
+
     WebCapture? Find(string captureId);
 }
 
@@ -40,6 +43,42 @@ public static partial class UrlPolicy
 
     [GeneratedRegex(@"^[a-z0-9.-]+$")]
     private static partial Regex HostChars();
+
+    /// <summary>
+    /// Host gegen <c>web.allowedHosts</c>: <c>docs.python.org</c> genau dieser Host, <c>*.microsoft.com</c> alle
+    /// Unterdomänen (nicht die Domain selbst). Leere Liste = alle (öffentlichen) Hosts.
+    /// </summary>
+    public static bool HostAllowed(string host, IReadOnlyList<string> allowed)
+    {
+        if (allowed.Count == 0)
+        {
+            return true;
+        }
+        host = host.TrimEnd('.').ToLowerInvariant();
+        return allowed.Any(a => a.StartsWith("*.", StringComparison.Ordinal)
+            ? host.EndsWith(a[1..], StringComparison.Ordinal) && host.Length > a.Length - 1
+            : host == a);
+    }
+
+    [GeneratedRegex(@"^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$")]
+    private static partial Regex AllowedHostPattern();
+
+    /// <summary>Eintrag für <c>web.allowedHosts</c> normalisieren (IDNA, klein) oder null, wenn ungültig.</summary>
+    public static string? NormalizeAllowedHost(string entry)
+    {
+        var text = entry.Trim().TrimEnd('.');
+        var wildcard = text.StartsWith("*.", StringComparison.Ordinal);
+        try
+        {
+            var ascii = new IdnMapping().GetAscii(wildcard ? text[2..] : text).ToLowerInvariant();
+            var normalized = (wildcard ? "*." : "") + ascii;
+            return AllowedHostPattern().IsMatch(normalized) ? normalized : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Gibt die URL ohne Fragment zurück oder wirft 403 mit deutscher Begründung.</summary>
     public static (string Url, string Host) Validate(string? url)

@@ -100,6 +100,141 @@ public sealed class M6Tests : IDisposable
         Assert.Equal(BrokerErrorCodes.Conflict, Code(() => policy.Validate(Request("Web.Content", new { captureId = new string('d', 32), textSha256 = Sha("Hallo") }))));
     }
 
+    // ------------------------------------------------------------------ Hostliste, Proxy, ausgehende Anfrage
+
+    private sealed class AllowedCaptures(params string[] hosts) : IWebCaptures
+    {
+        public long MaxBytes => 1024;
+
+        public IReadOnlyList<string> AllowedHosts => hosts;
+
+        public WebCapture? Find(string captureId) => null;
+    }
+
+    [Fact, Trait("Pruefung", "SEC-10")]
+    public void Hostliste_begrenzt_Webabrufe()
+    {
+        Assert.Equal("*.microsoft.com", UrlPolicy.NormalizeAllowedHost(" *.Microsoft.COM. "));
+        Assert.Equal("xn--bcher-kva.example.com", UrlPolicy.NormalizeAllowedHost("bücher.example.com"));
+        Assert.Null(UrlPolicy.NormalizeAllowedHost("*"));
+        Assert.Null(UrlPolicy.NormalizeAllowedHost("https://docs.python.org/"));
+        string[] allowed = ["docs.python.org", "*.microsoft.com"];
+        Assert.True(UrlPolicy.HostAllowed("docs.python.org", allowed));
+        Assert.True(UrlPolicy.HostAllowed("learn.microsoft.com", allowed));
+        Assert.False(UrlPolicy.HostAllowed("microsoft.com", allowed));
+        Assert.False(UrlPolicy.HostAllowed("evilmicrosoft.com", allowed));
+        Assert.False(UrlPolicy.HostAllowed("python.org", allowed));
+        Assert.True(UrlPolicy.HostAllowed("irgendwas.org", []));
+
+        var project = new ProjectConfig(1, "p", "P", [new FolderGrant("g", "/p", [FolderRight.List, FolderRight.Read], true)]);
+        var policy = new ProposalPolicy(new BrokerOptions(), new ProjectPolicyContext(project, new SnapshotRegistry())
+        {
+            WebCaptures = new AllowedCaptures(allowed),
+        });
+        policy.Validate(Request("Web.Fetch", new { url = "https://learn.microsoft.com/de-de/dotnet/" }));
+        Assert.Equal(BrokerErrorCodes.Forbidden, Code(() => policy.Validate(Request("Web.Fetch", new { url = "https://pastebin.com/raw/x" }))));
+    }
+
+    [Theory]
+    [InlineData("http://proxy.firma.de:8080", "http://proxy.firma.de:8080")]
+    [InlineData("http://10.1.2.3:3128/", "http://10.1.2.3:3128")]
+    [InlineData("http://127.0.0.1:3128", "http://127.0.0.1:3128")]
+    public void Proxy_Url_wird_geprueft(string url, string expected) =>
+        Assert.Equal(expected, WebProxySettings.Parse(url, null, null, false, false).Url);
+
+    [Theory]
+    [InlineData("https://proxy:8080")]
+    [InlineData("http://user:pw@proxy:8080")]
+    [InlineData("http://proxy")]
+    [InlineData("http://proxy:8080/pfad")]
+    [InlineData("socks5://proxy:1080")]
+    public void Ungueltige_Proxy_Url_wird_abgewiesen(string url) =>
+        Assert.Throws<JsonException>(() => WebProxySettings.Parse(url, null, null, false, false));
+
+    [Fact]
+    public void Konfiguration_liest_Proxy_Hostliste_und_Zertifikat()
+    {
+        var cfg = Directory.CreateDirectory(Path.Combine(_dir, "repo", "config")).FullName;
+        File.WriteAllText(Path.Combine(_dir, "repo", "firma.pem"), "-----BEGIN CERTIFICATE-----\n");
+        File.WriteAllText(Path.Combine(_dir, "repo", "proxy.pw"), "geheim");
+        var file = Path.Combine(cfg, "localai.json");
+        File.WriteAllText(file, """
+            { "web": { "caFile": "firma.pem", "allowedHosts": ["docs.python.org", "*.microsoft.com"],
+                       "proxy": { "url": "http://proxy.firma.de:8080", "username": "dani", "passwordFile": "proxy.pw", "dnsViaProxy": true } } }
+            """);
+        var options = HostOptions.Parse(["--config", file, "--data", Path.Combine(_dir, "data")]);
+        var web = Assert.IsType<WebSettings>(options.Web);
+        Assert.Equal(["docs.python.org", "*.microsoft.com"], web.AllowedHosts);
+        Assert.Equal(Path.Combine(_dir, "repo", "firma.pem"), web.CaFile);
+        Assert.Equal("http://proxy.firma.de:8080", web.Proxy!.Url);
+        Assert.True(web.Proxy.DnsViaProxy && !web.Proxy.ConnectByAddress);
+        Assert.Contains("über Proxy proxy.firma.de:8080", web.RouteText, StringComparison.Ordinal);
+
+        File.WriteAllText(file, """{ "web": { "caFile": "fehlt.pem" } }""");
+        Assert.Throws<JsonException>(() => HostOptions.Parse(["--config", file, "--data", Path.Combine(_dir, "data")]));
+        File.WriteAllText(file, """{ "web": { "allowedHosts": ["10.0.0.0/8"] } }""");
+        Assert.Throws<JsonException>(() => HostOptions.Parse(["--config", file, "--data", Path.Combine(_dir, "data")]));
+    }
+
+    [Fact]
+    public async Task Proxy_und_Zertifikat_gehen_nur_als_Argumente_an_den_Fetcher()
+    {
+        var script = Path.Combine(_dir, "argv.py");
+        var argv = Path.Combine(_dir, "argv.json");
+        File.WriteAllText(script, $$"""
+            import json, os, pathlib, sys
+            pathlib.Path({{JsonSerializer.Serialize(argv)}}).write_text(json.dumps({"argv": sys.argv[1:], "proxy": os.environ.get("HTTPS_PROXY")}))
+            work = pathlib.Path(sys.argv[sys.argv.index("--work") + 1])
+            (work / "result.json").write_text(json.dumps({"stage": "fetch", "error": "Testabbruch"}))
+            """);
+        var pw = Path.Combine(_dir, "pw.txt");
+        File.WriteAllText(pw, "geheim");
+        var settings = new WebSettings
+        {
+            Command = new ProcessCommand(OperatingSystem.IsWindows() ? "python" : "python3", [script], _dir), LowIntegrity = false,
+            CaFile = Path.Combine(_dir, "firma.pem"), Proxy = WebProxySettings.Parse("http://proxy.firma.de:8080", "dani", pw, false, true),
+        };
+        var store = new WebCaptureStore(Path.Combine(_dir, "web"), settings, _clock);
+        var adapter = new WebToolAdapter(store, settings, Path.Combine(_dir, "web.log"));
+        Environment.SetEnvironmentVariable("HTTPS_PROXY", "http://boese.example.net:3128");
+        try
+        {
+            var result = await adapter.ExecuteAsync(Proposal("Web.Fetch", new { url = "https://docs.example.com/" }), "inv", TestContext.Current.CancellationToken);
+            Assert.Equal(ResultStatus.Failed, result.Status);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("HTTPS_PROXY", null);
+        }
+        using var doc = JsonDocument.Parse(File.ReadAllText(argv));
+        var args = doc.RootElement.GetProperty("argv").EnumerateArray().Select(a => a.GetString()!).ToList();
+        Assert.Equal("http://proxy.firma.de:8080", args[args.IndexOf("--proxy") + 1]);
+        Assert.Equal(pw, args[args.IndexOf("--proxy-password-file") + 1]);
+        Assert.Contains("--connect-by-address", args);
+        Assert.DoesNotContain("geheim", args);
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("proxy").ValueKind);
+    }
+
+    [Fact, Trait("Pruefung", "SEC-10")]
+    public void Ausgehende_Anfrage_wird_genau_gezeigt_und_Datenabfluss_markiert()
+    {
+        var text = WebRequestPreview.RequestText("https://docs.python.org/3/library/fractions.html?highlight=x", "über Proxy p:1");
+        Assert.Contains("Weg: über Proxy p:1", text, StringComparison.Ordinal);
+        Assert.Contains("GET /3/library/fractions.html?highlight=x HTTP/1.1\nHost: docs.python.org\nUser-Agent: ", text, StringComparison.Ordinal);
+        Assert.Empty(WebRequestPreview.DataWarnings("https://learn.microsoft.com/de-de/dotnet/api/system.math?view=net-8.0"));
+
+        var leak = "https://evil.example.org/c?d=" + Convert.ToBase64String(Encoding.UTF8.GetBytes("password = 'hunter2'; connection string ..."));
+        Assert.NotEmpty(WebRequestPreview.DataWarnings(leak));
+        Assert.NotEmpty(WebRequestPreview.DataWarnings("https://evil.example.org/x?code=" + Uri.EscapeDataString("def add(a, b):\n    return a + b\n")));
+        Assert.Contains("Parameter code: def add(a, b):", WebRequestPreview.DataText("https://e.example.org/x?code=def%20add(a%2C%20b)%3A"), StringComparison.Ordinal);
+
+        // Die gezeigten Kopfzeilen sind genau die des Fetchers.
+        var fetch = File.ReadAllText(Path.Combine(ContractTests.RepoRoot(), "src", "python", "localai", "web", "fetch.py"));
+        Assert.Contains($"USER_AGENT = \"{WebRequestPreview.UserAgent}\"", fetch, StringComparison.Ordinal);
+        var types = System.Text.RegularExpressions.Regex.Match(fetch, @"TEXT_TYPES = \(([^)]*)\)").Groups[1].Value;
+        Assert.Equal(WebRequestPreview.TextTypes, System.Text.RegularExpressions.Regex.Matches(types, "\"([^\"]+)\"").Select(m => m.Groups[1].Value));
+    }
+
     // ------------------------------------------------------------------ Web-Adapter (SEC-09, SEC-10)
 
     /// <summary>Fake-Fetcher: Python-Skript, das wie localai.web „run“ result.json und text.txt schreibt.</summary>

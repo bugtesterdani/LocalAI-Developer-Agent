@@ -417,11 +417,27 @@
                                                        Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
                                             <TextBox Text="{Binding WebFetchText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{loc:T LabelWebDataWarnings}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
+                                                       Visibility="{Binding HasWebDataWarnings, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebDataWarningsText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
+                                                     Visibility="{Binding HasWebDataWarnings, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{loc:T LabelWebData}" Style="{StaticResource FieldLabel}"
+                                                       Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebDataText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                                     Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{loc:T LabelWebRequest}" Style="{StaticResource FieldLabel}"
+                                                       Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebRequestText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                                     Visibility="{Binding IsWebFetch, Converter={StaticResource BoolToVis}}" />
 
                                             <!-- Web.Content: exakt dieser bereinigte Text an genau diesen Agenten (zweite Freigabe) -->
                                             <TextBlock Text="{loc:T LabelWebSource}" Style="{StaticResource FieldLabel}"
                                                        Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
                                             <TextBox Text="{Binding WebSourceText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
+                                                     Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{loc:T LabelWebResponse}" Style="{StaticResource FieldLabel}"
+                                                       Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox Text="{Binding WebResponseText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
                                                      Visibility="{Binding IsWebContent, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{loc:T LabelWebWarnings}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
                                                        Visibility="{Binding HasWebWarnings, Converter={StaticResource BoolToVis}}" />

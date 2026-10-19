@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import pathlib
+import ssl
 import subprocess
 import sys
 import time
@@ -58,7 +59,8 @@ def _label_low(work: pathlib.Path) -> None:
         raise OSError(f"Quarantäneordner nicht für niedrige Integrität kennzeichenbar (icacls {run.returncode})")
 
 
-def run(url: str, work: pathlib.Path, max_bytes: int, timeout: int, max_chars: int, low: bool) -> dict:
+def run(url: str, work: pathlib.Path, max_bytes: int, timeout: int, max_chars: int, low: bool,
+        proxy_args: list[str] | None = None) -> dict:
     work.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     result: dict = {"url": url, "stage": "fetch"}
@@ -66,7 +68,7 @@ def run(url: str, work: pathlib.Path, max_bytes: int, timeout: int, max_chars: i
         if low:
             _label_low(work)
         code, timed_out = _stage("fetch", ["--url", url, "--out", str(work), "--max-bytes", str(max_bytes),
-                                           "--timeout", str(timeout)], work, timeout + 15, low)
+                                           "--timeout", str(timeout), *(proxy_args or [])], work, timeout + 15, low)
         meta_path = work / "meta.json"
         if timed_out or not meta_path.is_file():
             result["error"] = "Abruf abgebrochen (Zeitgrenze)" if timed_out else f"Abrufprozess ohne Ergebnis (Exitcode {code})"
@@ -92,6 +94,26 @@ def run(url: str, work: pathlib.Path, max_bytes: int, timeout: int, max_chars: i
         (work / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _proxy_args(args: argparse.Namespace) -> list[str]:
+    out: list[str] = []
+    for flag, value in (("--proxy", args.proxy), ("--proxy-user", args.proxy_user),
+                        ("--proxy-password-file", args.proxy_password_file), ("--ca-file", args.ca_file)):
+        if value:
+            out += [flag, value]
+    out += ["--dns-via-proxy"] if args.dns_via_proxy else []
+    out += ["--connect-by-address"] if args.connect_by_address else []
+    return out
+
+
+def _proxy(args: argparse.Namespace) -> fetch_stage.Proxy | None:
+    if not args.proxy:
+        return None
+    password = ""
+    if args.proxy_password_file:
+        password = pathlib.Path(args.proxy_password_file).read_text(encoding="utf-8-sig").strip()
+    return fetch_stage.Proxy.parse(args.proxy, args.proxy_user, password, args.dns_via_proxy, args.connect_by_address)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="localai.web")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -107,17 +129,32 @@ def main(argv: list[str] | None = None) -> int:
     p_fetch.add_argument("--out", required=True)
     p_fetch.add_argument("--max-bytes", type=int, default=fetch_stage.DEFAULT_MAX_BYTES)
     p_fetch.add_argument("--timeout", type=int, default=int(fetch_stage.DEFAULT_TIMEOUT))
+    for p in (p_run, p_fetch):
+        p.add_argument("--proxy", default="", help="http://host:port (nur aus config/localai.json)")
+        p.add_argument("--proxy-user", default="")
+        p.add_argument("--proxy-password-file", default="")
+        p.add_argument("--ca-file", default="", help="zusätzliche Stammzertifikate (PEM), z. B. eines TLS-aufbrechenden Proxys")
+        p.add_argument("--dns-via-proxy", action="store_true")
+        p.add_argument("--connect-by-address", action="store_true")
     p_gate = sub.add_parser("gate")
     p_gate.add_argument("--work", required=True)
     p_gate.add_argument("--max-chars", type=int, default=gate_stage.DEFAULT_MAX_CHARS)
     args = parser.parse_args(argv)
     if args.command == "run":
         result = run(args.url, pathlib.Path(args.work), max(1, min(args.max_bytes, 16 * 1024 * 1024)),
-                     max(1, min(args.timeout, 120)), max(1000, min(args.max_chars, 200_000)), not args.no_low_integrity)
+                     max(1, min(args.timeout, 120)), max(1000, min(args.max_chars, 200_000)), not args.no_low_integrity,
+                     _proxy_args(args))
         print(json.dumps({"stage": result.get("stage"), "error": result.get("error", "")}, ensure_ascii=False))
         return 0
     if args.command == "fetch":
-        meta, body = fetch_stage.fetch(args.url, args.max_bytes, float(args.timeout))
+        try:
+            proxy = _proxy(args)
+            context = fetch_stage.tls_context(args.ca_file or None)
+        except (OSError, ValueError, ssl.SSLError) as err:
+            meta = fetch_stage.FetchMeta(url=args.url, error=f"Proxy-/Zertifikatseinstellung ungültig: {err}")
+            fetch_stage.write(pathlib.Path(args.out), meta, b"")
+            return 0
+        meta, body = fetch_stage.fetch(args.url, args.max_bytes, float(args.timeout), context=context, proxy=proxy)
         fetch_stage.write(pathlib.Path(args.out), meta, body)
         return 0
     gate_stage.run(pathlib.Path(args.work), args.max_chars)

@@ -17,6 +17,40 @@ public sealed record WebSettings
     public int MaxChars { get; init; } = 20_000;
     public bool LowIntegrity { get; init; } = true;
     public required ProcessCommand Command { get; init; }
+
+    /// <summary>Nur diese Hosts (<c>*.domain</c> = Unterdomänen); leer = alle öffentlichen.</summary>
+    public IReadOnlyList<string> AllowedHosts { get; init; } = [];
+
+    /// <summary>Zusätzliche Stammzertifikate (PEM), z. B. eines TLS-aufbrechenden Firmenproxys.</summary>
+    public string? CaFile { get; init; }
+
+    /// <summary>Ausdrücklich konfigurierter HTTP-Proxy (CONNECT); Umgebungsvariablen werden nie verwendet.</summary>
+    public WebProxySettings? Proxy { get; init; }
+
+    /// <summary>Für Status und Freigabekarte: „direkt“ oder „über Proxy host:port“.</summary>
+    public string RouteText => Proxy is null
+        ? "direkt (eigene DNS-Prüfung, Verbindung zur geprüften Adresse)"
+        : $"über Proxy {Proxy.Host}:{Proxy.Port} (CONNECT {(Proxy.ConnectByAddress ? "auf die geprüfte Adresse" : "auf den Hostnamen")}"
+          + $"{(Proxy.DnsViaProxy ? ", DNS ggf. nur durch den Proxy" : "")}; TLS weiter Ende zu Ende geprüft"
+          + $"{(CaFile is null ? "" : ", zusätzliches Stammzertifikat")})";
+}
+
+/// <summary>HTTP-Proxy aus <c>web.proxy</c>. Passwort nur als Datei (nicht in der Konfiguration, nicht auf der Kommandozeile).</summary>
+public sealed record WebProxySettings(string Url, string Host, int Port, string? Username, string? PasswordFile, bool DnsViaProxy,
+    bool ConnectByAddress)
+{
+    public static WebProxySettings Parse(string url, string? username, string? passwordFile, bool dnsViaProxy, bool connectByAddress)
+    {
+        var text = url.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttp || uri.UserInfo.Length > 0
+            || uri.AbsolutePath != "/" || uri.Query.Length > 0 || uri.Fragment.Length > 0 || uri.Host.Length == 0
+            || !text.EndsWith($":{uri.Port}", StringComparison.Ordinal))
+        {
+            throw new JsonException("web.proxy.url muss die Form http://host:port haben, mit Port (Benutzer in web.proxy.username, Passwort in web.proxy.passwordFile)");
+        }
+        var host = uri.HostNameType == UriHostNameType.IPv6 ? $"[{uri.IdnHost}]" : uri.IdnHost;
+        return new WebProxySettings($"http://{host}:{uri.Port}", uri.IdnHost, uri.Port, username, passwordFile, dnsViaProxy, connectByAddress);
+    }
 }
 
 /// <summary>
@@ -30,6 +64,8 @@ public sealed class WebCaptureStore(string directory, WebSettings settings, IClo
     private readonly Lock _gate = new();
 
     public long MaxBytes => settings.MaxBytes;
+
+    public IReadOnlyList<string> AllowedHosts => settings.AllowedHosts;
 
     public string QuarantineDirectory => Path.Combine(directory, "quarantine");
 
@@ -162,7 +198,11 @@ public sealed class WebToolAdapter(WebCaptureStore store, WebSettings settings, 
         string url;
         try
         {
-            url = UrlPolicy.Validate(proposal.Arguments.GetProperty("url").GetString()).Url;
+            (url, var host) = UrlPolicy.Validate(proposal.Arguments.GetProperty("url").GetString());
+            if (!UrlPolicy.HostAllowed(host, settings.AllowedHosts))
+            {
+                return Failed(proposal, invocationId, $"Host {host} steht nicht in web.allowedHosts");
+            }
         }
         catch (BrokerException ex)
         {
@@ -180,6 +220,30 @@ public sealed class WebToolAdapter(WebCaptureStore store, WebSettings settings, 
         if (!settings.LowIntegrity)
         {
             arguments.Add("--no-low-integrity");
+        }
+        if (settings.CaFile is not null)
+        {
+            arguments.AddRange(["--ca-file", settings.CaFile]);
+        }
+        if (settings.Proxy is { } proxy)
+        {
+            arguments.AddRange(["--proxy", proxy.Url]);
+            if (proxy.Username is not null)
+            {
+                arguments.AddRange(["--proxy-user", proxy.Username]);
+            }
+            if (proxy.PasswordFile is not null)
+            {
+                arguments.AddRange(["--proxy-password-file", proxy.PasswordFile]);
+            }
+            if (proxy.DnsViaProxy)
+            {
+                arguments.Add("--dns-via-proxy");
+            }
+            if (proxy.ConnectByAddress)
+            {
+                arguments.Add("--connect-by-address");
+            }
         }
         var exit = await RunAsync(arguments, TimeSpan.FromSeconds(settings.TimeoutSeconds * 2 + 120), cancellationToken).ConfigureAwait(false);
         if (exit is not null)
@@ -222,7 +286,11 @@ public sealed class WebToolAdapter(WebCaptureStore store, WebSettings settings, 
             var capture = new WebCapture(captureId, Str(fetch, "url"), Str(fetch, "host"), Str(fetch, "address"), Str(fetch, "fetched_at"),
                 Num(fetch, "status"), Str(fetch, "content_type"), Num(fetch, "raw_bytes"), Str(fetch, "raw_sha256"), textSha,
                 Str(gate, "sanitizer_version"), Num(gate, "chars"), gate.TryGetProperty("truncated", out var t) && t.ValueKind == JsonValueKind.True,
-                Num(gate, "links"), warnings, Title: Clip(Str(gate, "title"), 300));
+                Num(gate, "links"), warnings, Title: Clip(Str(gate, "title"), 300), Request: Clip(Str(fetch, "request"), 4000),
+                Proxy: Str(fetch, "proxy") is { Length: > 0 } via ? via : null, TlsIssuer: Clip(Str(fetch, "tls_issuer"), 200),
+                ResponseHeaders: fetch.TryGetProperty("headers", out var h) && h.ValueKind == JsonValueKind.Object
+                    ? h.EnumerateObject().Take(40).Select(x => Clip($"{x.Name}: {(x.Value.ValueKind == JsonValueKind.String ? x.Value.GetString() : x.Value.ToString())}", 300)).ToList()
+                    : null);
             store.Save(capture, textBytes);
             var summary = ContractJson.Serialize(capture);
             return Ok(proposal, invocationId, [new TargetResult("capture", ResultStatus.Succeeded, Text: summary, ContentSha256: CanonicalJson.Sha256Hex(summary),

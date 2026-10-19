@@ -1,12 +1,17 @@
 """Fetch-Stufe: genau ein HTTPS GET auf die geprüfte Adresse, Rohbytes in die Quarantäne (Spezifikation §7).
 
-Keine Cookies, keine Authentifizierung, kein Proxy (Umgebungsvariablen werden ignoriert: eigene Verbindung über
-``socket`` + ``ssl``), kein JavaScript, keine Subressourcen. Weiterleitungen werden angehalten und gemeldet
-(neue URL = neue Freigabe). Ergebnis: ``meta.json`` und ggf. ``raw.bin`` im Ausgabeordner.
+Keine Cookies, keine Authentifizierung beim Zielserver, kein JavaScript, keine Subressourcen. Weiterleitungen werden
+angehalten und gemeldet (neue URL = neue Freigabe). Ergebnis: ``meta.json`` und ggf. ``raw.bin`` im Ausgabeordner.
+
+Proxy nur, wenn in ``config/localai.json`` (``web.proxy``) ausdrücklich gesetzt – Umgebungsvariablen werden nie
+verwendet. Über den Proxy läuft ein CONNECT-Tunnel; TLS wird weiterhin Ende zu Ende gegen den Hostnamen geprüft.
+Ein TLS-aufbrechender Firmenproxy braucht dafür sein Stammzertifikat (Windows-Zertifikatsspeicher oder ``caFile``);
+der Aussteller des Serverzertifikats wird festgehalten und in der Freigabe angezeigt.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import http.client
 import json
@@ -17,7 +22,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from localai.web.netcheck import UrlRejected, check_addresses, check_url
 
@@ -45,10 +50,60 @@ class FetchMeta:
     fetched_at: str = ""
     seconds: float = 0.0
     headers: dict[str, str] = field(default_factory=dict)
+    request: str = ""  # genau die gesendete Anfrage (ohne Proxy-Zugangsdaten)
+    proxy: str = ""  # host:port des Proxys oder leer (direkt)
+    tls_issuer: str = ""  # Aussteller des Serverzertifikats (zeigt TLS-Aufbruch durch einen Proxy)
 
     @property
     def ok(self) -> bool:
         return not self.error and not self.redirect and self.status == 200
+
+
+@dataclass(frozen=True)
+class Proxy:
+    """HTTP-Proxy für CONNECT (nur aus der Konfiguration)."""
+
+    host: str
+    port: int
+    username: str = ""
+    password: str = ""
+    dns_via_proxy: bool = False  # Zielname nur vom Proxy auflösen lassen (wenn lokal kein externes DNS)
+    connect_by_address: bool = False  # CONNECT auf die lokal geprüfte IP statt den Namen (strenger, nicht jeder Proxy erlaubt es)
+
+    @property
+    def label(self) -> str:
+        return f"{self.host}:{self.port}"
+
+    @staticmethod
+    def parse(url: str, username: str = "", password: str = "", dns_via_proxy: bool = False,
+              connect_by_address: bool = False) -> Proxy:
+        parts = urlsplit(url.strip())
+        if (parts.scheme != "http" or not parts.hostname or parts.username or parts.path not in ("", "/") or parts.query
+                or parts.fragment or parts.port is None):
+            raise ValueError("web.proxy.url muss die Form http://host:port haben, mit Port (Zugangsdaten getrennt angeben)")
+        return Proxy(parts.hostname, parts.port, username, password, dns_via_proxy, connect_by_address)
+
+
+def tls_context(ca_file: str | None = None) -> ssl.SSLContext:
+    """Systemspeicher (unter Windows inkl. Firmen-Stammzertifikaten) plus optional eine PEM-Datei."""
+    ctx = ssl.create_default_context()
+    if ca_file:
+        ctx.load_verify_locations(cafile=ca_file)
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+
+def _issuer(sock: object) -> str:
+    try:
+        cert = sock.getpeercert()  # type: ignore[attr-defined]
+    except (AttributeError, ValueError, OSError):
+        return ""
+    if not cert:
+        return ""
+    fields = {k: v for rdn in cert.get("issuer", ()) for k, v in rdn}
+    return ", ".join(f"{k}={fields[k]}" for k in ("commonName", "organizationName") if k in fields)[:200]
 
 
 def system_resolver(host: str) -> list[str]:
@@ -69,9 +124,34 @@ class _PinnedConnection(http.client.HTTPSConnection):
         self.sock = self._ctx.wrap_socket(raw, server_hostname=self.host)
 
 
+def request_headers(host: str) -> dict[str, str]:
+    return {"Host": host, "User-Agent": USER_AGENT, "Accept": ", ".join(TEXT_TYPES) + ";q=0.9, */*;q=0.1",
+            "Accept-Encoding": "identity", "Connection": "close"}
+
+
+def request_text(host: str, path: str) -> str:
+    return "\n".join([f"GET {path} HTTP/1.1"] + [f"{k}: {v}" for k, v in request_headers(host).items()])
+
+
+class _TunnelConnection(http.client.HTTPSConnection):
+    """CONNECT-Tunnel über den konfigurierten Proxy; TLS (SNI, Zertifikat) immer gegen den Hostnamen der URL."""
+
+    def __init__(self, proxy: Proxy, target: str, tls_host: str, port: int, context: ssl.SSLContext, timeout: float,
+                 headers: dict[str, str]) -> None:
+        super().__init__(proxy.host, proxy.port, timeout=timeout, context=context)
+        self.set_tunnel(target, port, headers=headers)
+        self._tls_host = tls_host
+        self._ctx = context
+
+    def connect(self) -> None:
+        http.client.HTTPConnection.connect(self)  # TCP zum Proxy + CONNECT
+        self.sock = self._ctx.wrap_socket(self.sock, server_hostname=self._tls_host)
+
+
 def fetch(url: str, max_bytes: int = DEFAULT_MAX_BYTES, timeout: float = DEFAULT_TIMEOUT,
           resolver: Resolver = system_resolver, context: ssl.SSLContext | None = None,
-          port: int = 443, allow: Callable[[str], bool] | None = None) -> tuple[FetchMeta, bytes]:
+          port: int = 443, allow: Callable[[str], bool] | None = None,
+          proxy: Proxy | None = None) -> tuple[FetchMeta, bytes]:
     """Holt die URL. ``allow``/``port`` nur für Tests (lokaler TLS-Server); im Betrieb nie gesetzt."""
     started = time.monotonic()
     meta = FetchMeta(url=url, fetched_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -79,27 +159,42 @@ def fetch(url: str, max_bytes: int = DEFAULT_MAX_BYTES, timeout: float = DEFAULT
     try:
         checked = check_url(url)
         meta.url, meta.host = checked.url, checked.host
+        address = ""
         if checked.literal is not None:
             address = str(checked.literal)
         else:
             try:
                 answers = resolver(checked.host)
             except OSError as err:
-                raise UrlRejected(f"{checked.host}: DNS-Auflösung fehlgeschlagen ({err})") from err
-            if allow is not None and all(allow(a) for a in answers):
-                address = answers[0]
-            else:
-                address = str(check_addresses(checked.host, answers))
-        meta.address = address
-        ctx = context or ssl.create_default_context()
+                if proxy is None or not proxy.dns_via_proxy:
+                    raise UrlRejected(f"{checked.host}: DNS-Auflösung fehlgeschlagen ({err})") from err
+                answers = []  # nur der Proxy löst auf (web.proxy.dnsViaProxy)
+            if answers:
+                if allow is not None and all(allow(a) for a in answers):
+                    address = answers[0]
+                else:
+                    address = str(check_addresses(checked.host, answers))
+        meta.address = address or "(Auflösung durch den Proxy)"
+        ctx = context or tls_context()
         ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
         deadline = started + timeout
-        connection = _PinnedConnection(checked.host, address, port, ctx, timeout)
+        headers = request_headers(checked.host)
+        meta.request = request_text(checked.host, checked.path)
+        if proxy is None:
+            connection: http.client.HTTPSConnection = _PinnedConnection(checked.host, address, port, ctx, timeout)
+        else:
+            meta.proxy = proxy.label
+            tunnel_headers = {}
+            if proxy.username:
+                token = base64.b64encode(f"{proxy.username}:{proxy.password}".encode()).decode("ascii")
+                tunnel_headers["Proxy-Authorization"] = f"Basic {token}"
+            target = address if proxy.connect_by_address and address else checked.host
+            connection = _TunnelConnection(proxy, target, checked.host, port, ctx, timeout, tunnel_headers)
+            meta.request = f"CONNECT {target}:{port} HTTP/1.1 (Proxy {proxy.label})\n" + meta.request
         try:
-            connection.request("GET", checked.path, headers={
-                "Host": checked.host, "User-Agent": USER_AGENT, "Accept": ", ".join(TEXT_TYPES) + ";q=0.9, */*;q=0.1",
-                "Accept-Encoding": "identity", "Connection": "close"})
+            connection.request("GET", checked.path, headers=headers)
+            meta.tls_issuer = _issuer(connection.sock)
             response = connection.getresponse()
             meta.status = response.status
             meta.headers = {k.lower(): v[:300] for k, v in response.getheaders()[:40]}
@@ -144,9 +239,15 @@ def fetch(url: str, max_bytes: int = DEFAULT_MAX_BYTES, timeout: float = DEFAULT
     except UrlRejected as err:
         meta.error = str(err)
     except ssl.SSLError as err:
-        meta.error = f"TLS-Fehler (Zertifikat/Hostname): {err.reason or err}"
+        hint = " – bei einem TLS-aufbrechenden Firmenproxy dessen Stammzertifikat in web.proxy.caFile angeben" if proxy else ""
+        meta.error = f"TLS-Fehler (Zertifikat/Hostname): {err.reason or err}{hint}"
     except (OSError, http.client.HTTPException) as err:
-        meta.error = f"Verbindung fehlgeschlagen: {err}"
+        text = str(err)
+        if proxy is not None and "Tunnel connection failed" in text:
+            text = f"Proxy {proxy.label} hat den Tunnel abgelehnt ({text.split(':', 1)[-1].strip()})"
+            if "407" in text:
+                text += " – Anmeldung am Proxy nötig (web.proxy.username/passwordFile; NTLM/Kerberos nur über einen lokalen Helfer)"
+        meta.error = f"Verbindung fehlgeschlagen: {text}"
     finally:
         meta.seconds = round(time.monotonic() - started, 2)
     meta.raw_bytes = len(body)

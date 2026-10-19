@@ -154,6 +154,49 @@ public sealed class ApprovalCardViewModel : ObservableObject
         private set => Set(ref _webText, value);
     }
 
+    /// <summary>Erste Freigabe: genau diese Anfrage (Anfragezeile, Kopfzeilen, Weg über Proxy oder direkt).</summary>
+    public string WebRequestText => IsWebFetch ? WebRequestPreview.RequestText(Argument("url"), _owner.WebRoute) : string.Empty;
+
+    /// <summary>Was die Anfrage an Daten überträgt: Pfadsegmente und Parameter, dekodiert.</summary>
+    public string WebDataText => IsWebFetch ? WebRequestPreview.DataText(Argument("url")) : string.Empty;
+
+    public bool HasWebDataWarnings => IsWebFetch && WebRequestPreview.DataWarnings(Argument("url")).Count > 0;
+
+    public string WebDataWarningsText => IsWebFetch
+        ? string.Join("\n", WebRequestPreview.DataWarnings(Argument("url")).Select(w => "• " + w))
+        : string.Empty;
+
+    /// <summary>Zweite Freigabe: was tatsächlich gesendet wurde und was zurückkam (Status, Weg, Zertifikat, Kopfzeilen).</summary>
+    public string WebResponseText
+    {
+        get
+        {
+            if (_capture is null)
+            {
+                return string.Empty;
+            }
+            var lines = new List<string>
+            {
+                UiText.Format("WebResponseSummary", _capture.Status, _capture.ContentType, _capture.RawBytes, _capture.Chars),
+                UiText.Format("WebResponseRoute", _capture.Proxy is null ? UiText.Get("WebRouteDirect") : UiText.Format("WebRouteProxy", _capture.Proxy)),
+                UiText.Format("WebResponseIssuer", string.IsNullOrEmpty(_capture.TlsIssuer) ? "?" : _capture.TlsIssuer),
+            };
+            if (!string.IsNullOrEmpty(_capture.Request))
+            {
+                lines.Add("");
+                lines.Add(UiText.Get("WebRequestSent"));
+                lines.Add(_capture.Request);
+            }
+            if (_capture.ResponseHeaders is { Count: > 0 } headers)
+            {
+                lines.Add("");
+                lines.Add(UiText.Get("WebResponseHeaders"));
+                lines.AddRange(headers);
+            }
+            return InertText.Clean(string.Join("\n", lines), 12_000);
+        }
+    }
+
     public string WebSourceText => _capture is null
         ? string.Empty
         : UiText.Format("WebSourceDetails", InertText.Clean(_capture.Url, 2100), _capture.Address, _capture.FetchedAt, _capture.ContentType,
@@ -193,6 +236,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
                     WebReady = true;
                 }
                 OnPropertyChanged(nameof(WebSourceText));
+                OnPropertyChanged(nameof(WebResponseText));
                 OnPropertyChanged(nameof(HasWebWarnings));
                 OnPropertyChanged(nameof(WebWarningsText));
                 OnPropertyChanged(nameof(WebReady));
@@ -484,6 +528,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>Rückfrage vor dem Neuaufbau (dauert Minuten). Die Oberfläche setzt hier einen Dialog ein.</summary>
     public Func<bool> ConfirmRebuild { get; set; } = () => false;
+
+    /// <summary>Weg der Webabrufe laut Broker (direkt oder über den konfigurierten Proxy).</summary>
+    public string? WebRoute { get; private set; }
 
     private async Task RebuildSandboxAsync()
     {
@@ -820,6 +867,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 var detail = sandbox.GetString();
                 Post(() => SandboxDetail ??= detail);
+            }
+            if (status.TryGetProperty("web", out var web) && web.ValueKind == JsonValueKind.Object
+                && web.TryGetProperty("route", out var route) && route.ValueKind == JsonValueKind.String)
+            {
+                var routeText = route.GetString();
+                Post(() => WebRoute = routeText);
             }
         }).ConfigureAwait(false);
         await RefreshPendingAsync().ConfigureAwait(false);

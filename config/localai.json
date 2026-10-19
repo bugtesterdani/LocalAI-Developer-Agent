@@ -41,7 +41,16 @@
     "maxBytes": 2097152,
     "timeoutSeconds": 15,
     "maxChars": 20000,
-    "lowIntegrity": true
+    "lowIntegrity": true,
+    "allowedHosts": [],
+    "caFile": null,
+    "proxy": {
+      "url": null,
+      "username": null,
+      "passwordFile": null,
+      "dnsViaProxy": false,
+      "connectByAddress": false
+    }
   },
   "fakeAgent": {
     "command": "uv",

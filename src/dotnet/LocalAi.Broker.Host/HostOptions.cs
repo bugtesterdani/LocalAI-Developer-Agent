@@ -258,7 +258,57 @@ public sealed record HostOptions
             TimeoutSeconds = Math.Clamp(Int("timeoutSeconds") ?? defaults.TimeoutSeconds, 1, 120),
             MaxChars = Math.Clamp(Int("maxChars") ?? defaults.MaxChars, 1000, 200_000),
             LowIntegrity = !(web.TryGetProperty("lowIntegrity", out var low) && low.ValueKind == JsonValueKind.False),
+            AllowedHosts = ReadAllowedHosts(web),
+            CaFile = OptionalFile(web, "caFile", repoRoot),
+            Proxy = ReadProxy(web, repoRoot),
         };
+    }
+
+    private static string? OptionalString(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Trim().Length > 0 ? v.GetString()!.Trim() : null;
+
+    /// <summary>Datei muss beim Start vorhanden sein (sonst würde jeder Abruf erst im Fetcher scheitern).</summary>
+    private static string? OptionalFile(JsonElement e, string name, string repoRoot)
+    {
+        var value = OptionalString(e, name);
+        if (value is null)
+        {
+            return null;
+        }
+        var full = Path.GetFullPath(Path.Combine(repoRoot, value));
+        return File.Exists(full) ? full : throw new JsonException($"web: Datei für {name} nicht gefunden: {full}");
+    }
+
+    private static IReadOnlyList<string> ReadAllowedHosts(JsonElement web)
+    {
+        if (!web.TryGetProperty("allowedHosts", out var list) || list.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+        var result = new List<string>();
+        foreach (var item in list.EnumerateArray())
+        {
+            var text = item.ValueKind == JsonValueKind.String ? item.GetString()! : item.ToString();
+            result.Add(LocalAi.Broker.UrlPolicy.NormalizeAllowedHost(text)
+                       ?? throw new JsonException($"web.allowedHosts: ungültiger Eintrag „{text}“ (z. B. docs.python.org oder *.microsoft.com)"));
+        }
+        return result;
+    }
+
+    private static WebProxySettings? ReadProxy(JsonElement web, string repoRoot)
+    {
+        if (!web.TryGetProperty("proxy", out var proxy) || proxy.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        var url = OptionalString(proxy, "url");
+        if (url is null)
+        {
+            return null;
+        }
+        bool Flag(string name) => proxy.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+        return WebProxySettings.Parse(url, OptionalString(proxy, "username"), OptionalFile(proxy, "passwordFile", repoRoot),
+            Flag("dnsViaProxy"), Flag("connectByAddress"));
     }
 
     private static ProcessCommand ReadCommand(JsonElement element, string repoRoot)

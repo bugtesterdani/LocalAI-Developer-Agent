@@ -497,6 +497,10 @@ class WebCapture(Contract):
     title: str | None = Field(default=None, alias="title")
     links: StrictInt = Field(alias="links")
     warnings: list[WebWarning] = Field(alias="warnings")
+    request: str | None = Field(default=None, alias="request")
+    proxy: str | None = Field(default=None, alias="proxy")
+    tls_issuer: str | None = Field(default=None, alias="tlsIssuer")
+    response_headers: list[str] | None = Field(default=None, alias="responseHeaders")
     text: str | None = Field(default=None, alias="text")
     released_to: list[str] | None = Field(default=None, alias="releasedTo")
 

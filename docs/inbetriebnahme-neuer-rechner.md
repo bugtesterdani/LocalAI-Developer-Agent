@@ -117,8 +117,9 @@ Die Pfade auf den neuen Rechner umstellen:
   `buildTimeoutMinutes` wird bei großen Toolchains automatisch erhöht.
 - Zum ersten Ausprobieren ohne VM geht auch `"mode": "dev-local-unsafe"` (rot markiert, kein Build/Test).
 - Webabrufe (ab M6): ohne Abschnitt `web` eingeschaltet mit Standardwerten. Ausschalten mit
-  `"web": { "enabled": false }`; Grenzen und Befehl siehe `docs/pruefung-M6.md`. Der Rechner braucht dafür direkten
-  Internetzugang (HTTPS, Port 443) – ein Proxy wird bewusst nicht verwendet.
+  `"web": { "enabled": false }`. Hinter einem Firmenproxy: `web.proxy.url` (und ggf. `web.caFile` für einen
+  TLS-aufbrechenden Proxy) setzen – die Proxy-Variablen (`HTTPS_PROXY`) gelten für Webabrufe bewusst **nicht**.
+  Details: `docs/pruefung-M6.md`, Abschnitt 0.
 
 ### `config\models.local.json` (Ollama)
 

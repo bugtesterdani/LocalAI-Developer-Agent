@@ -155,6 +155,9 @@ def test_m6_abnahme():
             assert out.state == ProposalState.Succeeded, out
             capture = json.loads(next(r.text for r in out.result.target_results if r.target_id == "capture"))
             assert "text" not in capture, "nach der ersten Freigabe kein Text"
+            summary["proxy"] = capture.get("proxy") or "direkt"
+            summary["tls_issuer"] = capture.get("tlsIssuer", "")
+            assert capture.get("request", "").count("GET ") == 1 and capture.get("responseHeaders"), capture
             summary["web_fetch_s"] = round(time.monotonic() - t0, 1)
             quarantine = data / "web" / "quarantine" / capture["captureId"]
             label = subprocess.run(["icacls", str(quarantine)], capture_output=True, text=True, errors="replace").stdout

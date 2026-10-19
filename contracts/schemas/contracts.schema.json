@@ -1343,6 +1343,25 @@
             "$ref": "#/$defs/WebWarning"
           }
         },
+        "request": {
+          "type": "string",
+          "description": "Genau die gesendete Anfrage (CONNECT-Zeile bei Proxy, GET-Zeile und Kopfzeilen; ohne Proxy-Zugangsdaten)."
+        },
+        "proxy": {
+          "type": "string",
+          "description": "host:port des konfigurierten Proxys; fehlt bei direktem Abruf."
+        },
+        "tlsIssuer": {
+          "type": "string",
+          "description": "Aussteller des Serverzertifikats – zeigt, ob ein Proxy TLS aufbricht."
+        },
+        "responseHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Kopfzeilen der Antwort (Name: Wert, gekürzt)."
+        },
         "text": {
           "type": "string"
         },

@@ -195,3 +195,147 @@ def test_launcher_schreibt_ergebnis_auch_bei_abgelehnter_url(tmp_path):
 def test_launcher_startet_getrennte_prozesse(tmp_path):
     result = launcher_run("https://intranet/", tmp_path / "w", 1000, 5, 20_000, low=False)
     assert (tmp_path / "w" / "fetch.log").exists() and "öffentlich" in result["fetch"]["error"]
+
+
+# ---------------------------------------------------------------------- Proxy (CONNECT, Firmenzertifikat)
+
+class _ConnectProxy:
+    """Minimaler CONNECT-Proxy: leitet jeden Tunnel an den lokalen TLS-Server weiter (löst also selbst „auf“)."""
+
+    def __init__(self, upstream_port: int, require_auth: str | None = None) -> None:
+        import socket as _socket
+        self.upstream_port = upstream_port
+        self.require_auth = require_auth
+        self.requests: list[tuple[str, dict[str, str]]] = []
+        self.server = _socket.create_server((LOOPBACK, 0))
+        self.port = self.server.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self) -> None:
+        import socket as _socket
+        while True:
+            try:
+                client, _ = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._handle, args=(client, _socket), daemon=True).start()
+
+    def _handle(self, client, _socket) -> None:  # noqa: ANN001
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = client.recv(4096)
+            if not chunk:
+                client.close()
+                return
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+        headers = dict(line.split(": ", 1) for line in head[1:] if ": " in line)
+        self.requests.append((head[0], headers))
+        if self.require_auth and headers.get("Proxy-Authorization") != self.require_auth:
+            client.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n")
+            client.close()
+            return
+        upstream = _socket.create_connection((LOOPBACK, self.upstream_port))
+        client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+
+        def pipe(a, b):  # noqa: ANN001
+            try:
+                while (chunk := a.recv(65536)):
+                    b.sendall(chunk)
+            except OSError:
+                pass
+            finally:
+                for s in (a, b):
+                    try:
+                        s.shutdown(_socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+
+        threading.Thread(target=pipe, args=(client, upstream), daemon=True).start()
+        pipe(upstream, client)
+
+    def close(self) -> None:
+        self.server.close()
+
+
+@pytest.fixture
+def proxy(tls_server):
+    p = _ConnectProxy(tls_server.server_address[1])
+    yield p
+    p.close()
+
+
+def _via_proxy(proxy_obj, path="/page", resolver=lambda h: ["93.184.215.14"], ca=True, **proxy_kw):
+    proxy = fetcher.Proxy.parse(f"http://{LOOPBACK}:{proxy_obj.port}", **proxy_kw)
+    ctx = fetcher.tls_context(str(DATA / "web-test.crt") if ca else None)
+    return fetcher.fetch(f"https://docs.example.com{path}", resolver=resolver, context=ctx, proxy=proxy)
+
+
+def test_proxy_tunnel_mit_firmenzertifikat_und_angezeigter_anfrage(proxy):
+    meta, body = _via_proxy(proxy)
+    assert meta.ok and body == PAGE, meta.error
+    assert proxy.requests[-1][0] == "CONNECT docs.example.com:443 HTTP/1.1"
+    assert meta.proxy == f"{LOOPBACK}:{proxy.port}" and meta.address == "93.184.215.14"
+    assert meta.request.startswith("CONNECT docs.example.com:443") and "GET /page HTTP/1.1\nHost: docs.example.com" in meta.request
+    assert "docs.example.com" in meta.tls_issuer, "Aussteller wird festgehalten (TLS-Aufbruch erkennbar)"
+
+
+def test_proxy_ohne_firmenzertifikat_scheitert_mit_hinweis(proxy):
+    meta, body = _via_proxy(proxy, ca=False)
+    assert not meta.ok and body == b"" and "TLS-Fehler" in meta.error and "caFile" in meta.error
+
+
+def test_proxy_dns_bleibt_geprueft(proxy):
+    meta, _ = _via_proxy(proxy, resolver=lambda h: ["10.0.0.7"])
+    assert "nicht öffentliche" in meta.error and not proxy.requests, "private Antwort → kein Tunnel"
+
+    def no_dns(_h):
+        raise OSError("kein externes DNS")
+
+    meta, _ = _via_proxy(proxy, resolver=no_dns)
+    assert "DNS-Auflösung fehlgeschlagen" in meta.error
+    meta, _ = _via_proxy(proxy, resolver=no_dns, dns_via_proxy=True)
+    assert meta.ok and meta.address == "(Auflösung durch den Proxy)"
+
+
+def test_proxy_connect_auf_gepruefte_adresse(proxy):
+    meta, _ = _via_proxy(proxy, connect_by_address=True)
+    assert meta.ok, meta.error
+    assert proxy.requests[-1][0] == "CONNECT 93.184.215.14:443 HTTP/1.1", "TLS trotzdem gegen den Hostnamen geprüft"
+
+
+def test_proxy_anmeldung(tls_server):
+    import base64
+    p = _ConnectProxy(tls_server.server_address[1], require_auth="Basic " + base64.b64encode(b"dani:geheim").decode())
+    try:
+        meta, _ = _via_proxy(p)
+        assert "407" in meta.error and "Anmeldung am Proxy" in meta.error
+        meta, _ = _via_proxy(p, username="dani", password="geheim")
+        assert meta.ok, meta.error
+        assert "geheim" not in meta.request and "Proxy-Authorization" not in meta.request
+    finally:
+        p.close()
+
+
+@pytest.mark.parametrize("url", ["https://proxy:8080", "http://u:p@proxy:8080", "http://proxy:8080/pfad", "socks5://proxy:1080", "http://proxy"])
+def test_proxy_url_wird_geprueft(url):
+    with pytest.raises(ValueError):
+        fetcher.Proxy.parse(url)
+
+
+def test_launcher_reicht_proxy_nur_aus_argumenten_weiter(tmp_path, monkeypatch):
+    from localai.web import __main__ as launcher
+    monkeypatch.setenv("HTTPS_PROXY", "http://boese.example.net:3128")
+    seen = {}
+
+    def fake_stage(stage, args, work, timeout, low):  # noqa: ANN001
+        seen[stage] = args
+        (work / "meta.json").write_text(json.dumps({"error": "x"}))
+        return 0, False
+
+    monkeypatch.setattr(launcher, "_stage", fake_stage)
+    launcher.main(["run", "--url", "https://docs.example.com/", "--work", str(tmp_path / "w"), "--no-low-integrity",
+                   "--proxy", "http://proxy.firma.de:8080", "--ca-file", "C:/firma.pem", "--dns-via-proxy"])
+    args = seen["fetch"]
+    assert args[args.index("--proxy") + 1] == "http://proxy.firma.de:8080" and "--dns-via-proxy" in args
+    assert "boese" not in " ".join(args) and "HTTPS_PROXY" not in launcher._child_env(tmp_path)

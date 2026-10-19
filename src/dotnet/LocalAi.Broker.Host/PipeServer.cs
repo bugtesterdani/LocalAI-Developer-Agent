@@ -214,6 +214,15 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                     ["mode"] = HostOptions.ModeName(options.Mode),
                     ["sandbox"] = SandboxStatus(),
                     ["testAdapterInvocations"] = testAdapter?.Invocations ?? 0,
+                    ["web"] = options.Web is null
+                        ? new JsonObject { ["enabled"] = false }
+                        : new JsonObject
+                        {
+                            ["enabled"] = true,
+                            ["route"] = options.Web.RouteText,
+                            ["proxy"] = options.Web.Proxy?.Url,
+                            ["allowedHosts"] = new JsonArray(options.Web.AllowedHosts.Select(h => (JsonNode?)h).ToArray()),
+                        },
                 };
             case M.Submit:
                 return Node(broker.Submit(ContractJson.Deserialize<ProposalRequest>(p)));

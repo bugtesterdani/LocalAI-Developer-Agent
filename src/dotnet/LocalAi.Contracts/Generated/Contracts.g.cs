@@ -452,6 +452,10 @@ public sealed partial record WebCapture(
     [property: JsonPropertyName("links")] long Links,
     [property: JsonPropertyName("warnings")] IReadOnlyList<WebWarning> Warnings,
     [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null,
+    [property: JsonPropertyName("request"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Request = null,
+    [property: JsonPropertyName("proxy"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Proxy = null,
+    [property: JsonPropertyName("tlsIssuer"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TlsIssuer = null,
+    [property: JsonPropertyName("responseHeaders"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ResponseHeaders = null,
     [property: JsonPropertyName("text"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text = null,
     [property: JsonPropertyName("releasedTo"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ReleasedTo = null);
 

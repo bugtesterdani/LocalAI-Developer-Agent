@@ -224,10 +224,15 @@ public sealed class ProposalPolicy
         if (tool == "Web.Fetch")
         {
             var url = StringArgument(arguments, "url");
-            var (normalized, _) = UrlPolicy.Validate(url);
+            var (normalized, host) = UrlPolicy.Validate(url);
             if (normalized != url)
             {
                 throw Invalid("url ohne Fragment (#…) angeben");
+            }
+            if (!UrlPolicy.HostAllowed(host, captures.AllowedHosts))
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden,
+                    $"Host {host} steht nicht in web.allowedHosts ({string.Join(", ", captures.AllowedHosts)})");
             }
             return;
         }
