@@ -74,6 +74,8 @@ class FakeBroker:
     changed: list[str] = field(default_factory=list)  # in der Sandbox geänderte Dateien (aus Patch.Apply)
     export_skip: set[str] = field(default_factory=set)  # bei Workspace.ExportPatch abgewählte Pfade
     exported: list[str] = field(default_factory=list)  # in den „Projektordner“ übernommene Dateien
+    # M9: Einstellung osDebug wie vom Broker (None = nicht eingerichtet)
+    os_debug: dict | None = None
     _results: dict = field(default_factory=dict)
 
     # -------------------------------------------------- Orchestrator-Methoden
@@ -84,7 +86,7 @@ class FakeBroker:
         return [FolderGrant(grant_id="p", root="/projekt", rights=list(self.rights), recursive=True)]
 
     def toolchains_available(self):
-        return {"enabled": bool(self.toolchains), "toolchains": self.toolchains}
+        return {"enabled": bool(self.toolchains), "toolchains": self.toolchains, "osDebug": self.os_debug}
 
     def submit(self, request: ProposalRequest):
         with self.lock:
@@ -116,6 +118,19 @@ class FakeBroker:
             cached = self._results.get(pid)
             if cached is not None:
                 return cached
+            if request.tool == "OsDebug.Start":
+                text = json.dumps({"session": pid, "state": "angehalten vor dem ersten Befehl", "notes": ["QEMU pc, TCG"]})
+                result = done([TargetResult(target_id="debug", status=ResultStatus.Succeeded, text=text)])
+                self._results[pid] = result
+                return result
+            if request.tool in ("OsDebug.Command", "OsDebug.Stop"):
+                command = request.arguments.get("command", "stop")
+                data = {"state": "angehalten (Haltepunkt/Einzelschritt)", "serial": "Hallo DaniOS\r\n"}
+                if command == "registers":
+                    data["registers"] = "EAX=00000000 EIP=00007c22 CR0=00000010"
+                result = done([TargetResult(target_id="debug", status=ResultStatus.Succeeded, text=json.dumps(data))])
+                self._results[pid] = result
+                return result
             if request.tool == "Repo.Index":
                 if request.arguments.get("query"):
                     text = "\n".join(f"{p}:1 function x" for p in self.files)

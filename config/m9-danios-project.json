@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "projectId": "danios",
+  "name": "M9: eigenes Betriebssystem booten und debuggen",
+  "guestOs": "Linux",
+  "grants": [
+    {
+      "grantId": "os",
+      "root": "D:\\Projekte\\DaniOS",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": [],
+  "osDebug": {
+    "grantId": "os",
+    "image": "build/os.iso",
+    "media": "Cdrom",
+    "machine": "pc",
+    "memoryMB": 128,
+    "cpus": 1,
+    "firmware": "Bios",
+    "accel": "Tcg",
+    "maxCommands": 500,
+    "maxMinutes": 60
+  }
+}

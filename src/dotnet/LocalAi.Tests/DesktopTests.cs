@@ -149,6 +149,30 @@ public sealed partial class DesktopTests
         Assert.Contains("beliebigen Code", card.SideEffectsText, StringComparison.Ordinal);
     }
 
+    [Fact, Trait("Pruefung", "M9-Sitzung")]
+    public void Debug_Sitzung_Karte_zeigt_Abbild_Build_und_Grenzen()
+    {
+        var api = new FakeApi();
+        var main = new MainViewModel(api, api, a => a(), Guid.NewGuid().ToString("D"), "hyperv");
+        var now = DateTimeOffset.UtcNow;
+        var args = new
+        {
+            grantId = "os",
+            config = new { image = "build/os.iso", media = "Cdrom", machine = "pc", memoryMB = 128, cpus = 1, firmware = "Bios", accel = "Tcg",
+                build = new { toolchain = "cross-gcc", action = "build", parameters = new { } } },
+            maxCommands = 500, maxMinutes = 60, allowInput = true, haltAtStart = true,
+        };
+        var proposal = new ToolProposal(1, Guid.NewGuid().ToString("D"), "run", "task", AgentRole.Debugger, "OsDebug.Start", "1", "Boot",
+            JsonSerializer.SerializeToElement(args), [], "snap", 1, "sbx", ContractTime.ToContract(now), ContractTime.ToContract(now.AddMinutes(5)));
+        var card = new ApprovalCardViewModel(new ProposalView(proposal, ProposalHashing.Sha256(proposal), ProposalState.AwaitingApproval), main);
+        Assert.True(card.HasCommand && !card.IsToolchain);
+        Assert.Contains("Abbild: build/os.iso (Cdrom)", card.CommandText, StringComparison.Ordinal);
+        Assert.Contains("vorher bauen: Toolchain cross-gcc", card.CommandText, StringComparison.Ordinal);
+        Assert.Contains("höchstens 500 Befehle, 60 Minuten", card.CommandText, StringComparison.Ordinal);
+        Assert.Contains("Tastatur und Maus: erlaubt", card.CommandText, StringComparison.Ordinal);
+        Assert.Contains("ohne dass jeder einzeln bestätigt wird", card.SideEffectsText, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Einzelaufruf_hat_keine_Abwahl()
     {

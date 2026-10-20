@@ -141,6 +141,10 @@ try {
     try { Set-VM -VM $vm -AutomaticCheckpointsEnabled $false } catch { }
     Set-VMMemory -VM $vm -DynamicMemoryEnabled $false -StartupBytes ([int64]$req.memoryMB * 1MB)
     Set-VMProcessor -VM $vm -Count ([int]$req.processors)
+    if ($req.nestedVirtualization -eq $true) {
+        # M9: KVM für QEMU in der VM (verschachtelte Virtualisierung); ohne bleibt QEMU bei reiner Emulation (TCG).
+        Set-VMProcessor -VM $vm -ExposeVirtualizationExtensions $true
+    }
     $osDrive = Get-VMHardDiskDrive -VM $vm | Select-Object -First 1
     # Debian startet über shim, signiert mit der Microsoft-UEFI-CA (nicht mit der Windows-Vorlage).
     Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftUEFICertificateAuthority -FirstBootDevice $osDrive

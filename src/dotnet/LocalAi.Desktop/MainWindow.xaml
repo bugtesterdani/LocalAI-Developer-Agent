@@ -438,9 +438,9 @@
 
                                             <!-- Toolchain.*: Toolchain, Aktion und typisierte Parameter in Klartext -->
                                             <TextBlock Text="{loc:T LabelCommand}" Style="{StaticResource FieldLabel}"
-                                                       Visibility="{Binding IsToolchain, Converter={StaticResource BoolToVis}}" />
+                                                       Visibility="{Binding HasCommand, Converter={StaticResource BoolToVis}}" />
                                             <TextBox AutomationProperties.Name="{loc:T LabelCommand}" Text="{Binding CommandText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas"
-                                                     Visibility="{Binding IsToolchain, Converter={StaticResource BoolToVis}}" />
+                                                     Visibility="{Binding HasCommand, Converter={StaticResource BoolToVis}}" />
 
                                             <!-- Web.Fetch: genau eine URL mit Grenzen (erste Freigabe) -->
                                             <TextBlock Text="{loc:T LabelWebFetch}" Style="{StaticResource FieldLabel}"

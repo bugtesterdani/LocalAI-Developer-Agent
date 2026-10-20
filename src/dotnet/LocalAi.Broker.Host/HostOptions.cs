@@ -267,6 +267,7 @@ public sealed record HostOptions
             LinuxPrerequisites = linux ? prerequisites : null,
             IdleMinutes = Int("idleMinutes") ?? defaults.IdleMinutes,
             StopAction = Str("stopAction") ?? defaults.StopAction,
+            NestedVirtualization = linux && e.TryGetProperty("nestedVirtualization", out var nested) && nested.ValueKind == JsonValueKind.True,
             ImagePath = Path.GetFullPath(Path.Combine(repoRoot, image)),
             ImageName = Str("imageName"),
             ImageIndex = Int("imageIndex"),

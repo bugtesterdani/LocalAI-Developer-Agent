@@ -122,6 +122,7 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
     ContinueSandbox = vm is null ? null : vm.ContinueAsync,
     Toolchains = toolchains,
     ToolchainCatalog = policy.Toolchains,
+    OsDebug = policy.OsDebug,
     WebCaptures = parts.Captures,
     // Not-Aus (SEC-15): neben Dispatch-Sperre und Orchestrator auch Webabrufe und laufende Ausführung beenden.
     StopExecution = async () =>
@@ -131,7 +132,12 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
         {
             notes.Add($"{killed} Webabruf(e) beendet");
         }
-        if (parts.StopExecution is not null)
+        if (parts.Vm is not null && broker.StopClosedDebugSessions)
+        {
+            // M9: QEMU einer Debug-Sitzung läuft ohne Job weiter – die VM mit QEMU wird deshalb ausgeschaltet.
+            notes.Add(await parts.Vm.EmergencyStopAsync(GuestOs.Linux).ConfigureAwait(false));
+        }
+        else if (parts.StopExecution is not null)
         {
             notes.Add(await parts.StopExecution().ConfigureAwait(false));
         }
@@ -281,6 +287,11 @@ static SandboxParts CreateSandbox(
             File.WriteAllText(keyFile, Convert.ToHexStringLower(session.Key));
             var worker = options.DevWorker ?? throw new InvalidDataException("sandbox.devWorker fehlt in config/localai.json");
             string[] workerArgs = ["--inbox", transport.Inbox, "--outbox", transport.Outbox, "--work", Path.Combine(dir, "work"), "--key-file", keyFile];
+            if (project.OsDebug is not null)
+            {
+                // Entwicklungsmodus (unsicher, ohne VM): QEMU läuft direkt auf diesem Rechner.
+                workerArgs = [.. workerArgs, "--osdebug"];
+            }
             var workerLog = Path.Combine(options.DataDirectory, "worker.log");
             var process = children.Start(worker, workerArgs, new Dictionary<string, string>(), workerLog);
             var adapter = new SandboxToolAdapter(session, transport, context, registry, Path.Combine(dir, "scratch"), SystemClock.Instance);

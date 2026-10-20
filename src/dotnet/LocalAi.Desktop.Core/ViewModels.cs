@@ -290,10 +290,37 @@ public sealed class ApprovalCardViewModel : ObservableObject
             "Workspace.ExportPatch" => "SideEffectsExport",
             "Repo.Index" => "SideEffectsIndex",
             _ when IsToolchain => "SideEffectsToolchain",
+            "OsDebug.Start" => "SideEffectsOsDebug",
             _ => "SideEffectsRead",
         });
 
     public bool IsToolchain => Proposal.Tool.StartsWith("Toolchain.", StringComparison.Ordinal);
+
+    /// <summary>Befehlsabschnitt sichtbar: Toolchain-Aufruf oder Debug-Sitzung (M9).</summary>
+    public bool HasCommand => IsToolchain || Proposal.Tool == "OsDebug.Start";
+
+    /// <summary>Debug-Sitzung (M9) in Klartext: Abbild, Maschine, Build und die freigegebenen Grenzen.</summary>
+    private string OsDebugText()
+    {
+        var args = Proposal.Arguments;
+        var c = args.TryGetProperty("config", out var cfg) && cfg.ValueKind == JsonValueKind.Object ? cfg : default;
+        string Get(string name) => c.ValueKind == JsonValueKind.Object && c.TryGetProperty(name, out var v) ? v.ToString() : "?";
+        var lines = new List<string>
+        {
+            UiText.Format("OsDebugImage", Get("image"), Get("media")),
+            UiText.Format("OsDebugMachine", Get("machine"), Get("memoryMB"), Get("cpus"), Get("firmware"), Get("accel")),
+        };
+        if (c.ValueKind == JsonValueKind.Object && c.TryGetProperty("build", out var build))
+        {
+            lines.Add(UiText.Format("OsDebugBuild", build.TryGetProperty("toolchain", out var t) ? t.ToString() : "?",
+                build.TryGetProperty("action", out var a) ? a.ToString() : "?"));
+        }
+        lines.Add(UiText.Format("OsDebugLimits", args.TryGetProperty("maxCommands", out var n) ? n.ToString() : "?",
+            args.TryGetProperty("maxMinutes", out var m) ? m.ToString() : "?"));
+        lines.Add(UiText.Get(args.TryGetProperty("allowInput", out var input) && input.ValueKind == JsonValueKind.True
+            ? "OsDebugInputAllowed" : "OsDebugInputDenied"));
+        return string.Join("\n", lines);
+    }
 
     public bool HasPatch => _patch is not null;
 
@@ -321,6 +348,10 @@ public sealed class ApprovalCardViewModel : ObservableObject
     {
         get
         {
+            if (Proposal.Tool == "OsDebug.Start" && Proposal.Arguments.ValueKind == JsonValueKind.Object)
+            {
+                return OsDebugText();
+            }
             if (!IsToolchain || Proposal.Arguments.ValueKind != JsonValueKind.Object)
             {
                 return string.Empty;

@@ -65,6 +65,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
 
+    /// <summary>Betriebssystem-Debugging des Projekts (M9); null = nicht eingerichtet.</summary>
+    public OsDebugSettings? OsDebug { get; init; }
+
     /// <summary>Webabrufe (Inhaltsvorschau für die Inhaltsfreigabe); null = ausgeschaltet.</summary>
     public IWebCaptures? WebCaptures { get; init; }
 
@@ -374,12 +377,24 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                         ["actions"] = actions,
                     });
                 }
-                return new JsonObject
+                var available = new JsonObject
                 {
                     ["enabled"] = ToolchainCatalog is not null,
                     ["reason"] = ToolchainCatalog is null ? "Toolchain-Aktionen nur in der Betriebsart hyperv" : null,
                     ["toolchains"] = list,
                 };
+                if (OsDebug is not null)
+                {
+                    // M9: Agenten übernehmen config unverändert in OsDebug.Start (die Policy vergleicht sie).
+                    available["osDebug"] = new JsonObject
+                    {
+                        ["grantId"] = OsDebug.GrantId,
+                        ["config"] = JsonNode.Parse(OsDebug.WorkerConfig.GetRawText()),
+                        ["maxCommands"] = OsDebug.MaxCommands,
+                        ["maxMinutes"] = OsDebug.MaxMinutes,
+                    };
+                }
+                return available;
             }
             case M.ChatSend:
             {

@@ -14,6 +14,10 @@ namespace LocalAi.Broker;
 /// <item>Jede Freigabe erzeugt genau eine einmalige Capability, die beim Dispatch atomar konsumiert wird.</item>
 /// <item>Keine automatischen Wiederholungen; nach Neustart sind alle alten Freigaben ungültig.</item>
 /// <item>Sammelfreigaben lassen sich nur verkleinern (Abwahl), nie erweitern.</item>
+/// <item>Ausnahme mit eigener, ausdrücklicher Freigabe (M9): Eine freigegebene Debug-Sitzung (<c>OsDebug.Start</c>) erlaubt
+/// Befehle derselben Sitzung (<c>OsDebug.Command/Stop</c>) desselben Runs und Agenten – nur bis zur freigegebenen Zahl und
+/// Dauer, Eingaben nur mit allowInput; jeder Befehl wird als eigener Vorschlag mit Bezug auf die Sitzung protokolliert.
+/// Not-Aus und Abbruch beenden die Sitzung.</item>
 /// </list>
 /// </summary>
 public sealed class ApprovalBroker : IAsyncDisposable
@@ -46,7 +50,20 @@ public sealed class ApprovalBroker : IAsyncDisposable
     private readonly IToolAdapter _adapter;
     private readonly AuditJournal _journal;
     private readonly IClock _clock;
+    private sealed class DebugGrant
+    {
+        public required string StartId { get; init; }
+        public required string RunId { get; init; }
+        public required AgentRole Agent { get; init; }
+        public required int MaxCommands { get; init; }
+        public required DateTimeOffset Deadline { get; init; }
+        public required bool AllowInput { get; init; }
+        public int Used { get; set; }
+        public bool Closed { get; set; }
+    }
+
     private readonly Lock _gate = new();
+    private readonly Dictionary<string, DebugGrant> _debugGrants = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string RequestSha256, string ProposalId)> _idempotency = new(StringComparer.Ordinal);
     private readonly List<BrokerEvent> _events = [];
@@ -146,6 +163,7 @@ public sealed class ApprovalBroker : IAsyncDisposable
                     throw new BrokerException(BrokerErrorCodes.Conflict, "idempotencyKey wurde bereits für einen anderen Vorschlag verwendet");
                 }
 
+                var grant = OsDebugTools.IsSessionTool(request.Tool) ? RequireDebugGrant(request) : null;
                 var open = _entries.Values.Count(e => e.State is ProposalState.AwaitingApproval or ProposalState.Approved);
                 if (open >= _options.MaxOpenProposals)
                 {
@@ -173,6 +191,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
                 var entry = CreateEntry(proposal, request.IdempotencyKey, requestSha);
                 _idempotency[request.IdempotencyKey] = (requestSha, proposal.ProposalId);
                 AddEvent("proposal.created", entry, null);
+                if (grant is not null)
+                {
+                    ApproveInSession(entry, grant);
+                }
                 return View(entry);
             }
             catch (BrokerException ex)
@@ -280,6 +302,123 @@ public sealed class ApprovalBroker : IAsyncDisposable
         }
     }
 
+    // ------------------------------------------------------------------ Debug-Sitzungen (M9)
+
+    private DebugGrant RequireDebugGrant(ProposalRequest request)
+    {
+        var sessionId = request.Arguments.GetProperty("sessionId").GetString()!;
+        if (!_debugGrants.TryGetValue(sessionId, out var grant) || grant.Closed)
+        {
+            throw new BrokerException(BrokerErrorCodes.Forbidden, "Keine freigegebene, laufende Debug-Sitzung mit dieser Kennung – zuerst OsDebug.Start");
+        }
+        if (grant.RunId != request.RunId || grant.Agent != request.Agent)
+        {
+            throw new BrokerException(BrokerErrorCodes.Forbidden, "Die Debug-Sitzung gehört einem anderen Run bzw. Agenten");
+        }
+        if (_clock.UtcNow > grant.Deadline)
+        {
+            CloseGrant(grant, "freigegebene Dauer abgelaufen");
+            throw new BrokerException(BrokerErrorCodes.Gone, "Die freigegebene Dauer der Debug-Sitzung ist abgelaufen – neue Sitzung vorschlagen");
+        }
+        if (request.Tool == OsDebugTools.Command)
+        {
+            if (grant.Used >= grant.MaxCommands)
+            {
+                throw new BrokerException(BrokerErrorCodes.TooMany,
+                    $"Die Debug-Sitzung hat ihre {grant.MaxCommands} freigegebenen Befehle verbraucht – OsDebug.Stop und neue Sitzung vorschlagen");
+            }
+            var command = request.Arguments.GetProperty("command").GetString()!;
+            if (OsDebugTools.InputCommands.Contains(command) && !grant.AllowInput)
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden, "Tastatur und Maus sind für diese Debug-Sitzung nicht freigegeben");
+            }
+        }
+        return grant;
+    }
+
+    private void ApproveInSession(Entry entry, DebugGrant grant)
+    {
+        var capability = new Capability
+        {
+            Id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)),
+            ProposalSha256 = entry.Sha256,
+            SessionId = SessionId,
+            PolicyRevision = _options.PolicyRevision,
+        };
+        entry.Capability = capability;
+        if (entry.Proposal.Tool == OsDebugTools.Command)
+        {
+            grant.Used++;
+        }
+        Journal("decision", entry, new JsonObject
+        {
+            ["decision"] = "SessionGrant",
+            ["sha256"] = entry.Sha256,
+            ["sessionId"] = SessionId,
+            ["grant"] = grant.StartId,
+            ["used"] = grant.Used,
+            ["capabilityFingerprint"] = CanonicalJson.Sha256Hex(capability.Id)[..16],
+        });
+        SetState(entry, ProposalState.Approved, $"Im Rahmen der freigegebenen Debug-Sitzung ({grant.Used}/{grant.MaxCommands} Befehle)");
+        if (entry.Proposal.Tool == OsDebugTools.Stop)
+        {
+            CloseGrant(grant, "OsDebug.Stop");
+        }
+        _dispatchQueue.Writer.TryWrite(entry.Proposal.ProposalId);
+    }
+
+    private void CloseGrant(DebugGrant grant, string reason)
+    {
+        if (grant.Closed)
+        {
+            return;
+        }
+        grant.Closed = true;
+        _journal.Append("osdebug.closed", new JsonObject { ["proposalId"] = grant.StartId, ["reason"] = reason, ["used"] = grant.Used });
+        AddEvent("osdebug.closed", null, $"Debug-Sitzung beendet ({reason}, {grant.Used} Befehle)", grant.RunId);
+    }
+
+    private void OpenGrant(Entry start)
+    {
+        var args = start.Proposal.Arguments;
+        var minutes = args.GetProperty("maxMinutes").GetInt32();
+        var grant = new DebugGrant
+        {
+            StartId = start.Proposal.ProposalId,
+            RunId = start.Proposal.RunId,
+            Agent = start.Proposal.Agent,
+            MaxCommands = args.GetProperty("maxCommands").GetInt32(),
+            Deadline = _clock.UtcNow + TimeSpan.FromMinutes(minutes),
+            AllowInput = args.TryGetProperty("allowInput", out var input) && input.ValueKind == JsonValueKind.True,
+        };
+        _debugGrants[grant.StartId] = grant;
+        Journal("osdebug.granted", start, new JsonObject
+        {
+            ["maxCommands"] = grant.MaxCommands,
+            ["deadline"] = ContractTime.ToContract(grant.Deadline),
+            ["allowInput"] = grant.AllowInput,
+            ["runId"] = grant.RunId,
+            ["agent"] = grant.Agent.ToString(),
+        });
+        AddEvent("osdebug.granted", start, $"Debug-Sitzung offen: höchstens {grant.MaxCommands} Befehle, {minutes} min" +
+                                           (grant.AllowInput ? ", Tastatur/Maus erlaubt" : ""));
+    }
+
+    /// <summary>Der letzte Not-Aus hat offene Debug-Sitzungen beendet – dann muss auch QEMU in der VM enden.</summary>
+    public bool StopClosedDebugSessions { get; private set; }
+
+    /// <summary>Offene Debug-Sitzungen (für Not-Aus der VM und Anzeige).</summary>
+    public int OpenDebugSessions
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _debugGrants.Values.Count(g => !g.Closed && _clock.UtcNow <= g.Deadline);
+            }
+        }
+    }
+
     /// <summary>Sammelfreigabe: behält nur die genannten Ziele und erzeugt einen neuen Vorschlag.</summary>
     public ProposalView Narrow(NarrowRequest request)
     {
@@ -343,6 +482,11 @@ public sealed class ApprovalBroker : IAsyncDisposable
             EnsureStarted();
             _stopped = true;
             _journal.Append("emergency.stop", new JsonObject());
+            StopClosedDebugSessions = _debugGrants.Values.Any(g => !g.Closed);
+            foreach (var grant in _debugGrants.Values)
+            {
+                CloseGrant(grant, "Not-Aus");
+            }
             foreach (var entry in _entries.Values)
             {
                 if (entry.State is ProposalState.AwaitingApproval or ProposalState.Approved)
@@ -411,6 +555,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
         {
             EnsureStarted();
             var count = 0;
+            foreach (var grant in _debugGrants.Values.Where(g => g.RunId == runId && (agent is null || g.Agent == agent)))
+            {
+                CloseGrant(grant, reason);
+            }
             foreach (var entry in _entries.Values.Where(e => e.Proposal.RunId == runId && (agent is null || e.Proposal.Agent == agent)).ToList())
             {
                 if (entry.State is ProposalState.AwaitingApproval or ProposalState.Approved)
@@ -549,6 +697,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
                 _ => ProposalState.Failed,
             };
             SetState(entry, state, null);
+            if (proposal.Tool == OsDebugTools.Start && result.Status == ResultStatus.Succeeded && !_stopped)
+            {
+                OpenGrant(entry);
+            }
         }
         return true;
     }

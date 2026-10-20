@@ -637,7 +637,10 @@ class Executor:
         # Linux-Gast: linproc.ToolUser (Werkzeugprozesse als eigener Benutzer, eigener Netzwerk-Namespace).
         self.tools_user = tools_user if os.name != "nt" else None
 
-    def run(self, tool: str, job_id: str, arguments: dict[str, Any], index: SnapshotIndex) -> ExecResult:
+    def run(self, tool: str, job_id: str, arguments: dict[str, Any], index: SnapshotIndex,
+            keep: Any = None) -> ExecResult:
+        """``keep(dirs)``: wird nach den Schritten und vor dem Löschen des Arbeitsordners aufgerufen (z. B. um ein
+        gebautes Abbild für OsDebug zu übernehmen)."""
         toolchain = self.catalog.get(arguments.get("toolchain"))
         action_name, action = resolve_action(toolchain, tool)
         params = validate_parameters(action, arguments.get("parameters"), index)
@@ -695,6 +698,8 @@ class Executor:
                 report.problems.append(f"Schritt {failed_step} von {len(steps)} fehlgeschlagen – spätere Schritte nicht ausgeführt")
             if system_temp is not None:
                 system_temp.cleanup()
+            if keep is not None:
+                keep(dirs)
         finally:
             if self.tools_user is not None:
                 from localai.worker import linproc

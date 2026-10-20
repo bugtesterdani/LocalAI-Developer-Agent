@@ -257,7 +257,7 @@ public sealed class M7Tests : IAsyncDisposable
     public void Manifest_enthaelt_Versionen_und_meldet_fehlende_Offline_Voraussetzungen()
     {
         var manifest = VersionManifest.Build(Options(), null, ["dotnet"]);
-        Assert.Equal("0.8.0", manifest["version"]!.GetValue<string>());
+        Assert.Equal("0.9.0", manifest["version"]!.GetValue<string>());
         Assert.NotNull(manifest["contractsSchemaSha256"]);
         Assert.Contains(manifest["prompts"]!.AsArray(), p => p!["name"]!.GetValue<string>() == "common" && p["version"]!.GetValue<int>() >= 4);
         var checks = manifest["offline"]!.AsArray();
@@ -267,7 +267,7 @@ public sealed class M7Tests : IAsyncDisposable
 
         var json = JsonSerializer.SerializeToElement(manifest);
         var (text, problems) = SystemReport.FormatManifest(json);
-        Assert.Contains("Local AI Developer Agent 0.8.0", text, StringComparison.Ordinal);
+        Assert.Contains("Local AI Developer Agent 0.9.0", text, StringComparison.Ordinal);
         Assert.Contains("Windows-Abbild", problems, StringComparison.Ordinal);
         Directory.CreateDirectory(Path.Combine(_dir, "data"));
         VersionManifest.Write(manifest, Path.Combine(_dir, "data"));

@@ -8,7 +8,8 @@
       1. Debian 13 Cloud-Abbild (generic, amd64, Rohformat) samt Prüfung gegen SHA512SUMS
       2. Python für Linux (python-build-standalone, install_only_stripped) samt Prüfung gegen SHA256SUMS
       3. Wheels des Workers für Linux (pydantic und Abhängigkeiten, gleiche Versionen wie src/python/.venv)
-      4. Debian-Paket hyperv-daemons (KVP-Datenaustausch und Copy-VMFile im Gast)
+      4. Debian-Paket hyperv-daemons (KVP-Datenaustausch und Copy-VMFile im Gast) samt Abhängigkeiten
+      5. mit -WithQemu (M9, Betriebssystem-Debugging): QEMU, OVMF (UEFI) und binutils (objdump) samt Abhängigkeiten
     Ergebnis:
       <Ziel>\debian-13-generic-amd64.raw          → sandbox.hypervLinux.imagePath
       <Ziel>\linux-gast\prerequisites.json …      → sandbox.hypervLinux.prerequisites (Standard: neben dem Abbild)
@@ -20,7 +21,7 @@ param(
     [Parameter(Mandatory)][string]$Target,
     [string]$PythonMinor = '3.13',
     [string]$DebianImageUrl = 'https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.raw',
-    [string]$HypervDaemonsDeb,
+    [switch]$WithQemu,
     [switch]$SkipImage
 )
 
@@ -83,20 +84,16 @@ Get-ChildItem -LiteralPath $wheelDir -Filter '*.whl' | Remove-Item -Force
     --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 --python-version $PythonMinor --implementation cp
 if ($LASTEXITCODE -ne 0) { throw "pip download fehlgeschlagen (Exitcode $LASTEXITCODE)" }
 
-# ------------------------------------------------------------------ 4 hyperv-daemons
+# ------------------------------------------------------------------ 4/5 Debian-Pakete (mit Abhängigkeiten, Hashprüfung)
 $debDir = Join-Path $prereq 'debs'
 Get-ChildItem -LiteralPath $debDir -Filter '*.deb' | Remove-Item -Force
-if ($HypervDaemonsDeb) {
-    Copy-Item -LiteralPath $HypervDaemonsDeb -Destination $debDir
-} else {
-    $page = (Invoke-WebRequest -UseBasicParsing -Uri 'https://packages.debian.org/trixie/amd64/hyperv-daemons/download').Content
-    $name = [regex]::Match($page, 'hyperv-daemons_[A-Za-z0-9.+~-]+_amd64\.deb').Value
-    $sha = [regex]::Match($page, '(?s)SHA256[^0-9a-f]*([0-9a-f]{64})').Groups[1].Value
-    if (-not $name) { throw 'hyperv-daemons nicht gefunden – Paket von Hand laden und mit -HypervDaemonsDeb angeben' }
-    $deb = Join-Path $debDir $name
-    Save-Url "https://deb.debian.org/debian/pool/main/l/linux/$name" $deb
-    if ($sha -and (Get-Sha $deb) -ne $sha) { throw 'hyperv-daemons: SHA256 stimmt nicht' }
-}
+$debPackages = @('hyperv-daemons')
+if ($WithQemu) { $debPackages += @('qemu-system-x86', 'ovmf', 'binutils') }
+Push-Location $repo
+try {
+    & uv run --no-sync --project src/python python tools/prereq/debian_closure.py --dest $debDir @debPackages
+    if ($LASTEXITCODE -ne 0) { throw "Debian-Pakete konnten nicht geladen werden (Exitcode $LASTEXITCODE)" }
+} finally { Pop-Location }
 
 # ------------------------------------------------------------------ prerequisites.json
 $hashes = [ordered]@{}

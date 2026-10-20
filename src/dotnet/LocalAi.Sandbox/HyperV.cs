@@ -34,6 +34,12 @@ public sealed record HyperVSettings
     /// </summary>
     public string StopAction { get; init; } = "ShutDown";
 
+    /// <summary>
+    /// Nur Linux (M9): Virtualisierungsfunktionen der CPU an die VM weiterreichen, damit QEMU dort KVM nutzen kann
+    /// (schneller als reine Emulation). Standard aus – QEMU läuft dann mit TCG, ganz ohne verschachtelte Virtualisierung.
+    /// </summary>
+    public bool NestedVirtualization { get; init; }
+
     /// <summary>Name der Edition im Abbild, z. B. „Windows 11 Pro“; alternativ <see cref="ImageIndex"/>.</summary>
     public string? ImageName { get; init; }
 
@@ -1035,9 +1041,10 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     /// endet jeder Prozessbaum im Gast sicher. Danach ist die Sandbox gesperrt (Neuaufbau); ohne laufenden Job bleibt
     /// sie bereit, es wird ohnehin nichts mehr versandt (Dispatch gesperrt).
     /// </summary>
-    public async Task<string> EmergencyStopAsync()
+    public async Task<string> EmergencyStopAsync(bool force = false)
     {
-        var busy = (_exchange.CurrentCount == 0 || Status.State == SandboxState.Paused) && Status.State != SandboxState.Stopped;
+        // force (M9): in der VM läuft noch etwas ohne Job – z. B. QEMU einer Debug-Sitzung.
+        var busy = (force || _exchange.CurrentCount == 0 || Status.State == SandboxState.Paused) && Status.State != SandboxState.Stopped;
         if (!busy)
         {
             return "keine laufende Ausführung in der VM";
@@ -1213,6 +1220,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             ["productKey"] = _settings.ProductKey,
             ["keepVmOnExit"] = _settings.KeepVmOnExit,
             ["guest"] = _settings.IsLinux ? "Linux" : "Windows",
+            ["nestedVirtualization"] = _settings.NestedVirtualization,
         };
         return request.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }

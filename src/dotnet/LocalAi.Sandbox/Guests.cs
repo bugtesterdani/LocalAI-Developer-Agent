@@ -13,11 +13,12 @@ namespace LocalAi.Sandbox;
 /// ist ein Fehler; ein nur geerbter Gast (Projekt/Standard) weicht dem Manifest.</item>
 /// </list>
 /// </summary>
-public sealed record GuestPlan(GuestOs Home, IReadOnlyDictionary<string, GuestOs> Toolchains, IReadOnlyList<string> Notes)
+public sealed record GuestPlan(GuestOs Home, IReadOnlyDictionary<string, GuestOs> Toolchains, IReadOnlyList<string> Notes,
+    GuestOs? OsDebug = null)
 {
-    /// <summary>Alle VMs, die das Projekt braucht: Heimat-Gast zuerst, dann die der Toolchains.</summary>
+    /// <summary>Alle VMs, die das Projekt braucht: Heimat-Gast zuerst, dann die der Toolchains und von OsDebug (M9).</summary>
     public IReadOnlyList<GuestOs> Required =>
-        new[] { Home }.Concat(Toolchains.Values.Order()).Distinct().ToList();
+        new[] { Home }.Concat(Toolchains.Values.Order()).Concat(OsDebug is { } d ? [d] : []).Distinct().ToList();
 
     public GuestOs GuestOf(string toolchain) => Toolchains.TryGetValue(toolchain, out var guest) ? guest : Home;
 
@@ -67,10 +68,15 @@ public static class GuestSelection
                 notes.Add($"Toolchain '{name}' läuft in der {Name(declared.Value)}-VM (laut toolchain.json)");
             }
         }
+        if (project.OsDebug?.Build is { } build && result.TryGetValue(build.Toolchain, out var buildGuest) && buildGuest != GuestOs.Linux)
+        {
+            problems.Add($"osDebug.build.toolchain: '{build.Toolchain}' läuft unter {Name(buildGuest)}, QEMU aber in der Linux-VM – eine Linux-Toolchain wählen");
+        }
         if (problems.Count > 0)
         {
             throw new InvalidDataException(string.Join("; ", problems));
         }
-        return new GuestPlan(home, result, notes);
+        // M9: QEMU für das Betriebssystem-Debugging läuft in der Linux-VM.
+        return new GuestPlan(home, result, notes, project.OsDebug is null ? null : GuestOs.Linux);
     }
 }

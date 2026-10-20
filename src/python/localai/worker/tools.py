@@ -13,6 +13,7 @@ from localai.contracts import ResultStatus, SandboxJob, TargetResult, ToolResult
 from localai.pathrules import ROOT, PathRuleError, is_within, normalize_relative
 from localai.worker import hdevelop, patching
 from localai.worker.execution import ACTIONS, ExecError, Executor
+from localai.worker.osdebug import OsDebugError
 from localai.worker.repoindex import DEFAULT_MAX_CHARS, MAX_CHARS, RepoIndexer, build_map
 from localai.worker.snapshot import SnapshotError, SnapshotIndex, SnapshotStore
 
@@ -55,10 +56,12 @@ Handler = Callable[[SandboxJob, SnapshotIndex], tuple[list[TargetResult], bool]]
 
 
 class ToolRunner:
-    def __init__(self, store: SnapshotStore, executor: Executor | None = None, indexer: RepoIndexer | None = None) -> None:
+    def __init__(self, store: SnapshotStore, executor: Executor | None = None, indexer: RepoIndexer | None = None,
+                 osdebug: Any = None) -> None:
         self.store = store
         self.executor = executor
         self.indexer = indexer
+        self.osdebug = osdebug  # OsDebugManager (M9) oder None
         self._exit_code: int | None = None
         self._tools: dict[str, Handler] = {
             "File.Read": self._read,
@@ -69,6 +72,7 @@ class ToolRunner:
             "Repo.Index": self._index,
             "Workspace.Diff": self._diff,
             **{name: self._toolchain for name in ACTIONS},
+            "OsDebug.Start": self._osdebug,
         }
 
     def run(self, job: SandboxJob, payload: Any) -> ToolResult:
@@ -77,6 +81,8 @@ class ToolRunner:
         try:
             if proposal.tool == "Workspace.Snapshot":
                 results, truncated = self._import(job, payload)
+            elif proposal.tool in ("OsDebug.Command", "OsDebug.Stop"):
+                results, truncated = self._osdebug(job, None)
             else:
                 handler = self._tools.get(proposal.tool)
                 if handler is None:
@@ -88,7 +94,7 @@ class ToolRunner:
                 results, truncated = handler(job, index)
             status = (ResultStatus.Succeeded if all(r.status == ResultStatus.Succeeded for r in results)
                       else ResultStatus.Failed)
-        except (ToolError, SnapshotError, ExecError, patching.PatchError) as err:
+        except (ToolError, SnapshotError, ExecError, patching.PatchError, OsDebugError) as err:
             results, truncated, status = [TargetResult(target_id="*", status=ResultStatus.Failed, message=str(err))], False, ResultStatus.Failed
         except Exception as err:  # noqa: BLE001 – unerwarteter Fehler: melden statt ohne Antwort abzustürzen
             message = f"Interner Fehler im Worker ({type(err).__name__}): {err}"[:2000]
@@ -317,6 +323,30 @@ class ToolRunner:
             TargetResult(target_id="tests", status=ResultStatus.Succeeded, text=report_text, content_sha256=_sha(report_text),
                          message=result.message),
         ], False
+
+    # ------------------------------------------------------------------ OsDebug.* (M9)
+    def _osdebug(self, job: SandboxJob, index: SnapshotIndex | None) -> tuple[list[TargetResult], bool]:
+        if self.osdebug is None:
+            raise ToolError("OsDebug ist in dieser Sandbox nicht freigeschaltet (nur Linux-VM mit QEMU)")
+        args = dict(job.proposal.arguments)
+        tool = job.proposal.tool
+        if tool == "OsDebug.Start":
+            data = self.osdebug.start(job.proposal.proposal_id, args, index, job.job_id)
+            message = f"Debug-Sitzung gestartet: {data['state']}"
+        elif tool == "OsDebug.Stop":
+            message = self.osdebug.stop(str(args.get("sessionId")))
+            data = {"state": "beendet"}
+        else:
+            data = self.osdebug.command(str(args.get("sessionId")), args)
+            message = f"{args.get('command')}: {data.get('state')}" + (f" – {data['message']}" if data.get("message") else "")
+        screenshot = data.pop("screenshot", None)
+        text = json.dumps(data, ensure_ascii=False)
+        results = [TargetResult(target_id="debug", status=ResultStatus.Succeeded, text=text, content_sha256=_sha(text),
+                                message=message[:2000])]
+        if screenshot:
+            results.append(TargetResult(target_id="screenshot", status=ResultStatus.Succeeded, text=screenshot,
+                                        content_sha256=_sha(screenshot), message="PNG (Base64)"))
+        return results, False
 
     # ------------------------------------------------------------------ Repo.Index
     def _index(self, job: SandboxJob, index: SnapshotIndex) -> tuple[list[TargetResult], bool]:

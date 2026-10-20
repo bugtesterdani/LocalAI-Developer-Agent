@@ -44,7 +44,7 @@ class EditBlock:
 
 @dataclass
 class Action:
-    kind: str  # list | read | search | symbols | fetch | finish
+    kind: str  # list | read | search | symbols | fetch | debug | finish
     reasoning: str
     path: str = "."
     depth: int = 3
@@ -55,6 +55,7 @@ class Action:
     result: dict[str, Any] = field(default_factory=dict)
     edits: list[EditBlock] = field(default_factory=list)  # SEARCH/REPLACE-Blöcke vor dem JSON
     diff_block: str = ""  # ```diff-Block außerhalb des JSON (Ersatz, wenn das Patchfeld fehlt)
+    debug: dict[str, Any] = field(default_factory=dict)  # M9: Befehl und Parameter der Debug-Sitzung
 
 
 @dataclass
@@ -257,13 +258,29 @@ def _action(data: dict[str, Any], reasoning: str) -> Action:
         if not isinstance(url, str) or not url.strip().lower().startswith("https://") or len(url) > 2048:
             raise ProtocolError('fetch needs "url": "https://..." (one public web page, at most 2048 characters).')
         return Action("fetch", reasoning, url=url.strip().split("#", 1)[0], reason=str(data.get("reason", "")))
+    if kind == "debug":
+        command = data.get("command")
+        if command not in DEBUG_COMMANDS:
+            raise ProtocolError(f"debug needs \"command\": one of {', '.join(sorted(DEBUG_COMMANDS))}.")
+        params = {k: v for k, v in data.items() if k in DEBUG_PARAMS}
+        unknown = sorted(set(data) - DEBUG_PARAMS - {"action", "command", "reason"})
+        if unknown:
+            raise ProtocolError(f"debug: unknown fields {', '.join(unknown)}.")
+        return Action("debug", reasoning, reason=str(data.get("reason", "")), debug={"command": command, **params})
     if kind == "finish":
         result = data.get("result")
         if not isinstance(result, dict):
             raise ProtocolError('finish needs "result": { ... } as described for your role.')
         return Action("finish", reasoning, result=result)
-    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols", "fetch" or "finish". A final result must be wrapped: '
-                        '{"action": "finish", "result": { ... }}.')
+    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols", "fetch", "debug" (if available) or "finish". '
+                        'A final result must be wrapped: {"action": "finish", "result": { ... }}.')
+
+
+# M9: Befehle der Debug-Sitzung (boot = Sitzung auf dem aktuellen Stand (neu) starten).
+DEBUG_COMMANDS = {"boot", "continue", "pause", "step", "break", "registers", "info", "memory", "disassemble", "screenshot",
+                  "screen-text", "keys", "mouse", "serial", "reset", "events"}
+DEBUG_PARAMS = {"address", "count", "length", "physical", "kind", "remove", "waitMs", "keys", "text", "dx", "dy", "button",
+                "topic", "mode", "halt"}
 
 
 # ------------------------------------------------------------------ Ergebnisprüfung je Rolle
@@ -515,8 +532,8 @@ def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
                 raise ProtocolError("Each task must be an object.")
             for key in ("id", "title", "description"):
                 _str(t, key)
-            if t.get("role") not in ("Coder", "Tester"):
-                raise ProtocolError('task.role must be "Coder" or "Tester".')
+            if t.get("role") not in ("Coder", "Tester", "Debugger"):
+                raise ProtocolError('task.role must be "Coder", "Tester" or "Debugger" (Debugger only for OS debugging).')
             t["reads"] = _str_list(t.get("reads"), "task.reads")
             t["writes"] = _str_list(t.get("writes"), "task.writes")
             t["depends_on"] = _str_list(t.get("depends_on"), "task.depends_on")

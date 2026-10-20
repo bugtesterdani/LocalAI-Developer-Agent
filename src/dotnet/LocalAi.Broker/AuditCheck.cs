@@ -43,6 +43,7 @@ public static class AuditCheck
     {
         public required string Sha { get; init; }
         public required int Session { get; init; }
+        public string Tool { get; init; } = "";
         public int Approvals;
         public int Denials;
         public string? ApprovedSha;
@@ -52,9 +53,18 @@ public static class AuditCheck
     /// <summary>Prüft Hashkette (wirft <see cref="AuditTamperException"/>) und Freigabeinvarianten.</summary>
     public static AuditReport Verify(string journalPath) => Check(AuditJournal.ReadVerified(journalPath));
 
+    private sealed class Grant
+    {
+        public required int Session { get; init; }
+        public required int Max { get; init; }
+        public int Used;
+        public bool Closed;
+    }
+
     public static AuditReport Check(IReadOnlyList<JournalEntry> entries)
     {
         var problems = new List<string>();
+        var grants = new Dictionary<string, Grant>(StringComparer.Ordinal);
         var proposals = new Dictionary<string, Proposal>(StringComparer.Ordinal);
         int session = 0, approvals = 0, denials = 0, invocations = 0, stops = 0;
         foreach (var e in entries)
@@ -78,7 +88,7 @@ public static class AuditCheck
                         problems.Add($"#{e.Seq}: Vorschlag ohne Kennung oder Hash");
                         break;
                     }
-                    if (!proposals.TryAdd(pid, new Proposal { Sha = sha, Session = session }))
+                    if (!proposals.TryAdd(pid, new Proposal { Sha = sha, Session = session, Tool = e.Data["proposal"]?["tool"]?.GetValue<string>() ?? "" }))
                     {
                         problems.Add($"#{e.Seq}: Vorschlag {pid} doppelt angelegt");
                     }
@@ -103,6 +113,26 @@ public static class AuditCheck
                         p.Approvals++;
                         p.ApprovedSha = sha;
                     }
+                    else if (kind == "SessionGrant")
+                    {
+                        // M9: nur Befehle einer freigegebenen, offenen Debug-Sitzung derselben Broker-Sitzung, im Budget.
+                        var grantId = Str("grant");
+                        if (p.Tool is not ("OsDebug.Command" or "OsDebug.Stop"))
+                        {
+                            problems.Add($"#{e.Seq}: Sitzungsfreigabe für {p.Tool} ({id}) nicht erlaubt");
+                        }
+                        else if (grantId is null || !grants.TryGetValue(grantId, out var g) || g.Closed || g.Session != session)
+                        {
+                            problems.Add($"#{e.Seq}: Sitzungsfreigabe für {id} ohne offene, freigegebene Debug-Sitzung");
+                        }
+                        else if (p.Tool == "OsDebug.Command" && ++g.Used > g.Max)
+                        {
+                            problems.Add($"#{e.Seq}: Debug-Sitzung {grantId} über ihr Befehlsbudget ({g.Max}) hinaus genutzt");
+                        }
+                        approvals++;
+                        p.Approvals++;
+                        p.ApprovedSha = sha;
+                    }
                     else
                     {
                         denials++;
@@ -114,6 +144,25 @@ public static class AuditCheck
                     }
                     break;
                 }
+                case "osdebug.granted":
+                {
+                    // Nur nach genau einer ausdrücklich freigegebenen und ausgeführten OsDebug.Start.
+                    if (id is null || !proposals.TryGetValue(id, out var start) || start.Tool != "OsDebug.Start" || start.Invocations != 1
+                        || start.Approvals != 1 || start.ApprovedSha != start.Sha || start.Session != session)
+                    {
+                        problems.Add($"#{e.Seq}: Debug-Sitzung {id} ohne freigegebenen, ausgeführten Start");
+                        break;
+                    }
+                    var max = e.Data["maxCommands"]?.GetValueKind() == System.Text.Json.JsonValueKind.Number ? e.Data["maxCommands"]!.GetValue<int>() : 0;
+                    grants[id] = new Grant { Session = session, Max = max };
+                    break;
+                }
+                case "osdebug.closed":
+                    if (id is not null && grants.TryGetValue(id, out var closed))
+                    {
+                        closed.Closed = true;
+                    }
+                    break;
                 case "invocation.started":
                 {
                     invocations++;

@@ -133,24 +133,29 @@ def pending_jobs(inbox: pathlib.Path, require_ready: bool) -> list[pathlib.Path]
 
 
 def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, poll: float,
-        require_ready: bool = False, executor: Executor | None = None, update: UpdateTarget | None = None) -> int:
+        require_ready: bool = False, executor: Executor | None = None, update: UpdateTarget | None = None,
+        osdebug=None) -> int:  # noqa: ANN001
     """Verarbeitet Jobs; Rückgabe 75 = nach Gast-Update neu starten, sonst 0."""
     for d in (inbox, work):
         d.mkdir(parents=True, exist_ok=True)
     state = WorkerState.load(work / "state.json")
-    runner = ToolRunner(SnapshotStore(work), executor, RepoIndexer(work))
+    runner = ToolRunner(SnapshotStore(work), executor, RepoIndexer(work), osdebug)
     print(f"[Worker] bereit, Eingang {inbox}", flush=True)
     while True:
         for job_file in pending_jobs(inbox, require_ready):
             try:
                 if process_one(job_file, sink, key, state, runner, update):
                     print("[Worker] Gast-Update angewendet – Neustart", flush=True)
+                    if osdebug is not None:
+                        osdebug.stop_all()
                     return RESTART_EXIT_CODE
             except (TransferError, OSError) as err:
                 # Ohne Rückweg kann nichts gemeldet werden; der Host läuft in seine Zeitgrenze.
                 print(f"[Worker] Rückgabe fehlgeschlagen: {err}", flush=True)
         if once:
             return 0
+        if osdebug is not None:
+            osdebug.reap()
         time.sleep(poll)
 
 
@@ -175,6 +180,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--package-dir", type=pathlib.Path, help="Gast-Update: installiertes Paket localai (nur Tests)")
     parser.add_argument("--tools-user", help="Linux-Gast: Werkzeugprozesse als dieser Benutzer, ohne Netz (z. B. localai-tools)")
     parser.add_argument("--jobs-root", type=pathlib.Path, help="Arbeitsordner der Toolchain-Jobs (Standard: <work>/jobs)")
+    parser.add_argument("--osdebug", action="store_true", help="OsDebug.* (QEMU) freischalten – Linux-Gast bzw. dev-local")
+    parser.add_argument("--emu-user", help="Linux-Gast: QEMU als dieser Benutzer, ohne Netz (z. B. localai-emu)")
+    parser.add_argument("--qemu", help="nur Tests: Pfad zu qemu-system-x86_64")
     parser.add_argument("--kvp-pool", type=pathlib.Path, help="nur Tests: KVP-Pool-Datei statt /var/lib/hyperv/.kvp_pool_1")
     parser.add_argument("--no-low-integrity", action="store_true",
                         help="Werkzeugprozesse ohne niedrige Integritätsstufe starten (schwächer, nur zur Fehlersuche)")
@@ -216,7 +224,19 @@ def main(argv: list[str] | None = None) -> int:
         # Gast-Update nur im VM-Modus (Transfer-Laufwerk); im Entwicklungsmodus ersetzt der Worker nie Code.
         update = UpdateTarget(args.guest_root or args.work.resolve().parent,
                               args.package_dir or pathlib.Path(localai.__file__).resolve().parent)
-    return run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor, update)
+    osdebug = None
+    if args.osdebug:
+        from localai.worker.osdebug import OsDebugManager
+        emu_user = None
+        if args.emu_user:
+            from localai.worker.linproc import ToolUser
+            emu_user = ToolUser.lookup(args.emu_user)
+        osdebug = OsDebugManager((args.jobs_root or args.work / "jobs"), emu_user, args.qemu, executor)
+    try:
+        return run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor, update, osdebug)
+    finally:
+        if osdebug is not None and not args.once:
+            osdebug.stop_all()
 
 
 if __name__ == "__main__":

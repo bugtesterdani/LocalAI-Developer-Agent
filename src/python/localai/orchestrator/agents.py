@@ -45,6 +45,8 @@ class Assignment:
     finisher: Callable[[dict[str, Any]], str | None] | None = None
     # Dateien, die die Aufgabe ändern darf (Pfad für SEARCH/REPLACE-Blöcke bzw. Diffs ohne Kopfzeilen).
     files: list[str] = field(default_factory=list)
+    # Mehr Modellschritte (z. B. Debug-Sitzung: jeder Befehl ist ein Schritt); None = limits der Rolle.
+    max_steps: int | None = None
 
 
 @dataclass
@@ -86,11 +88,21 @@ class Agent:
     def run(self, assignment: Assignment, cancel: CancelToken) -> AgentResult:
         role, task_id = self.role, assignment.task_id
         evidence = list(assignment.evidence)
+        max_steps = assignment.max_steps or self.limits.steps_for(role)
+        try:
+            return self._run(assignment, cancel, evidence, max_steps)
+        finally:
+            # M9: eine offene Debug-Sitzung dieser Aufgabe endet mit ihr (QEMU wird beendet).
+            end = getattr(self.bridge, "end_debug", None)
+            if end is not None:
+                end(role, task_id)
+
+    def _run(self, assignment: Assignment, cancel: CancelToken, evidence: list[Evidence], max_steps: int) -> AgentResult:
+        role, task_id = self.role, assignment.task_id
         history: list[str] = []
         gateway_errors = 0
         denials = 0
         invalid = 0
-        max_steps = self.limits.steps_for(role)
         self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: {assignment.title}", task_id)
         for step in range(1, max_steps + 1):
             cancel.raise_if_cancelled()

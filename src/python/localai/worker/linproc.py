@@ -49,7 +49,7 @@ class ToolUser:
         return cls(name, entry.pw_uid, entry.pw_gid)
 
 
-def isolation(user: ToolUser, memory_mb: int = 0, new_netns: bool = True):
+def isolation(user: ToolUser, memory_mb: int = 0, new_netns: bool = True, groups: tuple[int, ...] = ()):
     """preexec_fn für subprocess: läuft im Kindprozess vor exec (noch als root)."""
     import resource
 
@@ -62,7 +62,7 @@ def isolation(user: ToolUser, memory_mb: int = 0, new_netns: bool = True):
         if memory_mb > 0:
             limit = memory_mb * 1024 * 1024
             resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-        os.setgroups([])
+        os.setgroups(list(groups))  # leer – nur QEMU mit KVM bekommt die Gruppe von /dev/kvm (M9)
         os.setgid(user.gid)
         os.setuid(user.uid)
         if _libc is None or _libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:

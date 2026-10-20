@@ -1,7 +1,7 @@
 #!/bin/bash
 # Provisionierung des Linux-Gasts (M8), Teil 1 – läuft einmal als root über cloud-init (runcmd), ohne Netzwerk.
 # Das Seed-Laufwerk (CIDATA) ist schreibgeschützt unter /mnt/localai-seed eingebunden.
-#   1. hyperv-daemons installieren (KVP-Datenaustausch, Copy-VMFile)
+#   1. hyperv-daemons installieren (KVP-Datenaustausch, Copy-VMFile), mit -WithQemu auch QEMU (M9)
 #   2. Python für Linux nach /opt/localai/python entpacken, Wheels und Worker einspielen
 #   3. Sitzungsschlüssel, Konfiguration und Toolchains nach /var/lib/localai (nur root)
 #   4. Teil 2 in Python: localai.guest.provision (Netzwerkprüfung, Toolchains, Worker-Dienst, Bericht)
@@ -28,10 +28,13 @@ mkdir -p "$ROOT" "$OPT" || fail "Ordner nicht anlegbar"
 chmod 0700 "$ROOT"
 
 # 1 – hyperv-daemons (offline, ohne Abhängigkeitsauflösung)
-for deb in $(files_of deb); do
-    echo "dpkg -i $deb"
-    DEBIAN_FRONTEND=noninteractive dpkg -i "$SEED/prereq/$deb" || fail "Paket $deb ließ sich nicht installieren"
-done
+# Alle Pakete in einem Aufruf: dpkg ordnet Abhängigkeiten untereinander selbst (z. B. QEMU samt Bibliotheken, M9).
+debs=()
+for deb in $(files_of deb); do debs+=("$SEED/prereq/$deb"); done
+if [ ${#debs[@]} -gt 0 ]; then
+    echo "dpkg -i (${#debs[@]} Pakete)"
+    DEBIAN_FRONTEND=noninteractive dpkg -i "${debs[@]}" || fail "Pakete ließen sich nicht installieren (Abhängigkeiten?)"
+fi
 
 # 2 – Python und Worker
 python_archive=$(files_of python | head -n 1)

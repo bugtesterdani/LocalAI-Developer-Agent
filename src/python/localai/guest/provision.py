@@ -37,6 +37,7 @@ from localai.pathrules import PathRuleError, normalize_relative
 
 FCOPY_CLASS = "34d14be3-dee4-41c8-9ae7-6b174977c192"
 TOOLS_USER = "localai-tools"
+EMU_USER = "localai-emu"  # M9: QEMU der Debug-Sitzungen
 WORKER_UNIT = "localai-worker.service"
 FCOPY_UNIT = "localai-fcopy.service"
 KVP_UNIT = "localai-kvp.service"
@@ -402,7 +403,8 @@ def worker_command(config: dict[str, Any], paths: Paths = Paths()) -> list[str]:
             "--inbox", str(paths.root / "inbox"), "--work", str(paths.root / "work"),
             "--key-file", str(paths.root / "session.key"),
             "--transfer-disk", "auto", "--transfer-size", str(int(config["transferDiskBytes"])), "--require-ready",
-            "--toolchains", str(paths.published), "--tools-user", TOOLS_USER, "--jobs-root", str(paths.jobs)]
+            "--toolchains", str(paths.published), "--tools-user", TOOLS_USER, "--jobs-root", str(paths.jobs),
+            "--osdebug", "--emu-user", EMU_USER]
 
 
 def worker_unit(config: dict[str, Any], paths: Paths = Paths()) -> str:  # noqa: B008
@@ -553,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
         report.data["probes"] = probes()
 
         ensure_tools_user()
+        ensure_tools_user(EMU_USER)
 
         set_progress("toolchains")
         source_root = paths.root / "toolchain-src"

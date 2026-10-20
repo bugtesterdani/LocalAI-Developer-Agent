@@ -1235,3 +1235,44 @@ def test_webinhalt_verwerfen_und_sauber_neu_aufbauen(ollama, tmp_path):
     assert any("Do not fetch these web pages again" in s and url in s for s in coder_prompts)
     orch.stop()
     thread.join(5)
+
+
+def test_debugger_bootet_das_betriebssystem_in_einer_freigegebenen_sitzung(ollama, tmp_path):
+    """M9: Mit osDebug startet der Debugger eine Debug-Sitzung (eine Freigabe), sammelt Befehlsergebnisse als Evidenz
+    und beendet die Sitzung mit seiner Aufgabe."""
+    original = scripted_answer
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        if "Debugger agent" in system and "## OS debugging" in user:
+            done = user.count('source="OS debug')
+            steps = [{"action": "debug", "command": "boot", "halt": True},
+                     {"action": "debug", "command": "break", "address": "0x7c22"},
+                     {"action": "debug", "command": "continue", "waitMs": 5000},
+                     {"action": "debug", "command": "registers"}]
+            if done < len(steps):
+                return "Next debug step.\n```json\n" + json.dumps(steps[done]) + "\n```", ""
+        return original(body)
+
+    ollama.responder = responder
+    debug = {"grantId": "p", "config": {"image": "build/os.img", "media": "Floppy", "machine": "pc", "memoryMB": 128, "cpus": 1,
+                                        "firmware": "Bios", "accel": "Tcg"}, "maxCommands": 50, "maxMinutes": 20}
+    broker = FakeBroker(os_debug=debug)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Bitte leere Eingaben in calc abfangen")
+    wait_for(lambda: finished(broker), timeout=60)
+    tools = [p.tool for p in broker.proposals.values()]
+    assert tools.count("OsDebug.Start") == 1
+    assert [p.arguments.get("command") for p in broker.proposals.values() if p.tool == "OsDebug.Command"] == \
+        ["break", "continue", "registers"]
+    start_request = next(p for p in broker.proposals.values() if p.tool == "OsDebug.Start")
+    assert start_request.arguments["config"] == debug["config"] and start_request.arguments["maxCommands"] == 50
+    assert start_request.agent.value == "Debugger" and start_request.arguments["haltAtStart"] is True
+    session = next(pid for pid, p in broker.proposals.items() if p.tool == "OsDebug.Start")
+    assert all(p.arguments["sessionId"] == session for p in broker.proposals.values() if p.tool in ("OsDebug.Command", "OsDebug.Stop"))
+    # Sitzung endet mit der Aufgabe.
+    assert tools.index("OsDebug.Stop") > max(i for i, t in enumerate(tools) if t == "OsDebug.Command")
+    debugger_prompts = [r["messages"][-1]["content"] for r in ollama.requests if "Debugger agent" in r["messages"][0]["content"]]
+    assert any("EIP=00007c22" in c and "Hallo DaniOS" in c for c in debugger_prompts)
+    orch.stop()
+    thread.join(5)

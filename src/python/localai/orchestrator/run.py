@@ -526,6 +526,31 @@ class Orchestrator:
         if notes:
             self.reporter.chat("Orchestrator", "\n".join(notes))
 
+    def _os_debug_text(self) -> str:
+        """M9: Anleitung für die Aktion debug (nur, wenn das Projekt osDebug eingerichtet hat)."""
+        info = self.bridge.os_debug() if self.bridge is not None else None
+        if not info:
+            return ""
+        cfg = info.get("config") or {}
+        build = cfg.get("build")
+        built = f", built by toolchain {build.get('toolchain')} ({build.get('action')})" if isinstance(build, dict) else ""
+        return (
+            "## OS debugging (QEMU emulator, offline)\n"
+            f"The project's OS image {cfg.get('image')} ({cfg.get('media')}, {cfg.get('machine')}, {cfg.get('memoryMB')} MB, "
+            f"{cfg.get('firmware')}{built}) can be booted and inspected with the action \"debug\". The first debug action starts a "
+            f"session on the current files (the user approves it once; then at most {info.get('maxCommands')} commands, "
+            f"{info.get('maxMinutes')} minutes).\n"
+            '{"action": "debug", "command": "boot", "halt": true} – (re)start on the current files; halt stops before the first '
+            "instruction (set breakpoints, then continue). Use boot again after your fix is applied.\n"
+            '{"action": "debug", "command": "break", "address": "0x7c00"} then {"action": "debug", "command": "continue", "waitMs": 5000}\n'
+            "Other commands: pause, step {count}, registers, info {topic: mem|tlb|pic|lapic|irq|mtree|cpus}, "
+            "memory {address, length<=4096, physical}, disassemble {address, count, mode: 16|32|64|\"auto\"}, screen-text "
+            "(VGA text mode), screenshot, serial (new COM1 output), events (CPU resets, triple faults), reset, "
+            'keys {text} or {keys: ["ret", "ctrl-alt-delete"]}, mouse {dx, dy, button, action}.\n'
+            "Addresses are linear (real mode: segment*16+offset). Every result shows the run state and new serial output. "
+            "A triple fault halts the machine instead of rebooting – inspect registers and events."
+        )
+
     def _toolchain_text(self, bridge: ToolBridge) -> str:
         lines = []
         for tc in bridge.toolchains():
@@ -545,6 +570,9 @@ class Orchestrator:
             text += f"\n\n## Summary of the previous run\n{self.previous_summary}"
         if self.bridge is not None:
             text += f"\n\n## Available toolchains (for verify)\n{self._toolchain_text(self.bridge)}"
+            if self.bridge.os_debug():
+                text += ("\n\n## OS debugging available\nThe OS image can be booted in QEMU and debugged. For goals about boot "
+                         "problems, crashes or behaviour on screen, add a task with role \"Debugger\" (boots, inspects, may fix).")
         attempts = self.config.limits.max_plan_attempts
         for attempt in range(1, attempts + 1):
             try:
@@ -610,6 +638,8 @@ class Orchestrator:
         others = [f"- {t.task_id} ({t.role}): {t.title}" for t in tasks if t is not task]
         if others:
             lines.append("## Other tasks in this plan (done by other agents)\n" + "\n".join(others))
+        if task.role == "Debugger" and self._os_debug_text():
+            lines.append(self._os_debug_text())
         return "\n\n".join(lines)
 
     def _dependency_evidence(self, task: dag.Task, tasks: list[dag.Task]) -> list[Evidence]:
@@ -637,12 +667,12 @@ class Orchestrator:
     def _run_task(self, state: GoalState, agent: Agent, task: dag.Task, tasks: list[dag.Task],
                   acceptance: list[str]) -> None:
         cancel = state.controls.token(task.role)
-        field_name = "patch" if task.role == "Coder" else "test_patch"
+        field_name = {"Coder": "patch", "Debugger": "fix_patch"}.get(task.role, "test_patch")
         finisher = self._finisher(task.role, task.task_id, f"{task.task_id}: {task.title}", field_name, cancel)
         try:
             result = agent.run(Assignment(task.task_id, task.title, self._task_text(state, task, tasks, acceptance),
                                           self.listing + self._dependency_evidence(task, tasks) + self._known_files(task),
-                                          finisher=finisher, files=list(task.writes)), cancel)
+                                          finisher=finisher, files=list(task.writes), max_steps=self._debug_steps(task.role)), cancel)
             task.result, task.steps, task.state = result.result, result.steps, dag.TaskState.DONE
             self._post_result(task)
         except Cancelled as err:
@@ -657,6 +687,12 @@ class Orchestrator:
             task.state, task.error = dag.TaskState.FAILED, str(err)
             self.reporter.state(task.role, AgentState.Failed, str(err), task.task_id)
             self.reporter.chat(task.role, f"{task.task_id} gescheitert: {err}")
+
+    def _debug_steps(self, role: str) -> int | None:
+        """Debug-Sitzung: jeder Befehl ist ein Modellschritt – der Debugger bekommt dann mehr Schritte."""
+        if role != "Debugger" or not self._os_debug_text():
+            return None
+        return max(self.config.limits.steps_for(role), 40)
 
     def _finisher(self, role: str, task_id: str, label: str, field_name: str, cancel):  # noqa: ANN001, ANN202
         """Wendet den Patch des Ergebnisses an; passt er nicht, bekommt der Agent den Grund und korrigiert (≤ 3×)."""
@@ -703,6 +739,10 @@ class Orchestrator:
         if task.role == "Coder":
             text = (f"{task.task_id} · {task.title}\n{r['message_de']}\n\nPatch – {self._apply_text(r)}:\n"
                     f"```diff\n{r['patch']}\n```")
+        elif task.role == "Debugger":
+            text = f"{task.task_id} · {task.title}\n{r['message_de']}\nHypothese: {r.get('hypothesis', '')}"
+            if r.get("fix_patch"):
+                text += f"\n\nKorrektur – {self._apply_text(r)}:\n```diff\n{r['fix_patch']}\n```"
         else:
             cases = "\n".join(f"- {c.get('name', '?')}: {c.get('purpose', '')}" for c in r.get("test_plan", [])
                               if isinstance(c, dict))
@@ -820,9 +860,12 @@ class Orchestrator:
         task_id = f"D{attempt}"
         cancel = state.controls.token("Debugger")
         text = f"## User goal (German)\n{state.goal}\n\n## Problem to fix (repair attempt {attempt})\n{problem_en}"
+        if self._os_debug_text():
+            text += "\n\n" + self._os_debug_text()
         finisher = self._finisher("Debugger", task_id, f"Reparatur {attempt}", "fix_patch", cancel)
         try:
-            fix = agents["Debugger"].run(Assignment(task_id, f"Reparatur {attempt}", text, evidence, finisher=finisher), cancel)
+            fix = agents["Debugger"].run(Assignment(task_id, f"Reparatur {attempt}", text, evidence, finisher=finisher,
+                                                    max_steps=self._debug_steps("Debugger")), cancel)
         except Cancelled:
             state.controls.run.raise_if_cancelled()
             return False, "Reparatur abgebrochen"
@@ -844,7 +887,7 @@ class Orchestrator:
         verdict = "nicht durchgeführt"
         verification: Verification | None = None
         max_attempts = self.config.limits.max_repair_attempts
-        if not any(t.state == dag.TaskState.DONE and t.role in ("Coder", "Tester") for t in tasks):
+        if not any(t.state == dag.TaskState.DONE and t.role in ("Coder", "Tester", "Debugger") for t in tasks):
             self.reporter.state("Reviewer", AgentState.Ready, "keine Änderung zu prüfen")
             self.reporter.state("Debugger", AgentState.Ready, "nicht benötigt")
             self._summary(state, tasks, verdict, None, 0)

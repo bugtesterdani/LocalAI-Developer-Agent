@@ -99,6 +99,9 @@ class ToolBridge:
         self._toolchains: list[dict[str, Any]] | None = None
         # Freigegebene Webinhalte dieses Runs (Runbook „Inhalt verdächtig“: Capture-ID, Aufgabe, Agent, URL)
         self.released: list[dict[str, str]] = []
+        # M9: Einstellung osDebug des Projekts (vom Broker) und offene Debug-Sitzungen je (Agent, Aufgabe)
+        self._os_debug: dict[str, Any] | None = None
+        self._debug_sessions: dict[tuple[str, str], str] = {}
 
     # ------------------------------------------------------------------ Grundlagen
     def find_grant(self) -> FolderGrant | None:
@@ -180,9 +183,79 @@ class ToolBridge:
             try:
                 info = self.client.toolchains_available()
                 self._toolchains = list(info.get("toolchains") or []) if info.get("enabled") else []
+                self._os_debug = info.get("osDebug") if isinstance(info.get("osDebug"), dict) else None
             except (BrokerError, AttributeError):
                 self._toolchains = []
         return self._toolchains
+
+    # ------------------------------------------------------------------ OsDebug (M9)
+    def os_debug(self) -> dict[str, Any] | None:
+        """Einstellung osDebug des Projekts (Abbild, Maschine, Grenzen) – None, wenn nicht eingerichtet."""
+        self.toolchains()
+        return self._os_debug
+
+    def debug(self, agent: str, task_id: str, action: Action, cancel: CancelToken) -> ToolOutcome:
+        """Debug-Sitzung: erste Aktion (bzw. „boot“) schlägt OsDebug.Start vor – einmal freigeben –, danach laufen die
+        Befehle im Rahmen dieser Sitzung ohne weitere Freigabe (Broker prüft Run, Agent, Budget, Dauer)."""
+        info = self.os_debug()
+        if info is None:
+            return ToolOutcome([], "debug: OS debugging is not configured for this project (osDebug); do not use it")
+        params = dict(action.debug)
+        command = params.pop("command")
+        key = (agent, task_id)
+        notes: list[str] = []
+        if command == "boot" or key not in self._debug_sessions:
+            if key in self._debug_sessions:
+                self.end_debug(agent, task_id)
+            assert self.grant is not None and self.snapshot_id is not None
+            halt = bool(params.pop("halt", False)) if command == "boot" else False
+            args = {"grantId": info["grantId"], "config": info["config"], "maxCommands": info["maxCommands"],
+                    "maxMinutes": info["maxMinutes"], "allowInput": True, "haltAtStart": halt}
+            image = info["config"].get("image")
+            request = self._request(agent, task_id, "OsDebug.Start",
+                                    action.reason or f"Betriebssystem ({image}) in QEMU starten und untersuchen", [], args,
+                                    self.snapshot_id)
+            outcome = self._submit_and_wait(agent, task_id, request,
+                                            f"Debug-Sitzung starten ({image}, höchstens {info['maxCommands']} Befehle, "
+                                            f"{info['maxMinutes']} min)", cancel)
+            if isinstance(outcome, str):
+                return ToolOutcome([], f"debug boot: {outcome}")
+            if outcome.state != ProposalState.Succeeded or outcome.result is None:
+                return self._evidence(request, outcome, "debug boot")
+            self._debug_sessions[key] = started = outcome.final_proposal_id
+            notes.append(f"session {started[:8]} started on snapshot {self.snapshot_id[:12]}: "
+                         + _debug_text(outcome.result.target_results[0].text or "{}"))
+            if command == "boot":
+                evidence_id = f"E{next(self._evidence_ids)}"
+                return ToolOutcome([Evidence(evidence_id, "OS debug session", "\n".join(notes))], f"debug boot: ok, evidence {evidence_id}")
+        session = self._debug_sessions[key]
+        request = self._request(agent, task_id, "OsDebug.Command", action.reason or f"Debug-Befehl {command}", [],
+                                {"sessionId": session, "command": command, **params}, "-")
+        outcome = self._submit_and_wait(agent, task_id, request, f"Debug: {command}", cancel)
+        if isinstance(outcome, str):
+            if "403" in outcome or "410" in outcome or "429" in outcome:
+                self._debug_sessions.pop(key, None)
+                outcome += " – the session is over; use {\"action\": \"debug\", \"command\": \"boot\"} for a new one if needed"
+            return ToolOutcome([], f"debug {command}: {outcome}")
+        if outcome.state != ProposalState.Succeeded or outcome.result is None:
+            return self._evidence(request, outcome, f"debug {command}")
+        by_id = {r.target_id: r for r in outcome.result.target_results}
+        text = "\n".join([*notes, _debug_text(by_id["debug"].text or "{}")])
+        if "screenshot" in by_id:
+            text += "\n(screenshot captured and shown to the user; use screen-text to read text mode screens)"
+        evidence_id = f"E{next(self._evidence_ids)}"
+        return ToolOutcome([Evidence(evidence_id, f"OS debug {command}", text)], f"debug {command}: ok, evidence {evidence_id}")
+
+    def end_debug(self, agent: str, task_id: str) -> None:
+        """Sitzung der Aufgabe beenden (läuft im Rahmen der Sitzung ohne Freigabe; Ergebnis wird nicht abgewartet)."""
+        session = self._debug_sessions.pop((agent, task_id), None)
+        if session is None:
+            return
+        try:
+            self.client.submit(self._request(agent, task_id, "OsDebug.Stop", "Debug-Sitzung beenden", [], {"sessionId": session}, "-"))
+            self.reporter.event(agent, ActivityKind.Proposal, f"Debug-Sitzung {session[:8]} beendet", task_id=task_id)
+        except BrokerError:
+            pass
 
     def run_toolchain(self, agent: str, task_id: str, toolchain: str, action: str, parameters: dict[str, Any],
                       purpose: str, cancel: CancelToken) -> ToolchainOutcome:
@@ -336,6 +409,8 @@ class ToolBridge:
         grant = self.grant.grant_id
         if action.kind == "fetch":
             return self.fetch(agent, task_id, action.url, action.reason, cancel)
+        if action.kind == "debug":
+            return self.debug(agent, task_id, action, cancel)
         if action.kind == "list":
             request = self._request(agent, task_id, "File.List", action.reason or f"Struktur von {action.path} ansehen",
                                     [ToolTarget(target_id="t1", path=action.path)],
@@ -404,6 +479,27 @@ class ToolBridge:
         if notes:
             summary += "; " + "; ".join(notes)
         return ToolOutcome(evidence, summary)
+
+
+_DEBUG_ORDER = ("state", "message", "notes", "registers", "disassembly", "memory", "screenText", "info", "serial", "events", "log")
+
+
+def _debug_text(raw: str) -> str:
+    """Ergebnis eines Debug-Befehls lesbar für das Modell (Reihenfolge fest, Screenshot nicht als Text)."""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw[:20000]
+    lines = []
+    for key in _DEBUG_ORDER:
+        value = data.get(key)
+        if value in (None, "", []):
+            continue
+        if isinstance(value, list):
+            value = "; ".join(str(v) for v in value)
+        value = str(value)
+        lines.append(f"{key}: {value}" if "\n" not in value else f"{key}:\n{value}")
+    return "\n".join(lines)[:30000]
 
 
 def _ref(path: str, start: int | None, end: int | None) -> str:

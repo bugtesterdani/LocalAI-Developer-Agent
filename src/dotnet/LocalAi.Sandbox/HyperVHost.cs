@@ -402,7 +402,8 @@ public static class SandboxFingerprint
             {
                 "v1-base-linux",
                 $"image|{settings.ImagePath}|{Facts(settings.ImagePath)}",
-                $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.KeepVmOnExit}",
+                $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.KeepVmOnExit}"
+                + (settings.NestedVirtualization ? "|nested" : ""),
                 $"prereq|{LinuxPrerequisites.ManifestHash(sources.LinuxPrerequisites)}",
             };
             var known = toolchains.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);

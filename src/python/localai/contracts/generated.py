@@ -179,6 +179,7 @@ class ProjectConfig(Contract):
     toolchains: list[str] | None = Field(default=None, alias="toolchains")
     guest_os: GuestOs | None = Field(default=None, alias="guestOs")
     toolchain_guests: dict[str, GuestOs] | None = Field(default=None, alias="toolchainGuests")
+    os_debug: OsDebugConfig | None = Field(default=None, alias="osDebug")
 
 
 class SnapshotFile(Contract):
@@ -246,6 +247,48 @@ class ToolchainInstallKind(str, Enum):
 class GuestOs(str, Enum):
     Windows = "Windows"
     Linux = "Linux"
+
+
+class OsDebugMedia(str, Enum):
+    Cdrom = "Cdrom"
+    Disk = "Disk"
+    Floppy = "Floppy"
+    Kernel = "Kernel"
+
+
+class OsDebugFirmware(str, Enum):
+    Bios = "Bios"
+    Uefi = "Uefi"
+
+
+class OsDebugAccel(str, Enum):
+    Tcg = "Tcg"
+    Kvm = "Kvm"
+
+
+class OsDebugBuild(Contract):
+    """Optional: Abbild vor dem Start mit einer Toolchain-Aktion aus dem Snapshot bauen."""
+
+    toolchain: str = Field(alias="toolchain")
+    action: str = Field(alias="action")
+    parameters: dict[str, Any] | None = Field(default=None, alias="parameters")
+
+
+class OsDebugConfig(Contract):
+    """Projektdatei → osDebug: eigenes Betriebssystem in QEMU booten und debuggen (M9)."""
+
+    grant_id: str = Field(alias="grantId")
+    image: str = Field(alias="image")
+    media: OsDebugMedia | None = Field(default=None, alias="media")
+    machine: str | None = Field(default=None, alias="machine")
+    memory_m_b: StrictInt | None = Field(default=None, alias="memoryMB")
+    cpus: StrictInt | None = Field(default=None, alias="cpus")
+    firmware: OsDebugFirmware | None = Field(default=None, alias="firmware")
+    accel: OsDebugAccel | None = Field(default=None, alias="accel")
+    build: OsDebugBuild | None = Field(default=None, alias="build")
+    max_commands: StrictInt | None = Field(default=None, alias="maxCommands")
+    max_minutes: StrictInt | None = Field(default=None, alias="maxMinutes")
+    guest: GuestOs | None = Field(default=None, alias="guest")
 
 
 class ToolchainParameterType(str, Enum):

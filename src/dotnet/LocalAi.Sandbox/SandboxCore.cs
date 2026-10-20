@@ -109,6 +109,9 @@ public sealed class ProjectPolicyContext(ProjectConfig project, SnapshotRegistry
 
     public IExportStaging? Exports { get; init; }
 
+    /// <summary>Betriebssystem-Debugging aus der Projektdatei (M9).</summary>
+    public OsDebugSettings? OsDebug { get; init; } = project.OsDebug is { } d ? OsDebugSettings.FromProject(d) : null;
+
     public bool IsDerivedFrom(string snapshotId, string baseId, string grantId) => snapshots.IsDerivedFrom(snapshotId, baseId, grantId);
 }
 
@@ -143,6 +146,20 @@ public static class ProjectLoader
             if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z][a-z0-9-]{0,31}$") || !names.Add(name))
             {
                 throw new InvalidDataException($"toolchains: ungültiger oder doppelter Name '{name}'");
+            }
+        }
+        if (project.OsDebug is { } debug)
+        {
+            var settings = OsDebugSettings.FromProject(debug);
+            var grant = grants.FirstOrDefault(g => g.GrantId == debug.GrantId)
+                        ?? throw new InvalidDataException($"osDebug.grantId: kein Ordner {debug.GrantId} in grants");
+            if (!grant.Rights.Contains(FolderRight.Execute))
+            {
+                throw new InvalidDataException($"osDebug: Ordner {debug.GrantId} braucht das Recht Execute");
+            }
+            if (settings.BuildToolchain is { } tc && !names.Contains(tc))
+            {
+                throw new InvalidDataException($"osDebug.build.toolchain: {tc} ist nicht in toolchains des Projekts");
             }
         }
         return project with { Grants = grants };
@@ -249,7 +266,7 @@ public static class ResultValidator
         }
         var allowed = job.Proposal.Targets.Select(t => t.TargetId).ToHashSet(StringComparer.Ordinal);
         // Feste Ergebnisziele: Snapshot-ID (Import/Patch), Log und Testbericht (Toolchain.*), Repo-Map (Repo.Index).
-        allowed.UnionWith(["*", "snapshot", "log", "tests", "map", "changes"]);
+        allowed.UnionWith(["*", "snapshot", "log", "tests", "map", "changes", "debug", "screenshot"]);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         long chars = 0;
         foreach (var target in result.TargetResults)
@@ -298,6 +315,22 @@ public sealed class SandboxToolAdapter(
         if (proposal.Tool == "Workspace.Snapshot")
         {
             return SnapshotTimeout;
+        }
+        if (proposal.Tool == "OsDebug.Start")
+        {
+            // Mit Build: Zeitgrenze der Toolchain-Aktion plus Start von QEMU.
+            var build = proposal.Arguments.TryGetProperty("config", out var c) && c.TryGetProperty("build", out var b) ? b : default;
+            if (build.ValueKind == JsonValueKind.Object && policy.Toolchains is { } tc && build.TryGetProperty("toolchain", out var buildName)
+                && tc.Find(buildName.GetString()!) is { } m && m.Actions.TryGetValue(build.GetProperty("action").GetString()!, out var action))
+            {
+                return TimeSpan.FromSeconds(Math.Clamp(action.TimeoutSeconds ?? 120, 1, 3600)) + ExecutionMargin;
+            }
+            return JobTimeout;
+        }
+        if (proposal.Tool == "OsDebug.Command")
+        {
+            var wait = proposal.Arguments.TryGetProperty("waitMs", out var w) && w.TryGetInt32(out var ms) ? ms : 2000;
+            return TimeSpan.FromMilliseconds(Math.Clamp(wait, 0, 600_000)) + JobTimeout;
         }
         if (ToolchainTools.Actions.ContainsKey(proposal.Tool) && policy.Toolchains is { } catalog
             && proposal.Arguments.TryGetProperty("toolchain", out var name) && name.ValueKind == JsonValueKind.String

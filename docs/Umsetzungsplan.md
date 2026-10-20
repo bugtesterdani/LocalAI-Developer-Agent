@@ -53,6 +53,8 @@ Aufwand in Personentagen als Größenordnung; Referenztermine für eine Person i
 | **M7 Abnahme (MVP)** | B11 SEC-01–24, AC01–17, Demo, Doku | 9 | bis 09.03.2027 |
 | Puffer | | 7 | bis 18.03.2027 |
 | **M8 Linux-Gast** (vorgezogen) | B18 Linux-Gast (Debian 13), mehrere VMs mit Start bei Bedarf, Gastauswahl je Projekt/Toolchain | – | vor Doku/Paketierung |
+| **M9 OS-Debugging** | QEMU in der Linux-VM: eigenes Betriebssystem booten, debuggen, bedienen; Debug-Sitzung mit einer Freigabe | – | vor Doku/Paketierung |
+| **M10 Linux-Host** | Broker, Orchestrator und Oberfläche unter Linux (eigenes Avalonia-Projekt, WPF bleibt ohne Avalonia-Pakete), QEMU statt Hyper-V | – | vor Doku/Paketierung |
 | Erweiterungen | B13 Modellvergleich/Embeddings, B14 Git/Paketbeschaffung | – | danach |
 
 Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 → B12 → B19 → B10 → B11.
@@ -150,6 +152,19 @@ hyperv-daemons; `prerequisites.json` mit Hashes, Prüfung beim Aufbau). Gast: `p
 Worker mit KVP-Pool-Datei, Transfer-Laufwerk über `/sys/block`, Werkzeugprozesse als `localai-tools` mit eigenem
 Netzwerk-Namespace, `no_new_privs`, Grenzen und Aufräumen. Vorlagen `toolchains/python-linux`, `toolchains/dotnet-linux`,
 Projekte `config/m8-linux-project.json`, `config/m8-gemischt-project.json`. Prüfanleitung `docs/pruefung-M8.md`.
+
+## M9 – Betriebssystem-Debugging (QEMU)
+
+**Umgesetzt (Stand 20.10.2026):** Projektdatei `osDebug` (Abbild, Medium, Maschine, Firmware, Beschleunigung, optional
+Build per Toolchain, Grenzen), Werkzeuge `OsDebug.Start` (eigene Freigabe) sowie `OsDebug.Command`/`OsDebug.Stop`
+im Rahmen der freigegebenen Sitzung (Broker: gleicher Run und Agent, Befehlsbudget, Dauer, Eingaben nur mit
+allowInput; Journal `osdebug.granted/closed`, Entscheidung `SessionGrant`; Audit-Prüfung kennt beides; Not-Aus und
+Abbruch schließen die Sitzung, Not-Aus schaltet die VM mit QEMU aus). Worker: QEMU mit festen Argumenten (`-nic none`,
+seccomp, Unix-Sockets, Dreifachfehler hält an), QMP- und GDB-Client, Befehle für Haltepunkte, Einzelschritt, Register,
+Speicher, Disassemblierung (Capstone oder objdump), VGA-Text, Screenshot, Tastatur, Maus, serielle Ausgabe, Ereignisse;
+QEMU als `localai-emu` ohne Netz mit `no_new_privs`. Orchestrator: Aktion `debug`, Debugger-Aufgaben des Planers,
+Sitzung endet mit der Aufgabe. Linux-VM: QEMU-Pakete samt Abhängigkeiten (`tools/prereq/debian_closure.py`),
+`nestedVirtualization`. Oberfläche: Freigabekarte der Debug-Sitzung. Prüfanleitung `docs/pruefung-M9.md`.
 
 ## Risiken
 

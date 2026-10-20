@@ -445,6 +445,9 @@
           "additionalProperties": {
             "$ref": "#/$defs/GuestOs"
           }
+        },
+        "osDebug": {
+          "$ref": "#/$defs/OsDebugConfig"
         }
       },
       "required": [
@@ -644,6 +647,96 @@
       "enum": [
         "Windows",
         "Linux"
+      ]
+    },
+    "OsDebugMedia": {
+      "type": "string",
+      "description": "Wie QEMU das Abbild einbindet (M9).",
+      "enum": [
+        "Cdrom",
+        "Disk",
+        "Floppy",
+        "Kernel"
+      ]
+    },
+    "OsDebugFirmware": {
+      "type": "string",
+      "enum": [
+        "Bios",
+        "Uefi"
+      ]
+    },
+    "OsDebugAccel": {
+      "type": "string",
+      "description": "Tcg = reine CPU-Emulation (Standard), Kvm = Hardware-Virtualisierung in der Linux-VM (verschachtelt).",
+      "enum": [
+        "Tcg",
+        "Kvm"
+      ]
+    },
+    "OsDebugBuild": {
+      "type": "object",
+      "description": "Optional: Abbild vor dem Start mit einer Toolchain-Aktion aus dem Snapshot bauen.",
+      "properties": {
+        "toolchain": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "toolchain",
+        "action"
+      ]
+    },
+    "OsDebugConfig": {
+      "type": "object",
+      "description": "Projektdatei → osDebug: eigenes Betriebssystem in QEMU booten und debuggen (M9).",
+      "properties": {
+        "grantId": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "media": {
+          "$ref": "#/$defs/OsDebugMedia"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "memoryMB": {
+          "type": "integer"
+        },
+        "cpus": {
+          "type": "integer"
+        },
+        "firmware": {
+          "$ref": "#/$defs/OsDebugFirmware"
+        },
+        "accel": {
+          "$ref": "#/$defs/OsDebugAccel"
+        },
+        "build": {
+          "$ref": "#/$defs/OsDebugBuild"
+        },
+        "maxCommands": {
+          "type": "integer"
+        },
+        "maxMinutes": {
+          "type": "integer"
+        },
+        "guest": {
+          "$ref": "#/$defs/GuestOs"
+        }
+      },
+      "required": [
+        "grantId",
+        "image"
       ]
     },
     "ToolchainParameterType": {

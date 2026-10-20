@@ -69,6 +69,10 @@ public sealed class MultiGuestToolAdapter : IToolAdapter, IDisposable
     /// <summary>VM, in der ein Vorschlag läuft.</summary>
     public GuestOs GuestFor(ToolProposal proposal)
     {
+        if (proposal.Tool.StartsWith("OsDebug.", StringComparison.Ordinal) && _plan.OsDebug is { } debug && _adapters.ContainsKey(debug))
+        {
+            return debug;
+        }
         if (ToolchainTools.Actions.ContainsKey(proposal.Tool) && proposal.Arguments.ValueKind == JsonValueKind.Object
             && proposal.Arguments.TryGetProperty("toolchain", out var name) && name.ValueKind == JsonValueKind.String)
         {
@@ -276,9 +280,12 @@ public sealed class SandboxPool : IAsyncDisposable
         return texts.Count == 0 ? StatusText : string.Join(Separator, texts);
     }
 
-    public async Task<string> EmergencyStopAsync()
+    public Task<string> EmergencyStopAsync() => EmergencyStopAsync(null);
+
+    /// <param name="force">Diese VM auch ohne laufenden Job ausschalten (QEMU einer Debug-Sitzung).</param>
+    public async Task<string> EmergencyStopAsync(GuestOs? force)
     {
-        var results = await Task.WhenAll(_vms.Select(async kv => (kv.Key, Text: await kv.Value.EmergencyStopAsync().ConfigureAwait(false))))
+        var results = await Task.WhenAll(_vms.Select(async kv => (kv.Key, Text: await kv.Value.EmergencyStopAsync(kv.Key == force).ConfigureAwait(false))))
             .ConfigureAwait(false);
         return _vms.Count == 1 ? results[0].Text : string.Join(Separator, results.Select(r => $"{GuestSelection.Name(r.Key)}: {r.Text}"));
     }

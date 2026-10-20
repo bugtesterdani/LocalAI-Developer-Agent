@@ -171,6 +171,27 @@
   <data name="SideEffectsToolchain" xml:space="preserve">
     <value>Startet in der Offline-VM das im Toolchain-Manifest festgelegte Programm auf einer frischen Kopie des Snapshots. Achtung: Build-Skripte, NuGet-/MSBuild-Targets und Tests können dabei beliebigen Code ausführen – nur in der VM, ohne Netzwerk, nicht auf diesem PC.</value>
   </data>
+  <data name="SideEffectsOsDebug" xml:space="preserve">
+    <value>Startet in der Linux-VM eine Debug-Sitzung: QEMU bootet das Abbild aus dem Snapshot (ohne Netzwerk, als eigener Benutzer, mit seccomp). Danach darf dieser Agent im selben Run bis zu den unten genannten Grenzen Befehle ausführen (Haltepunkte, Register, Speicher, Bildschirm, Tastatur/Maus nur wenn erlaubt), ohne dass jeder einzeln bestätigt wird – jeder Befehl erscheint in der Aktivität und im Audit-Journal. Not-Aus beendet die Sitzung.</value>
+  </data>
+  <data name="OsDebugImage" xml:space="preserve">
+    <value>Abbild: {0} ({1})</value>
+  </data>
+  <data name="OsDebugMachine" xml:space="preserve">
+    <value>Maschine: {0}, {1} MB, {2} CPU, {3}, {4}</value>
+  </data>
+  <data name="OsDebugBuild" xml:space="preserve">
+    <value>vorher bauen: Toolchain {0}, Aktion {1}</value>
+  </data>
+  <data name="OsDebugLimits" xml:space="preserve">
+    <value>Grenzen der Sitzung: höchstens {0} Befehle, {1} Minuten</value>
+  </data>
+  <data name="OsDebugInputAllowed" xml:space="preserve">
+    <value>Tastatur und Maus: erlaubt</value>
+  </data>
+  <data name="OsDebugInputDenied" xml:space="preserve">
+    <value>Tastatur und Maus: nicht erlaubt</value>
+  </data>
   <data name="SideEffectsIndex" xml:space="preserve">
     <value>Liest den Snapshot in der Sandbox und erstellt einen Symbolindex (Repo-Map). Nichts wird verändert.</value>
   </data>

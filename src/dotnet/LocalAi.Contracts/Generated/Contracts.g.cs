@@ -161,7 +161,8 @@ public sealed partial record ProjectConfig(
     [property: JsonPropertyName("grants")] IReadOnlyList<FolderGrant> Grants,
     [property: JsonPropertyName("toolchains"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Toolchains = null,
     [property: JsonPropertyName("guestOs"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? GuestOs = null,
-    [property: JsonPropertyName("toolchainGuests"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, GuestOs>? ToolchainGuests = null);
+    [property: JsonPropertyName("toolchainGuests"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, GuestOs>? ToolchainGuests = null,
+    [property: JsonPropertyName("osDebug"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugConfig? OsDebug = null);
 
 public sealed partial record SnapshotFile(
     [property: JsonPropertyName("path")] string Path,
@@ -224,6 +225,50 @@ public enum GuestOs
     Windows,
     Linux,
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter<OsDebugMedia>))]
+public enum OsDebugMedia
+{
+    Cdrom,
+    Disk,
+    Floppy,
+    Kernel,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<OsDebugFirmware>))]
+public enum OsDebugFirmware
+{
+    Bios,
+    Uefi,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<OsDebugAccel>))]
+public enum OsDebugAccel
+{
+    Tcg,
+    Kvm,
+}
+
+/// <summary>Optional: Abbild vor dem Start mit einer Toolchain-Aktion aus dem Snapshot bauen.</summary>
+public sealed partial record OsDebugBuild(
+    [property: JsonPropertyName("toolchain")] string Toolchain,
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("parameters"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? Parameters = null);
+
+/// <summary>Projektdatei → osDebug: eigenes Betriebssystem in QEMU booten und debuggen (M9).</summary>
+public sealed partial record OsDebugConfig(
+    [property: JsonPropertyName("grantId")] string GrantId,
+    [property: JsonPropertyName("image")] string Image,
+    [property: JsonPropertyName("media"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugMedia? Media = null,
+    [property: JsonPropertyName("machine"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Machine = null,
+    [property: JsonPropertyName("memoryMB"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? MemoryMB = null,
+    [property: JsonPropertyName("cpus"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Cpus = null,
+    [property: JsonPropertyName("firmware"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugFirmware? Firmware = null,
+    [property: JsonPropertyName("accel"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugAccel? Accel = null,
+    [property: JsonPropertyName("build"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugBuild? Build = null,
+    [property: JsonPropertyName("maxCommands"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? MaxCommands = null,
+    [property: JsonPropertyName("maxMinutes"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? MaxMinutes = null,
+    [property: JsonPropertyName("guest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? Guest = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter<ToolchainParameterType>))]
 public enum ToolchainParameterType

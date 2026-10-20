@@ -34,6 +34,9 @@ public interface IPolicyContext
     /// <summary>Vorbereitete Übernahmen (Workspace.ExportPatch); null = nicht verfügbar.</summary>
     IExportStaging? Exports => null;
 
+    /// <summary>Betriebssystem-Debugging mit QEMU (M9); null = nicht eingerichtet.</summary>
+    OsDebugSettings? OsDebug => null;
+
     /// <summary>Ist <paramref name="snapshotId"/> aus <paramref name="baseId"/> abgeleitet (Patch.Apply-Kette)?</summary>
     bool IsDerivedFrom(string snapshotId, string baseId, string grantId) => false;
 }
@@ -99,6 +102,13 @@ public sealed class ProposalPolicy
             ["Workspace.ExportPatch"] = new("Workspace.ExportPatch", "1", 1, options.MaxTargetsPerProposal, true,
                 new HashSet<string> { "grantId", "stagingId", "patch" }, [FolderRight.Read], RequiresSnapshot: false),
         };
+        // M9: Start = eigene Freigabe (Sitzung mit Grenzen); Befehle/Stopp laufen im Rahmen der freigegebenen Sitzung.
+        _tools[OsDebugTools.Start] = new(OsDebugTools.Start, "1", 0, 0, false, OsDebugTools.StartArguments,
+            [FolderRight.Read, FolderRight.Execute]);
+        _tools[OsDebugTools.Command] = new(OsDebugTools.Command, "1", 0, 0, false, OsDebugTools.CommandArguments, [],
+            RequiresSnapshot: false, RequiresGrant: false);
+        _tools[OsDebugTools.Stop] = new(OsDebugTools.Stop, "1", 0, 0, false, new HashSet<string> { "sessionId" }, [],
+            RequiresSnapshot: false, RequiresGrant: false);
         foreach (var name in ToolchainTools.Actions.Keys)
         {
             // Ausführende Tools bleiben Einzelaufrufe ohne Ziele (Spezifikation §5 Sammelfreigabe).
@@ -210,6 +220,18 @@ public sealed class ProposalPolicy
         else if (ToolchainTools.Actions.ContainsKey(tool.Name))
         {
             ToolchainTools.Validate(tool.Name, request.Arguments, _context.Toolchains);
+        }
+        else if (tool.Name == OsDebugTools.Start)
+        {
+            OsDebugTools.ValidateStart(request.Arguments, _context.OsDebug);
+        }
+        else if (OsDebugTools.IsSessionTool(tool.Name))
+        {
+            if (_context.OsDebug is null)
+            {
+                throw new BrokerException(BrokerErrorCodes.Forbidden, "Betriebssystem-Debugging ist für dieses Projekt nicht eingerichtet");
+            }
+            OsDebugTools.ValidateCommand(tool.Name, request.Arguments);
         }
         return normalized;
     }
