@@ -1,0 +1,4 @@
+#!/bin/sh
+# Startet die Oberfläche des Local AI Developer Agent; sie startet Broker und Orchestrator selbst.
+# Eigene Einstellungen: ~/.config/localai/localai.json (Vorlage: Konfigurations-ZIP bzw. /opt/localai/config).
+exec /opt/localai/app/LocalAi.Desktop.Linux "$@"

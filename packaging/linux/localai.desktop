@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Local AI Developer Agent
+Comment=Lokaler Entwicklungsagent mit Freigabe jedes Werkzeugaufrufs
+Exec=localai
+Icon=localai
+Terminal=false
+Categories=Development;IDE;

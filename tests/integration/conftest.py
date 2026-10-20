@@ -55,6 +55,8 @@ def start_broker(data_dir: pathlib.Path, *extra: str) -> RunningBroker:
         ["dotnet", str(dll), "--data", str(data_dir), "--mode", "test", *extra],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace",
+        # Eigene Konfiguration einer installierten Fassung (Benutzerordner) darf Tests nicht beeinflussen.
+        env={k: v for k, v in os.environ.items() if k != "LOCALAI_CONFIG"} | {"LOCALAI_CONFIG_DIR": str(data_dir / "keine-config")},
     )
     assert process.stdout is not None
     line = process.stdout.readline()

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSI-Paket (WiX Toolset 5). Bau in .github/workflows/release.yml:
+    wix build packaging/windows/LocalAi.wxs -arch x64 -d Version=1.2.3 -d StagingDir=<Installationsordner> -d IconsDir=<Symbole> -o LocalAi.msi
+  Installiert den Installationsordner (packaging/package.py stage) nach Program Files, legt eine Verknüpfung im
+  Startmenü an. Eigene Einstellungen liegen im Benutzerordner (%LOCALAPPDATA%\LocalAi\config) und bleiben bei
+  Deinstallation und Aktualisierung erhalten.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Local AI Developer Agent"
+           Manufacturer="Local AI Developer Agent"
+           Version="$(Version)"
+           UpgradeCode="6f1c0e7a-3b8d-4f4a-9a52-2c6b7d9e1a40"
+           Scope="perMachine"
+           Language="1031"
+           Codepage="1252">
+    <SummaryInformation Description="Lokaler Entwicklungsagent mit Freigabe jedes Werkzeugaufrufs und Offline-VM" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Eine neuere Version des Local AI Developer Agent ist bereits installiert." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="LocalAi.ico" SourceFile="$(IconsDir)\localai.ico" />
+    <Property Id="ARPPRODUCTICON" Value="LocalAi.ico" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="LocalAi Developer Agent" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="Local AI Developer Agent" Level="1">
+      <Files Directory="INSTALLFOLDER" Include="$(StagingDir)\**" />
+      <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="b8f5d7a2-0c4e-4b19-8f3d-5a7e2c1b9d63">
+        <Shortcut Id="AppShortcut"
+                  Name="Local AI Developer Agent"
+                  Description="Lokaler Entwicklungsagent"
+                  Target="[INSTALLFOLDER]app\LocalAi.Desktop.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="LocalAi.ico" />
+        <RegistryValue Root="HKMU" Key="Software\LocalAi\DeveloperAgent" Name="StartMenuShortcut" Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>

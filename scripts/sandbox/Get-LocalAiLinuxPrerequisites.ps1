@@ -73,15 +73,24 @@ $pythonVersion = [regex]::Match($asset.name, '^cpython-([0-9.]+)\+').Groups[1].V
 Write-Host "Python für Linux: $($asset.name)"
 
 # ------------------------------------------------------------------ 3 Wheels (Versionen wie in der Entwicklungsumgebung)
-$site = Get-ChildItem -LiteralPath (Join-Path $repo 'src\python\.venv') -Recurse -Directory -Filter 'site-packages' | Select-Object -First 1
+# Installierte Fassung: kein .venv und kein uv – mitgeliefertes Python unter runtime\python.
+$runtimePython = Join-Path $repo 'runtime\python\python.exe'
+$venv = Join-Path $repo 'src\python\.venv'
+if (Test-Path -LiteralPath $venv) {
+    $site = Get-ChildItem -LiteralPath $venv -Recurse -Directory -Filter 'site-packages' | Select-Object -First 1
+} elseif (Test-Path -LiteralPath $runtimePython) {
+    $site = Get-Item -LiteralPath (Join-Path $repo 'runtime\python\Lib\site-packages')
+}
 if (-not $site) { throw "src\python\.venv fehlt – zuerst 'uv sync --project src/python' ausführen" }
 $pydantic = Get-ChildItem -LiteralPath $site.FullName -Directory -Filter 'pydantic-*.dist-info' | Select-Object -First 1
-if (-not $pydantic) { throw 'pydantic ist in src\python\.venv nicht installiert' }
+if (-not $pydantic) { throw "pydantic ist in $($site.FullName) nicht installiert" }
+$useUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
 $pydanticVersion = ($pydantic.Name -replace '^pydantic-', '' -replace '\.dist-info$', '')
 $wheelDir = Join-Path $prereq 'wheels'
 Get-ChildItem -LiteralPath $wheelDir -Filter '*.whl' | Remove-Item -Force
-& uvx --from pip pip download "pydantic==$pydanticVersion" --dest $wheelDir --only-binary=:all: `
-    --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 --python-version $PythonMinor --implementation cp
+$pipArgs = @('download', "pydantic==$pydanticVersion", '--dest', $wheelDir, '--only-binary=:all:',
+    '--platform', 'manylinux2014_x86_64', '--platform', 'manylinux_2_17_x86_64', '--python-version', $PythonMinor, '--implementation', 'cp')
+if ($useUv) { & uvx --from pip pip @pipArgs } else { & $runtimePython -m pip @pipArgs }
 if ($LASTEXITCODE -ne 0) { throw "pip download fehlgeschlagen (Exitcode $LASTEXITCODE)" }
 
 # ------------------------------------------------------------------ 4/5 Debian-Pakete (mit Abhängigkeiten, Hashprüfung)
@@ -91,7 +100,8 @@ $debPackages = @('hyperv-daemons')
 if ($WithQemu) { $debPackages += @('qemu-system-x86', 'ovmf', 'binutils') }
 Push-Location $repo
 try {
-    & uv run --no-sync --project src/python python tools/prereq/debian_closure.py --dest $debDir @debPackages
+    if ($useUv) { & uv run --no-sync --project src/python python tools/prereq/debian_closure.py --dest $debDir @debPackages }
+    else { & $runtimePython tools/prereq/debian_closure.py --dest $debDir @debPackages }
     if ($LASTEXITCODE -ne 0) { throw "Debian-Pakete konnten nicht geladen werden (Exitcode $LASTEXITCODE)" }
 } finally { Pop-Location }
 

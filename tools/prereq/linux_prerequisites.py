@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -90,18 +91,21 @@ def python_runtime(prereq: pathlib.Path, minor: str) -> tuple[str, str]:
 
 
 def wheels(prereq: pathlib.Path, minor: str) -> None:
-    site = next((ROOT / "src" / "python" / ".venv" / "lib").glob("python3*/site-packages"), None)
+    venv = ROOT / "src" / "python" / ".venv" / "lib"
+    # Installierte Fassung: kein .venv, pydantic liegt in der mitgelieferten Laufzeit (die dieses Skript ausführt).
+    site = next(venv.glob("python3*/site-packages"), None) if venv.is_dir() else pathlib.Path(sysconfig.get_paths()["purelib"])
     if site is None:
         raise SystemExit("src/python/.venv fehlt – zuerst 'uv sync --project src/python' ausführen")
     dist = next(site.glob("pydantic-*.dist-info"), None)
     if dist is None:
-        raise SystemExit("pydantic ist in src/python/.venv nicht installiert")
+        raise SystemExit(f"pydantic ist in {site} nicht installiert")
     version = dist.name.removeprefix("pydantic-").removesuffix(".dist-info")
     directory = prereq / "wheels"
     directory.mkdir(parents=True, exist_ok=True)
     for old in directory.glob("*.whl"):
         old.unlink()
-    subprocess.run(["uvx", "--from", "pip", "pip", "download", f"pydantic=={version}", "--dest", str(directory),
+    pip = ["uvx", "--from", "pip", "pip"] if shutil.which("uvx") else [sys.executable, "-m", "pip"]
+    subprocess.run([*pip, "download", f"pydantic=={version}", "--dest", str(directory),
                     "--only-binary=:all:", "--platform", "manylinux2014_x86_64", "--platform", "manylinux_2_17_x86_64",
                     "--python-version", minor, "--implementation", "cp"], check=True)
 

@@ -119,10 +119,17 @@ public sealed record HostOptions
                 default: throw new ArgumentException($"Unbekannte Option: {args[i]}");
             }
         }
+        string? installRoot = null;
+        if (configPath is null && FindUserConfig() is { } userConfig)
+        {
+            // Installierte Fassung: Konfiguration im Benutzerordner, Programmdateien im (schreibgeschützten) Installationsordner.
+            configPath = userConfig;
+            installRoot = FindInstallRoot();
+        }
         configPath ??= FindConfig();
         if (configPath is not null && File.Exists(configPath))
         {
-            options = ApplyConfig(options, configPath);
+            options = ApplyConfig(options, configPath, installRoot);
         }
         if (mode is not null)
         {
@@ -164,6 +171,52 @@ public sealed record HostOptions
         return Path.Combine(string.IsNullOrEmpty(root) ? AppContext.BaseDirectory : root, "LocalAi", "broker");
     }
 
+    /// <summary>
+    /// Ordner für die eigene Konfiguration einer installierten Fassung: LOCALAI_CONFIG_DIR, sonst
+    /// %LOCALAPPDATA%\LocalAi\config (Windows) bzw. $XDG_CONFIG_HOME/localai, ~/.config/localai (Linux).
+    /// Gleiche Regel in Python: <c>localai/orchestrator/models.py</c>.
+    /// </summary>
+    public static string UserConfigDirectory()
+    {
+        if (Environment.GetEnvironmentVariable("LOCALAI_CONFIG_DIR") is { Length: > 0 } explicitDir)
+        {
+            return Path.GetFullPath(explicitDir);
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalAi", "config");
+        }
+        var xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var root = string.IsNullOrEmpty(xdg) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config") : xdg;
+        return Path.Combine(root, "localai");
+    }
+
+    /// <summary>LOCALAI_CONFIG (Datei) oder localai.json im Benutzerordner; null = Konfiguration neben dem Programm suchen.</summary>
+    private static string? FindUserConfig()
+    {
+        if (Environment.GetEnvironmentVariable("LOCALAI_CONFIG") is { Length: > 0 } explicitFile)
+        {
+            return Path.GetFullPath(explicitFile);
+        }
+        var candidate = Path.Combine(UserConfigDirectory(), "localai.json");
+        return File.Exists(candidate) ? candidate : null;
+    }
+
+    /// <summary>Installations- bzw. Repository-Wurzel: vom Programmverzeichnis aufwärts der Ordner mit src/python/localai.</summary>
+    private static string FindInstallRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (Directory.Exists(Path.Combine(dir.FullName, "src", "python", "localai")))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+        return AppContext.BaseDirectory;
+    }
+
     /// <summary>Sucht config/localai.json vom Programmverzeichnis aufwärts (Repository-Wurzel).</summary>
     private static string? FindConfig()
     {
@@ -180,11 +233,12 @@ public sealed record HostOptions
         return null;
     }
 
-    private static HostOptions ApplyConfig(HostOptions options, string configPath)
+    /// <param name="installRoot">Wurzel für relative Pfade; null = Ordner oberhalb von config/ (Repository bzw. Installation).</param>
+    private static HostOptions ApplyConfig(HostOptions options, string configPath, string? installRoot = null)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(configPath));
         var root = doc.RootElement;
-        var repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, ".."));
+        var repoRoot = installRoot ?? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, ".."));
         options = options with { RepoRoot = repoRoot, ConfigPath = Path.GetFullPath(configPath) };
         if (root.TryGetProperty("fakeAgent", out var agent))
         {
@@ -394,6 +448,11 @@ public sealed record HostOptions
     private static ProcessCommand ReadCommand(JsonElement element, string repoRoot)
     {
         var command = element.GetProperty("command").GetString()!;
+        if (!Path.IsPathRooted(command) && (command.Contains('/') || command.Contains('\\')))
+        {
+            // z. B. runtime/python/python.exe der installierten Fassung: relativ zur Wurzel, nicht über PATH.
+            command = Path.GetFullPath(Path.Combine(repoRoot, command));
+        }
         var arguments = element.GetProperty("arguments").EnumerateArray().Select(a => a.GetString()!).ToList();
         var workingDirectory = element.TryGetProperty("workingDirectory", out var wd) ? wd.GetString()! : ".";
         return new ProcessCommand(command, arguments, Path.GetFullPath(Path.Combine(repoRoot, workingDirectory)));

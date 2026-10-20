@@ -32,6 +32,16 @@ def default_data_dir() -> pathlib.Path:
     return pathlib.Path(root) / "LocalAi" / "broker"
 
 
+def user_config_dir() -> pathlib.Path:
+    """Eigene Konfiguration einer installierten Fassung – gleiche Regel wie HostOptions.UserConfigDirectory (C#)."""
+    if os.environ.get("LOCALAI_CONFIG_DIR"):
+        return pathlib.Path(os.environ["LOCALAI_CONFIG_DIR"])
+    if sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or str(pathlib.Path.home() / "AppData" / "Local")
+        return pathlib.Path(root) / "LocalAi" / "config"
+    return pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config") / "localai"
+
+
 def repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[4]
 
@@ -144,13 +154,14 @@ class ModelsConfig:
         if explicit:
             return ModelsConfig.load(pathlib.Path(explicit))
         base_path = repo_root() / "config" / "models.json"
-        local_path = base_path.with_name("models.local.json")
         try:
             raw = json.loads(base_path.read_text(encoding="utf-8-sig"))
             source = str(base_path)
-            if local_path.exists():
-                raw = merge(raw, json.loads(local_path.read_text(encoding="utf-8-sig")))
-                source += f" + {local_path.name}"
+            # Repository: config/models.local.json; installierte Fassung: Benutzerordner (siehe user_config_dir).
+            for local_path in dict.fromkeys([base_path.with_name("models.local.json"), user_config_dir() / "models.local.json"]):
+                if local_path.exists():
+                    raw = merge(raw, json.loads(local_path.read_text(encoding="utf-8-sig")))
+                    source += f" + {local_path}"
         except (OSError, json.JSONDecodeError) as err:
             raise ConfigError(f"Modellkonfiguration: {err}") from err
         return ModelsConfig.parse(raw, source)
