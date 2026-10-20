@@ -2,6 +2,7 @@
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -47,6 +48,18 @@ class LicenseTests(unittest.TestCase):
         copied = self.stage / record["files"][0]["path"]
         self.assertEqual(copied.read_text(), "Copyright Example\nMIT original")
         self.assertEqual(record["declaredLicense"], "MIT")
+
+    def test_relative_build_paths_and_absolute_metadata_paths(self):
+        self.file("site/example-1.0.dist-info/METADATA",
+                  "Name: Example\nVersion: 1.0\nLicense-Expression: MIT\nLicense-File: LICENSE\n\n")
+        self.file("site/example-1.0.dist-info/licenses/LICENSE", "Original copyright")
+        previous = Path.cwd()
+        try:
+            os.chdir(self.root)
+            self.collector.python_packages(Path("site"))
+        finally:
+            os.chdir(previous)
+        self.assertEqual(len(self.collector.entries), 1)
 
     def test_missing_declared_text_blocks_collection(self):
         self.file("site/example-1.0.dist-info/METADATA",

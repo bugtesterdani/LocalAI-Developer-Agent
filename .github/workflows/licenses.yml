@@ -1,7 +1,5 @@
 name: License evidence
 on:
-  push:
-    branches: ["codex/license-compliance"]
   pull_request:
     paths:
       - "LICENSE"

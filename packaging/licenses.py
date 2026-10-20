@@ -74,6 +74,8 @@ class Collector:
         if not declared.strip() or not documents:
             raise LicenseError(f"{ecosystem}:{name}@{version}: missing license declaration/original text; "
                                "supply the original package notices or a version-specific reviewed override")
+        source = source.resolve()
+        documents = [p.resolve() for p in documents]
         target = self.destination / ecosystem / name / version
         record = {"ecosystem": ecosystem, "name": name, "version": version,
                   "declaredLicense": declared, "files": []}
@@ -174,8 +176,9 @@ class Collector:
         if not docs:
             raise LicenseError("Python runtime has no original licensing evidence; include distribution licenses")
         # Version comes from the installed stdlib, without starting this interpreter.
-        versions = sorted((runtime / "lib").glob("python3.*")) if (runtime / "lib").exists() else []
-        version = versions[-1].name.removeprefix("python") if versions else runtime.name
+        version = runtime.name
+        if not re.search(r"cpython-[0-9]+\.[0-9]+\.[0-9]+", version):
+            raise LicenseError("Expected a versioned uv-managed Python directory (cpython-X.Y.Z-...)")
         self.add("runtime", "python-distribution", version, "PSF-2.0 and bundled component licenses", runtime, docs)
 
     def write(self) -> None:
