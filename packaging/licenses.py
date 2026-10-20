@@ -108,7 +108,7 @@ class Collector:
                 declared = ""
                 for classifier in metadata.get_all("Classifier", []):
                     if classifier.startswith("License ::"):
-                        declared = {"MIT License": "MIT", "BSD License": "BSD-3-Clause",
+                        declared = {"MIT License": "MIT", "BSD License": "LicenseRef-BSD-see-original",
                                     "Apache Software License": "Apache-2.0"}.get(classifier.split(" :: ")[-1], "")
                         if declared:
                             break
@@ -144,31 +144,35 @@ class Collector:
 
     def nuget(self, assets: list[Path]) -> None:
         folders: list[Path] = []
-        count = 0
+        resolved: dict[str, str] = {}
         for asset in assets:
             data = read_json(asset)
-            roots = [Path(p) for p in data.get("packageFolders", {})]
-            folders.extend(p for p in roots if p not in folders)
-            for key, library in sorted(data.get("libraries", {}).items()):
+            folders.extend(Path(p) for p in data.get("packageFolders", {}) if Path(p) not in folders)
+            for key, library in data.get("libraries", {}).items():
                 if library.get("type") == "package":
-                    name, version = key.rsplit("/", 1)
-                    self.nuget_package(name, version, roots, library.get("path", ""))
-                    count += 1
-        if not count:
-            raise LicenseError("No resolved NuGet packages; publish the application first")
-        # Self-contained runtime packs are not always present in assets.libraries.
+                    resolved[key.lower()] = library.get("path", "")
+        # Inventory what is actually redistributed, not private build/analyzer tools.
+        # deps.json contains the published direct and transitive runtime dependencies.
+        processed: set[str] = set()
+        errors: list[str] = []
         runtime_packs = 0
         for deps in sorted((self.stage / "app").glob("*.deps.json")):
             for key, library in read_json(deps).get("libraries", {}).items():
-                if library.get("type") == "runtimepack":
-                    name, version = key.rsplit("/", 1)
-                    self.nuget_package(name, version, folders)
-                    runtime_packs += 1
-                elif library.get("type") == "package":
-                    name, version = key.rsplit("/", 1)
-                    self.nuget_package(name, version, folders, library.get("path", ""))
-        if not runtime_packs:
-            raise LicenseError("No self-contained .NET runtime pack found in published deps.json")
+                kind = library.get("type")
+                if kind not in {"package", "runtimepack"} or key.lower() in processed:
+                    continue
+                processed.add(key.lower())
+                name, version = key.rsplit("/", 1)
+                runtime_packs += int(kind == "runtimepack")
+                relative = resolved.get(key.lower(), library.get("path", ""))
+                try:
+                    self.nuget_package(name, version, folders, relative)
+                except LicenseError as error:
+                    errors.append(str(error))
+        if not processed or not runtime_packs:
+            errors.append("No self-contained runtime dependency graph found in published deps.json")
+        if errors:
+            raise LicenseError("\n".join(errors))
 
     def runtime(self, runtime: Path) -> None:
         # uv's managed Python is python-build-standalone; preserve its actual bundled notices.

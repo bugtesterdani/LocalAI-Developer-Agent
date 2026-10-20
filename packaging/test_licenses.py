@@ -82,6 +82,23 @@ class LicenseTests(unittest.TestCase):
         self.collector.nuget_package("Example", "1.0", [self.root / "cache"])
         self.assertEqual(len(self.collector.entries[0]["files"]), 2)
 
+    def test_runtime_graph_excludes_unshipped_build_tools(self):
+        cache = self.root / "cache"
+        for name in ("deployed", "microsoft.netcore.app.runtime.linux-x64"):
+            self.file(f"cache/{name}/1.0/{name}.nuspec",
+                      '<package><metadata><license type="expression">MIT</license></metadata></package>')
+            self.file(f"cache/{name}/1.0/LICENSE", f"Original notice for {name}")
+        assets = self.file("project.assets.json", json.dumps({
+            "packageFolders": {str(cache): {}},
+            "libraries": {"deployed/1.0": {"type": "package", "path": "deployed/1.0"},
+                          "build-only/1.0": {"type": "package", "path": "build-only/1.0"}}}))
+        self.file("stage/app/App.deps.json", json.dumps({"libraries": {
+            "deployed/1.0": {"type": "package"},
+            "runtimepack.Microsoft.NETCore.App.Runtime.linux-x64/1.0": {"type": "runtimepack"}}}))
+        self.collector.nuget([assets])
+        self.assertEqual({e["name"] for e in self.collector.entries},
+                         {"deployed", "microsoft.netcore.app.runtime.linux-x64"})
+
     def test_version_specific_reviewed_override(self):
         source = self.root / "empty"
         source.mkdir()

@@ -12,9 +12,9 @@ Paketieren aus den installierten Python-Distributionen, den aufgelösten
 NuGet-Paketen und der mitgelieferten Python-Laufzeit gesammelt.
 Im Installer liegen sie unter `licenses/collected/`; dazu gehören
 `THIRD-PARTY-INVENTORY.json` und `THIRD-PARTY-INVENTORY.md`.
-Die Sammlung ist konservativ: NuGet-Buildabhängigkeiten können zusätzlich
-enthalten sein. Eine Aufnahme behauptet nicht, dass jedes Paket zur Laufzeit
-verwendet wird. Die Inventarliste ist keine juristische Freigabe.
+Bei NuGet wird der veröffentlichte Laufzeitgraph aus deps.json ausgewertet;
+reine Buildwerkzeuge und Analyzer werden nicht als mitgelieferte Komponenten
+aufgeführt. Die Inventarliste ist keine juristische Freigabe.
 
 | Bestandteil | Lizenz / Hinweis |
 |---|---|

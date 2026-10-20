@@ -20,9 +20,11 @@ python packaging/licenses.py --stage build/stage --runtime <Python-Installations
 
 Der Sammler arbeitet offline, führt keine Paketprogramme aus und verwendet
 nur die beim Build tatsächlich vorhandenen Metadaten und Originaltexte.
-Er sammelt direkte und transitive NuGet-Abhängigkeiten aus den angegebenen
-Projektauflösungen, Python-Pakete aus dist-info und Lizenzhinweise der
-Python-Laufzeit. Paketordner stammen aus packageFolders in project.assets.json.
+Er sammelt veröffentlichte direkte und transitive NuGet-Laufzeitabhängigkeiten
+aus deps.json, Python-Pakete aus dist-info und Lizenzhinweise der Python-Laufzeit.
+Paketordner und Paketpfade stammen aus den angegebenen project.assets.json.
+Reine Buildwerkzeuge werden nicht weitergegeben und sind nicht Bestandteil
+dieses Laufzeitinventars; ihre Nutzungsbedingungen gelten beim Bauen weiterhin.
 Auch .NET-Runtimepacks aus den veröffentlichten deps.json werden berücksichtigt.
 
 Fehlt ein Paket, eine Lizenzdeklaration oder ein benötigter Originaltext, wird
