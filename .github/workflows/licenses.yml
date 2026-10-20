@@ -49,6 +49,7 @@ jobs:
           uv export --project src/python --frozen --no-dev --no-emit-project --no-hashes -o build/requirements.txt
           uv pip install --python "$py/bin/python3" --target "$site" -r build/requirements.txt
           echo "PY_RUNTIME=$py" >> "$GITHUB_ENV"
+          "$py/bin/python3" -c "import sys; print('PY_RUNTIME_VERSION=' + sys.version.split()[0])" >> "$GITHUB_ENV"
       - name: Installationsordner
         run: |
           python3 packaging/package.py stage --platform linux --app build/app --runtime "$PY_RUNTIME" \
@@ -56,7 +57,7 @@ jobs:
           python3 packaging/package.py icons --out build/icons
       - name: Original-Lizenzen sammeln und prüfen
         run: |
-          python3 packaging/licenses.py --stage build/stage --runtime "$PY_RUNTIME" \
+          python3 packaging/licenses.py --stage build/stage --runtime "$PY_RUNTIME" --runtime-version "$PY_RUNTIME_VERSION" \
             --assets src/dotnet/LocalAi.Desktop.Linux/obj/project.assets.json \
             --assets src/dotnet/LocalAi.Broker.Host/obj/project.assets.json
       - uses: actions/upload-artifact@v5
@@ -94,6 +95,8 @@ jobs:
           uv pip install --python "$py\python.exe" --target "$py\Lib\site-packages" -r build/requirements.txt
           if ($LASTEXITCODE) { throw "uv pip install fehlgeschlagen" }
           "PY_RUNTIME=$py" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          & "$py\python.exe" -c "import sys; print('PY_RUNTIME_VERSION=' + sys.version.split()[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          if ($LASTEXITCODE) { throw "Python-Version konnte nicht ermittelt werden" }
       - name: Installationsordner
         run: |
           python packaging/package.py stage --platform windows --app build/app --runtime $env:PY_RUNTIME --version $env:VERSION --out build/stage
@@ -103,7 +106,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
       - name: Original-Lizenzen sammeln und prüfen
         run: |
-          python packaging/licenses.py --stage build/stage --runtime $env:PY_RUNTIME `
+          python packaging/licenses.py --stage build/stage --runtime $env:PY_RUNTIME --runtime-version $env:PY_RUNTIME_VERSION `
             --assets src/dotnet/LocalAi.Desktop/obj/project.assets.json `
             --assets src/dotnet/LocalAi.Broker.Host/obj/project.assets.json
           if ($LASTEXITCODE) { throw "Lizenzsammlung fehlgeschlagen" }

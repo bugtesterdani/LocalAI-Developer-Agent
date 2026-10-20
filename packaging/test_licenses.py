@@ -125,6 +125,18 @@ class LicenseTests(unittest.TestCase):
         with self.assertRaises(licensing.LicenseError):
             self.collector.add("nuget", "example", "1.1", "MIT", source, [])
 
+    def test_windows_runtime_minor_directory_uses_exact_supplied_version(self):
+        runtime = self.root / "cpython-3.15-windows-x86_64-none"
+        self.file(runtime.name + "/LICENSE.txt", "Original Python and bundled component notices")
+        self.collector.runtime(runtime, "3.15.0")
+        self.assertEqual(self.collector.entries[0]["version"], "3.15.0")
+
+    def test_runtime_without_exact_version_is_rejected(self):
+        runtime = self.root / "cpython-3.15-windows-x86_64-none"
+        self.file(runtime.name + "/LICENSE.txt", "Original notices")
+        with self.assertRaises(licensing.LicenseError):
+            self.collector.runtime(runtime)
+
     def test_paths_cannot_escape_package(self):
         self.file("outside.txt", "not a package license")
         directory = self.root / "package"

@@ -15,10 +15,12 @@ eigene Lizenz von Abhängigkeiten, externen Werkzeugen und Modellgewichten.
 den Ordner licenses/. Vor dem Bau eines Installers wird zusätzlich ausgeführt:
 
 ```text
-python packaging/licenses.py --stage build/stage --runtime <Python-Installationsordner> --assets <Desktop/obj/project.assets.json> --assets <Broker/obj/project.assets.json>
+python packaging/licenses.py --stage build/stage --runtime <Python-Installationsordner> --runtime-version <X.Y.Z> --assets <Desktop/obj/project.assets.json> --assets <Broker/obj/project.assets.json>
 ```
 
-Der Sammler arbeitet offline, führt keine Paketprogramme aus und verwendet
+Die genaue Python-Version wird im Workflow über sys.version der installierten
+Laufzeit erfasst; uv-Verzeichnisnamen enthalten unter Windows nicht immer die
+Patchversion. Der Sammler arbeitet offline, führt keine Paketprogramme aus und verwendet
 nur die beim Build tatsächlich vorhandenen Metadaten und Originaltexte.
 Er sammelt veröffentlichte direkte und transitive NuGet-Laufzeitabhängigkeiten
 aus deps.json, Python-Pakete aus dist-info und Lizenzhinweise der Python-Laufzeit.

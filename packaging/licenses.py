@@ -186,15 +186,17 @@ class Collector:
         if errors:
             raise LicenseError("\n".join(errors))
 
-    def runtime(self, runtime: Path) -> None:
+    def runtime(self, runtime: Path, version: str | None = None) -> None:
         # uv's managed Python is python-build-standalone; preserve its actual bundled notices.
         docs = [p for p in legal_files(runtime) if "site-packages" not in p.parts]
         if not docs:
             raise LicenseError("Python runtime has no original licensing evidence; include distribution licenses")
         # Version comes from the installed stdlib, without starting this interpreter.
-        version = runtime.name
-        if not re.search(r"cpython-[0-9]+\.[0-9]+\.[0-9]+", version):
-            raise LicenseError("Expected a versioned uv-managed Python directory (cpython-X.Y.Z-...)")
+        if version is None:
+            match = re.match(r"cpython-([0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?)", runtime.name)
+            version = match.group(1) if match else ""
+        if not re.fullmatch(r"3\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", version):
+            raise LicenseError("Exact Python version missing; pass --runtime-version from the installed interpreter")
         self.add("runtime", "python-distribution", version, "PSF-2.0 and bundled component licenses", runtime, docs)
 
     def write(self) -> None:
@@ -240,6 +242,7 @@ def main() -> None:
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--runtime", type=Path)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--runtime-version")
     parser.add_argument("--assets", type=Path, action="append")
     args = parser.parse_args()
     if args.verify:
@@ -261,7 +264,7 @@ def main() -> None:
         site = matches[-1]
     collector.python_packages(site)
     collector.nuget(args.assets)
-    collector.runtime(args.runtime)
+    collector.runtime(args.runtime, args.runtime_version)
     collector.write()
     verify(args.stage)
 
