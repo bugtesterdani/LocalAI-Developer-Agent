@@ -6,7 +6,8 @@ name: Wiki
 
 on:
   push:
-    branches: [main]
+    # doku/dokumentation nur bis zum Merge (erste Veröffentlichung), danach entfernen
+    branches: [main, doku/dokumentation]
     paths:
       - "docs/**"
       - "toolchains/README.md"
