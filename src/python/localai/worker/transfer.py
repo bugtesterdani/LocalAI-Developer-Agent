@@ -81,9 +81,19 @@ def _device_size(handle_file) -> int:  # pragma: no cover - nur Windows
     return size.value
 
 
+def _block_size(handle_file) -> int:  # pragma: no cover - nur Linux-Gast
+    import fcntl
+
+    blkgetsize64 = 0x80081272
+    buf = fcntl.ioctl(handle_file.fileno(), blkgetsize64, b"\0" * 8)
+    return struct.unpack("<Q", buf)[0]
+
+
 def _size_of(path: str, f) -> int:
     if path.startswith("\\\\.\\"):
         return _device_size(f)
+    if path.startswith("/dev/"):
+        return _block_size(f)
     return os.fstat(f.fileno()).st_size
 
 
@@ -129,7 +139,46 @@ class TransferDisk:
             os.fsync(f.fileno())
 
 
-def find_transfer_disk(expected_size: int, max_disks: int = 32) -> str:  # pragma: no cover - nur Windows
+def find_transfer_disk(expected_size: int, max_disks: int = 32) -> str:
+    if sys.platform != "win32":
+        return find_transfer_disk_linux(expected_size)
+    return _find_transfer_disk_windows(expected_size, max_disks)  # pragma: no cover
+
+
+def _read_header_uncached(path: str) -> bytes:
+    """Erste 4096 Bytes ohne Seitencache (das Laufwerk wechselt der Host im laufenden Betrieb aus)."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        if hasattr(os, "posix_fadvise"):
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        return os.pread(fd, HEADER_SIZE, 0)
+    finally:
+        os.close(fd)
+
+
+def find_transfer_disk_linux(expected_size: int, sys_block: pathlib.Path = pathlib.Path("/sys/block"),
+                             dev: pathlib.Path = pathlib.Path("/dev")) -> str:
+    """Linux-Gast (M8): SCSI-Laufwerk mit genau der Größe des Transfer-Laufwerks und leerem Kopf (``/dev/sdX``)."""
+    candidates = []
+    for entry in sorted(sys_block.glob("sd*")):
+        try:
+            sectors = int((entry / "size").read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            continue
+        if sectors * 512 != expected_size:
+            continue
+        path = str(dev / entry.name)
+        try:
+            if not any(_read_header_uncached(path)):
+                candidates.append(path)
+        except OSError:
+            continue
+    if len(candidates) != 1:
+        raise TransferError(f"Transfer-Laufwerk nicht eindeutig gefunden ({len(candidates)} Kandidaten)")
+    return candidates[0]
+
+
+def _find_transfer_disk_windows(expected_size: int, max_disks: int = 32) -> str:  # pragma: no cover - nur Windows
     candidates = []
     for n in range(max_disks):
         path = f"\\\\.\\PhysicalDrive{n}"
@@ -149,8 +198,9 @@ def find_transfer_disk(expected_size: int, max_disks: int = 32) -> str:  # pragm
 class Signal:
     """Meldet dem Host „fertig“: in der VM über KVP, in Tests über eine Datei."""
 
-    def __init__(self, signal_file: pathlib.Path | None) -> None:
+    def __init__(self, signal_file: pathlib.Path | None, kvp_pool: pathlib.Path | None = None) -> None:
         self.signal_file = signal_file
+        self.kvp_pool = kvp_pool
 
     def send(self, value: str) -> None:
         if self.signal_file is not None:
@@ -166,8 +216,14 @@ class Signal:
                         raise
                     time.sleep(0.02)
             return
-        if sys.platform != "win32":  # pragma: no cover
-            raise TransferError("KVP-Signal gibt es nur in einer Windows-VM")
+        if sys.platform != "win32":
+            # Linux-Gast: Pool-Datei des KVP-Dienstes (hyperv-daemons).
+            from localai.worker import kvp
+            try:
+                kvp.write_value(KVP_VALUE, value, self.kvp_pool or kvp.GUEST_POOL)
+            except (OSError, kvp.KvpError) as err:
+                raise TransferError(f"KVP-Signal nicht schreibbar: {err}") from err
+            return
         import winreg  # pragma: no cover
 
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, KVP_KEY, 0, winreg.KEY_SET_VALUE) as key:  # pragma: no cover

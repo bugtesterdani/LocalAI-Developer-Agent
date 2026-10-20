@@ -598,7 +598,29 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand ContinueSandboxCommand { get; }
 
     /// <summary>VM nach ausgebliebener Antwort angehalten: „VM weiter verwenden“ sichtbar.</summary>
-    public bool IsSandboxPaused => SandboxDetail?.StartsWith("angehalten", StringComparison.Ordinal) == true;
+    public bool IsSandboxPaused => SandboxParts(SandboxDetail).Any(p => p.StartsWith("angehalten", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Zustand je VM: bei einer VM der ganze Text, bei mehreren (M8) „Windows: … | Linux: …“ ohne das Präfix des Gasts.
+    /// </summary>
+    public static IReadOnlyList<string> SandboxParts(string? detail)
+    {
+        if (string.IsNullOrEmpty(detail))
+        {
+            return [];
+        }
+        return detail.Split(" | ").Select(part =>
+        {
+            foreach (var prefix in new[] { "Windows: ", "Linux: " })
+            {
+                if (part.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return part[prefix.Length..];
+                }
+            }
+            return part;
+        }).ToList();
+    }
 
     private async Task ContinueSandboxAsync()
     {
@@ -879,7 +901,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>VM gesperrt: Kopfzeile rot.</summary>
-    public bool IsSandboxProblem => SandboxDetail?.StartsWith("gesperrt", StringComparison.Ordinal) == true || IsSandboxPaused;
+    public bool IsSandboxProblem => SandboxParts(SandboxDetail).Any(p => p.StartsWith("gesperrt", StringComparison.Ordinal)) || IsSandboxPaused;
 
     /// <summary>Entwicklungsmodus ohne VM: in der Oberfläche deutlich als unsicher markiert.</summary>
     public bool IsUnsafeSandbox => SandboxMode == "dev-local-unsafe";

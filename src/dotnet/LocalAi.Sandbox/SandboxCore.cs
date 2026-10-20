@@ -155,6 +155,12 @@ public sealed record SandboxReply(string? ResultJson, string? Rejection);
 public interface ISandboxTransport
 {
     Task<SandboxReply> ExchangeAsync(JobEnvelope envelope, string? payloadPath, TimeSpan timeout, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Vor dem Erzeugen eines Jobs: eine ausgeschaltete VM starten (Start bei Bedarf, M8), damit die Gültigkeit des
+    /// Jobs nicht in der Startzeit verstreicht. Rückgabe: null = bereit, sonst der Grund.
+    /// </summary>
+    Task<string?> EnsureStartedAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 }
 
 /// <summary>
@@ -309,10 +315,63 @@ public sealed class SandboxToolAdapter(
         return JobTimeout;
     }
 
+    /// <summary>
+    /// Nach erfolgreichem Import eines Snapshots: Vorschlag, Manifest und Archiv (wird danach gelöscht) – für den
+    /// Abgleich mit einer zweiten VM (M8). Das Archiv muss im Aufruf kopiert werden.
+    /// </summary>
+    public Action<ToolProposal, SnapshotManifest, string>? RetainSnapshot { get; init; }
+
+    /// <summary>
+    /// Abgleich (M8): einen in der anderen VM bereits importierten Snapshot unverändert in diese VM übertragen – mit
+    /// demselben, schon freigegebenen Vorschlag, demselben Manifest und demselben Archiv.
+    /// </summary>
+    public async Task<ToolResult> ImportSnapshotAsync(ToolProposal proposal, SnapshotManifest manifest, string archive, CancellationToken cancellationToken)
+    {
+        if (await transport.EnsureStartedAsync(cancellationToken).ConfigureAwait(false) is { } notReady)
+        {
+            return Failed(proposal, "abgleich", $"Sandbox nicht bereit ({notReady})");
+        }
+        var job = NewJob(proposal, "abgleich-" + Guid.NewGuid().ToString("D"), SnapshotTimeout) with
+        {
+            Snapshot = manifest,
+            PayloadSha256 = Sha256File(archive),
+        };
+        var reply = await transport.ExchangeAsync(JobSigner.Sign(job, session.Key), archive, SnapshotTimeout, cancellationToken).ConfigureAwait(false);
+        var result = ResultValidator.Validate(reply, job);
+        if (result.Status == ResultStatus.Succeeded && result.TargetResults.FirstOrDefault(t => t.TargetId == "snapshot")?.Text != manifest.SnapshotId)
+        {
+            return ResultValidator.Failed(job, "Sandbox meldet einen anderen Snapshot als übertragen");
+        }
+        return result;
+    }
+
+    private SandboxJob NewJob(ToolProposal proposal, string invocationId, TimeSpan timeout)
+    {
+        var now = clock.UtcNow;
+        return new SandboxJob(
+            SchemaVersion: ContractJson.SchemaVersion,
+            JobId: Guid.NewGuid().ToString("D"),
+            Sequence: session.NextSequence(),
+            SessionId: session.SessionId,
+            InvocationId: invocationId,
+            Proposal: proposal,
+            ProposalSha256: ProposalHashing.Sha256(proposal),
+            IssuedAt: ContractTime.ToContract(now),
+            ExpiresAt: ContractTime.ToContract(now + timeout));
+    }
+
+    private static ToolResult Failed(ToolProposal proposal, string invocationId, string message) =>
+        new(invocationId, proposal.ProposalId, ResultStatus.Failed, proposal.SnapshotId,
+            [new TargetResult("*", ResultStatus.Failed, Message: message)], CanonicalJson.Sha256Hex(message), Truncated: false, Untrusted: true);
+
     public async Task<ToolResult> ExecuteAsync(ToolProposal proposal, string invocationId, CancellationToken cancellationToken)
     {
         var isSnapshot = proposal.Tool == "Workspace.Snapshot";
         var timeout = TimeoutFor(proposal);
+        if (await transport.EnsureStartedAsync(cancellationToken).ConfigureAwait(false) is { } notReady)
+        {
+            return Failed(proposal, invocationId, $"Sandbox nicht bereit ({notReady})");
+        }
         var now = clock.UtcNow;
         var job = new SandboxJob(
             SchemaVersion: ContractJson.SchemaVersion,
@@ -360,6 +419,7 @@ public sealed class SandboxToolAdapter(
                     return ResultValidator.Failed(job, "Sandbox meldet einen anderen Snapshot als übertragen");
                 }
                 snapshots.Add(id, job.Snapshot.GrantId);
+                RetainSnapshot?.Invoke(proposal, job.Snapshot, archive!);
             }
             if (proposal.Tool == "Patch.Apply" && result.Status == ResultStatus.Succeeded)
             {

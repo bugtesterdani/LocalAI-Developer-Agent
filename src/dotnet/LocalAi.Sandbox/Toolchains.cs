@@ -15,6 +15,13 @@ public static class ToolchainValidator
     public const string ManifestFile = "toolchain.json";
     public const string GuestRoot = @"C:\Toolchains\";
 
+    /// <summary>Installationsort im Linux-Gast (M8): /opt/toolchains/&lt;name&gt;, nur für root beschreibbar.</summary>
+    public const string LinuxGuestRoot = "/opt/toolchains/";
+
+    /// <summary>guestPath, den ein Manifest für sein Gastsystem haben muss.</summary>
+    public static string ExpectedGuestPath(ToolchainManifest m) =>
+        m.Guest == GuestOs.Linux ? LinuxGuestRoot + m.Name : GuestRoot + m.Name;
+
     /// <summary>Platzhalter, die der Host bzw. die Provisionierung selbst einsetzt.</summary>
     public static readonly IReadOnlySet<string> FixedPlaceholders =
         new HashSet<string>(StringComparer.Ordinal) { "guest", "source", "selftest", "work", "results", "packages" };
@@ -28,7 +35,10 @@ public static class ToolchainValidator
     private static readonly Regex EnvName = new("^[A-Z_][A-Z0-9_]{0,63}$");
     private static readonly Regex Placeholder = new(@"\{([A-Za-z0-9_]*)\}");
     private static readonly Regex Hex64 = new("^[0-9a-f]{64}$");
-    private static readonly HashSet<string> BlockedEnv = new(StringComparer.Ordinal) { "PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH" };
+    private static readonly HashSet<string> BlockedEnv = new(StringComparer.Ordinal)
+    {
+        "PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH", "LD_PRELOAD", "LD_AUDIT",
+    };
 
     /// <summary>Präfix für Programme aus Windows selbst (C:\Windows\System32) – nur die hier erlaubten.</summary>
     public const string SystemPrefix = @"{system}\";
@@ -36,6 +46,19 @@ public static class ToolchainValidator
     /// <summary>Programme aus System32, die Toolchains nutzen dürfen: cmd (Batch) und Windows PowerShell 5.1.</summary>
     public static readonly IReadOnlySet<string> SystemBinaries =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "cmd.exe", @"WindowsPowerShell\v1.0\powershell.exe" };
+
+    /// <summary>Präfix für Programme aus dem Linux-Gast selbst (/usr/bin) – nur die hier erlaubten.</summary>
+    public const string LinuxSystemPrefix = "{system}/";
+
+    /// <summary>Programme aus /usr/bin, die Linux-Toolchains nutzen dürfen: bash, sh und das Python des Debian-Abbilds.</summary>
+    public static readonly IReadOnlySet<string> LinuxSystemBinaries =
+        new HashSet<string>(StringComparer.Ordinal) { "bash", "sh", "python3" };
+
+    /// <summary>Archivformate je Gast: Windows nur ZIP, Linux auch tar.gz/tar.xz (Rechte und Verknüpfungen bleiben erhalten).</summary>
+    public static bool IsArchive(string file, GuestOs guest) =>
+        file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+        || (guest == GuestOs.Linux && (file.EndsWith(".tar.gz", StringComparison.Ordinal) || file.EndsWith(".tgz", StringComparison.Ordinal)
+                                       || file.EndsWith(".tar.xz", StringComparison.Ordinal)));
 
     public const int MaxThenSteps = 5;
     public const int MaxDeploy = 20;
@@ -62,7 +85,8 @@ public static class ToolchainValidator
         Check(Name.IsMatch(m.Name), "name: nur Kleinbuchstaben, Ziffern und '-' (z. B. dotnet)");
         Check(Version.IsMatch(m.Version), "version ungültig");
         Check(!string.IsNullOrWhiteSpace(m.DisplayName) && m.DisplayName.Length <= 80, "displayName fehlt oder ist zu lang");
-        Check(string.Equals(m.GuestPath, GuestRoot + m.Name, StringComparison.Ordinal), $"guestPath muss {GuestRoot}{m.Name} sein");
+        var linux = m.Guest == GuestOs.Linux;
+        Check(string.Equals(m.GuestPath, ExpectedGuestPath(m), StringComparison.Ordinal), $"guestPath muss {ExpectedGuestPath(m)} sein");
         Check(!m.License.Proprietary || !string.IsNullOrWhiteSpace(m.License.Note), "Proprietäre Toolchain braucht einen Lizenzhinweis (license.note)");
         foreach (var file in m.License.Files ?? [])
         {
@@ -75,20 +99,38 @@ public static class ToolchainValidator
         {
             Check(Identifier.IsMatch(b.Name), $"Binary-Name ungültig: {b.Name}");
             Check(binaries.Add(b.Name), $"Binary doppelt: {b.Name}");
-            Check(IsSystemBinary(b.Path) || (IsRelative(b.Path) && !b.Path.Contains('{') && b.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)),
-                $"Binary {b.Name}: path muss eine relative .exe sein oder {SystemPrefix}cmd.exe bzw. {SystemPrefix}WindowsPowerShell\\v1.0\\powershell.exe");
-            Check(b.Sha256 is null || !IsSystemBinary(b.Path), $"Binary {b.Name}: sha256 nicht für Windows-Programme (ändern sich mit Updates)");
+            if (linux)
+            {
+                Check(IsLinuxSystemBinary(b.Path) || (IsRelative(b.Path) && !b.Path.Contains('{') && !b.Path.Contains('\\')),
+                    $"Binary {b.Name}: path muss ein relativer Pfad mit '/' sein oder {LinuxSystemPrefix}bash, {LinuxSystemPrefix}sh bzw. {LinuxSystemPrefix}python3");
+                Check(b.Sha256 is null || !IsLinuxSystemBinary(b.Path), $"Binary {b.Name}: sha256 nicht für Programme des Gastsystems");
+            }
+            else
+            {
+                Check(IsSystemBinary(b.Path) || (IsRelative(b.Path) && !b.Path.Contains('{') && b.Path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)),
+                    $"Binary {b.Name}: path muss eine relative .exe sein oder {SystemPrefix}cmd.exe bzw. {SystemPrefix}WindowsPowerShell\\v1.0\\powershell.exe");
+                Check(b.Sha256 is null || !IsSystemBinary(b.Path), $"Binary {b.Name}: sha256 nicht für Windows-Programme (ändern sich mit Updates)");
+            }
             Check(b.Sha256 is null || Hex64.IsMatch(b.Sha256), $"Binary {b.Name}: sha256 ungültig");
         }
 
         switch (m.Install.Kind)
         {
             case ToolchainInstallKind.Archive:
-                Check(m.Install.File is not null && m.Install.File.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && RelativeFile(m.Install.File, fileExists),
-                    $"install.file: ZIP-Archiv im Toolchain-Ordner fehlt ({m.Install.File})");
+                Check(m.Install.File is not null && IsArchive(m.Install.File, m.Guest ?? GuestOs.Windows) && RelativeFile(m.Install.File, fileExists),
+                    linux ? $"install.file: Archiv (.zip, .tar.gz, .tgz, .tar.xz) im Toolchain-Ordner fehlt ({m.Install.File})"
+                          : $"install.file: ZIP-Archiv im Toolchain-Ordner fehlt ({m.Install.File})");
                 Check(m.Install.Arguments is null || m.Install.Arguments.Count == 0, "install.arguments gibt es nur bei Installern");
                 break;
             case ToolchainInstallKind.Installer:
+                if (linux)
+                {
+                    // Linux: Debian-Pakete (dpkg -i, offline, ohne Abhängigkeitsauflösung) – keine weiteren Argumente.
+                    Check(m.Install.File is not null && m.Install.File.EndsWith(".deb", StringComparison.Ordinal) && RelativeFile(m.Install.File, fileExists),
+                        $"install.file: Debian-Paket (.deb) im Toolchain-Ordner fehlt ({m.Install.File})");
+                    Check(m.Install.Arguments is null || m.Install.Arguments.Count == 0, "install.arguments gibt es für .deb-Pakete nicht");
+                    break;
+                }
                 Check(m.Install.File is not null && (m.Install.File.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || m.Install.File.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
                       && RelativeFile(m.Install.File, fileExists), $"install.file: Installer (.exe/.msi) im Toolchain-Ordner fehlt ({m.Install.File})");
                 foreach (var a in m.Install.Arguments ?? [])
@@ -263,6 +305,10 @@ public static class ToolchainValidator
     /// <summary>{system}\cmd.exe oder {system}\WindowsPowerShell\v1.0\powershell.exe (Groß-/Kleinschreibung egal).</summary>
     public static bool IsSystemBinary(string path) =>
         path.StartsWith(SystemPrefix, StringComparison.OrdinalIgnoreCase) && SystemBinaries.Contains(path[SystemPrefix.Length..].Replace('/', '\\'));
+
+    /// <summary>{system}/bash, {system}/sh oder {system}/python3 (Linux-Gast, genau so geschrieben).</summary>
+    public static bool IsLinuxSystemBinary(string path) =>
+        path.StartsWith(LinuxSystemPrefix, StringComparison.Ordinal) && LinuxSystemBinaries.Contains(path[LinuxSystemPrefix.Length..]);
 }
 
 /// <summary>
@@ -329,7 +375,14 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
         {
             var manifestBytes = File.ReadAllBytes(Path.Combine(directory, ToolchainValidator.ManifestFile));
             manifestSha = Convert.ToHexStringLower(SHA256.HashData(manifestBytes));
-            manifest = ToolchainValidator.Parse(Encoding.UTF8.GetString(manifestBytes).TrimStart('\uFEFF'));
+            var text = Encoding.UTF8.GetString(manifestBytes).TrimStart('\uFEFF');
+            manifest = ToolchainValidator.Parse(text);
+            // Der Worker im Gast liest das Manifest streng (Pydantic): Gastsystem genau so schreiben.
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.TryGetProperty("guest", out var guest) && guest.GetString() is not ("Windows" or "Linux"))
+            {
+                problems.Add("guest muss \"Windows\" oder \"Linux\" sein (genau so geschrieben)");
+            }
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
@@ -401,7 +454,7 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
         }
         var info = new ToolchainInfo(name, version, manifest?.DisplayName ?? name, directory, digest, files.Count, total, registered,
             manifest?.License.Proprietary ?? false, problems, projectToolchains.Contains(name),
-            RegisteredDigest: registered ? registration!.Digest : null, LicenseNote: manifest?.License.Note);
+            RegisteredDigest: registered ? registration!.Digest : null, LicenseNote: manifest?.License.Note, Guest: manifest?.Guest ?? GuestOs.Windows);
         return new Inspection(info, manifest, manifestSha, files);
     }
 
@@ -432,6 +485,25 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
         return registration;
     }
 
+    /// <summary>Gastsystem laut Manifest einer registrierten Toolchain; null = nicht registriert oder nicht lesbar.</summary>
+    public GuestOs? GuestOf(string name)
+    {
+        var r = Registrations.FirstOrDefault(x => x.Name == name);
+        if (r is null)
+        {
+            return null;
+        }
+        try
+        {
+            var manifest = ToolchainValidator.Parse(File.ReadAllText(Path.Combine(r.Directory, ToolchainValidator.ManifestFile)).TrimStart('\uFEFF'));
+            return manifest.Guest ?? GuestOs.Windows;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
     public bool Unregister(string name)
     {
         lock (_gate)
@@ -447,11 +519,11 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
     /// Für den VM-Aufbau: kopiert die vom Projekt gewählten Toolchains nach <paramref name="stagingDirectory"/> und prüft
     /// die Kopie gegen die bei der Registrierung festgehaltenen Hashes (SEC-19/SEC-24). Liefert die Namen in Projektreihenfolge.
     /// </summary>
-    public IReadOnlyList<string> Stage(string stagingDirectory, CancellationToken cancellationToken)
+    public IReadOnlyList<string> Stage(string stagingDirectory, CancellationToken cancellationToken, IReadOnlyList<string>? only = null)
     {
         var registrations = Registrations;
         var staged = new List<string>();
-        foreach (var name in projectToolchains)
+        foreach (var name in projectToolchains.Where(n => only is null || only.Contains(n)))
         {
             var r = registrations.FirstOrDefault(x => x.Name == name)
                     ?? throw new ToolchainException($"Toolchain '{name}' ist für das Projekt gewählt, aber nicht registriert " +
@@ -598,7 +670,10 @@ public static class ToolchainBuildTime
 {
     public static readonly TimeSpan WindowsSetup = TimeSpan.FromMinutes(60);
 
-    public static TimeSpan Minimum(IEnumerable<ToolchainRegistration> registrations, IEnumerable<string> projectToolchains)
+    /// <summary>Debian-Cloud-Abbild: Start, cloud-init, Python entpacken – deutlich schneller als Windows.</summary>
+    public static readonly TimeSpan LinuxSetup = TimeSpan.FromMinutes(20);
+
+    public static TimeSpan Minimum(IEnumerable<ToolchainRegistration> registrations, IEnumerable<string> projectToolchains, GuestOs guest = GuestOs.Windows)
     {
         var wanted = new HashSet<string>(projectToolchains, StringComparer.OrdinalIgnoreCase);
         var minutes = 0;
@@ -614,6 +689,6 @@ public static class ToolchainBuildTime
                 minutes += 15;
             }
         }
-        return WindowsSetup + TimeSpan.FromMinutes(minutes);
+        return (guest == GuestOs.Linux ? LinuxSetup : WindowsSetup) + TimeSpan.FromMinutes(minutes);
     }
 }

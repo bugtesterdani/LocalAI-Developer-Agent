@@ -5,6 +5,7 @@
   },
   "sandbox": {
     "mode": "dev-local-unsafe",
+    "defaultGuestOs": "Windows",
     "devWorker": {
       "command": "uv",
       "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.worker"],
@@ -22,7 +23,24 @@
       "buildTimeoutMinutes": 90,
       "productKey": null,
       "keepVmOnExit": false,
-      "reuseVm": false
+      "reuseVm": false,
+      "idleMinutes": 30,
+      "stopAction": "ShutDown"
+    },
+    "hypervLinux": {
+      "imagePath": "D:\\Agent\\Linux\\debian-13-generic-amd64.raw",
+      "prerequisites": "D:\\Agent\\Linux\\linux-gast",
+      "vmName": "LocalAi-Linux",
+      "vmDirectory": null,
+      "memoryMB": 4096,
+      "processors": 4,
+      "osDiskGB": 64,
+      "transferDiskMB": 64,
+      "buildTimeoutMinutes": 30,
+      "keepVmOnExit": false,
+      "reuseVm": false,
+      "idleMinutes": 30,
+      "stopAction": "ShutDown"
     }
   },
   "orchestrator": {

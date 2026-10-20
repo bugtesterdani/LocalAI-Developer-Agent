@@ -38,7 +38,7 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
             Verb = "runas",
             WindowStyle = ProcessWindowStyle.Minimized,
         };
-        foreach (var a in new[] { "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Script("New-LocalAiSandbox.ps1"),
+        foreach (var a in new[] { "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Script(settings.IsLinux ? "New-LocalAiLinuxSandbox.ps1" : "New-LocalAiSandbox.ps1"),
                      "-RequestFile", requestFile, "-StatusFile", statusFile })
         {
             start.ArgumentList.Add(a);
@@ -198,9 +198,9 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
 
     public async Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken)
     {
-        if (action is not ("Start" or "Save" or "TurnOff"))
+        if (action is not ("Start" or "Stop" or "Save" or "TurnOff"))
         {
-            throw new ArgumentException("Start, Save oder TurnOff", nameof(action));
+            throw new ArgumentException("Start, Stop, Save oder TurnOff", nameof(action));
         }
         var result = await RunJsonAsync("Set-LocalAiVmState.ps1", ["-VmName", settings.VmName, "-Action", action], cancellationToken).ConfigureAwait(false);
         return new VmInfo(true, result.GetProperty("state").GetString() ?? "", result.GetProperty("nics").GetInt32());
@@ -325,13 +325,26 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
 }
 
 /// <summary>Quellen für die Gastdateien: Python-Laufzeit, Pakete, Worker, Skripte.</summary>
+/// <param name="LinuxPrerequisites">Nur Linux-Gast: Ordner mit prerequisites.json (Python für Linux, Wheels, hyperv-daemons).</param>
 public sealed record GuestPayloadSources(
     string PythonHome,
     string SitePackages,
     string LocalAiPackage,
     string GuestScripts,
-    IReadOnlyList<string> Packages)
+    IReadOnlyList<string> Packages,
+    string? LinuxPrerequisites = null)
 {
+    /// <summary>
+    /// Linux-Gast (M8): Worker und Gastskripte aus dem Repository, Python-Laufzeit und Pakete aus dem Offline-Ordner
+    /// (scripts/sandbox/Get-LocalAiLinuxPrerequisites.ps1) – die Windows-Python des Hosts passt nicht in den Gast.
+    /// </summary>
+    public static GuestPayloadSources ForLinux(string repoRoot, string prerequisites)
+    {
+        var python = Path.Combine(repoRoot, "src", "python");
+        return new GuestPayloadSources("", "", Path.Combine(python, "localai"), Path.Combine(repoRoot, "scripts", "sandbox", "guest-linux"),
+            DefaultPackages, Path.GetFullPath(prerequisites));
+    }
+
     /// <summary>Laufzeitpakete des Workers (pydantic und seine Abhängigkeiten); Testwerkzeuge kommen nicht in die VM.</summary>
     public static readonly IReadOnlyList<string> DefaultPackages =
         ["pydantic", "pydantic_core", "annotated_types", "typing_extensions", "typing_inspection"];
@@ -383,6 +396,22 @@ public static class SandboxFingerprint
     public static string ComputeBase(HyperVSettings settings, GuestPayloadSources sources, IEnumerable<ToolchainRegistration> toolchains,
         IEnumerable<string> projectToolchains)
     {
+        if (settings.IsLinux)
+        {
+            var linuxLines = new List<string>
+            {
+                "v1-base-linux",
+                $"image|{settings.ImagePath}|{Facts(settings.ImagePath)}",
+                $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.KeepVmOnExit}",
+                $"prereq|{LinuxPrerequisites.ManifestHash(sources.LinuxPrerequisites)}",
+            };
+            var known = toolchains.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var name in projectToolchains.Order(StringComparer.OrdinalIgnoreCase))
+            {
+                linuxLines.Add($"toolchain|{name}|{(known.TryGetValue(name, out var r) ? r.Digest : "nicht-registriert")}");
+            }
+            return Hash(linuxLines);
+        }
         var lines = new List<string>
         {
             "v2-base",
@@ -414,11 +443,12 @@ public static class SandboxFingerprint
     /// </summary>
     public static string ComputeCode(HyperVSettings settings, GuestPayloadSources sources)
     {
-        var lines = new List<string> { "v2-code", $"low={settings.LowIntegrityTools}" };
+        var lines = new List<string> { "v3-code", $"low={settings.LowIntegrityTools}", $"guest={settings.Guest}" };
         foreach (var (dir, include) in new (string, Func<string, bool>)[]
                  {
                      (sources.LocalAiPackage, rel => WorkerFiles.Contains(rel) || rel.StartsWith("worker/", StringComparison.Ordinal)
-                                                     || rel.StartsWith("contracts/", StringComparison.Ordinal)),
+                                                     || rel.StartsWith("contracts/", StringComparison.Ordinal)
+                                                     || rel.StartsWith("guest/", StringComparison.Ordinal)),
                      (sources.GuestScripts, _ => true),
                  })
         {
@@ -454,6 +484,89 @@ public static class SandboxFingerprint
 public static class GuestPayloadBuilder
 {
     private static readonly string[] SkipDirectories = ["__pycache__", "test", "tests", "idlelib", "tkinter", "turtledemo", "ensurepip"];
+
+    /// <summary>Wohin die Toolchains für den Aufbau kopiert werden (Windows: ins Abbild, Linux: aufs Seed-Laufwerk).</summary>
+    public static string ToolchainStaging(string guestDirectory, GuestOs guest) => guest == GuestOs.Linux
+        ? Path.Combine(guestDirectory, "seed", "localai", "toolchain-src")
+        : Path.Combine(guestDirectory, "LocalAi", "toolchain-src");
+
+    /// <summary>Gastdateien für die VM nach <paramref name="settings"/> (Windows-Abbild oder Linux-Seed).</summary>
+    public static void Build(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, HyperVSettings settings, IReadOnlyList<string> toolchains)
+    {
+        if (settings.IsLinux)
+        {
+            BuildLinux(guestDirectory, sources, sessionKey, settings, toolchains);
+        }
+        else
+        {
+            Build(guestDirectory, sources, sessionKey, settings.TransferDiskBytes, toolchains, settings.LowIntegrityTools);
+        }
+    }
+
+    public static readonly string[] LinuxScriptFiles = ["provision.sh"];
+
+    /// <summary>
+    /// Linux-Gast (M8): Inhalt des Seed-Laufwerks (FAT32, Bezeichnung CIDATA) für cloud-init NoCloud –
+    /// <c>meta-data</c>, <c>user-data</c> und <c>localai/</c> mit Python für Linux, Wheels, hyperv-daemons, Worker,
+    /// Sitzungsschlüssel, Konfiguration, Toolchains und provision.sh. Der Gast löscht das Laufwerk nach der Provisionierung.
+    /// </summary>
+    public static void BuildLinux(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, HyperVSettings settings, IReadOnlyList<string> toolchains)
+    {
+        var prerequisites = LinuxPrerequisites.Load(sources.LinuxPrerequisites
+            ?? throw new InvalidDataException("sandbox.hypervLinux.prerequisites fehlt"));
+        var seed = Path.Combine(guestDirectory, "seed");
+        var root = Path.Combine(seed, "localai");
+        Directory.CreateDirectory(root);
+        prerequisites.CopyVerified(Path.Combine(root, "prereq"));
+        CopyTree(sources.LocalAiPackage, Path.Combine(root, "pkg", "localai"),
+            rel => !rel.Split(Path.DirectorySeparatorChar).Contains("__pycache__") && !rel.EndsWith(".pyc", StringComparison.Ordinal)
+                   && !rel.Split(Path.DirectorySeparatorChar)[0].Equals("orchestrator", StringComparison.Ordinal));
+        foreach (var file in LinuxScriptFiles)
+        {
+            // Gastskripte immer mit LF (bash), auch wenn git sie unter Windows mit CRLF auscheckt.
+            var text = File.ReadAllText(Path.Combine(sources.GuestScripts, file), Encoding.UTF8).Replace("\r\n", "\n");
+            File.WriteAllText(Path.Combine(root, file), text, new UTF8Encoding(false));
+        }
+        File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
+        File.WriteAllText(Path.Combine(root, "guest-config.json"),
+            GuestConfigJson(settings.TransferDiskBytes, toolchains, lowIntegrityTools: true, GuestOs.Linux, prerequisites), new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(seed, "meta-data"),
+            $"instance-id: localai-{Guid.NewGuid():N}\nlocal-hostname: localai-sbx\n", new UTF8Encoding(false));
+        string? password = null;
+        if (settings.KeepVmOnExit)
+        {
+            // Nur zur Fehlersuche (keepVmOnExit): Anmeldung an der VM-Konsole als root.
+            password = "Lai-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(12));
+            Directory.CreateDirectory(settings.VmDirectory);
+            File.WriteAllText(Path.Combine(settings.VmDirectory, "gast-kennwort.txt"), password, Encoding.ASCII);
+        }
+        File.WriteAllText(Path.Combine(seed, "user-data"), CloudConfig(password), new UTF8Encoding(false));
+    }
+
+    /// <summary>cloud-config: keine Benutzer, keine Paketquellen, Root-Partition vergrößern, provision.sh vom Seed starten.</summary>
+    public static string CloudConfig(string? rootPassword)
+    {
+        var sb = new StringBuilder();
+        sb.Append("#cloud-config\n");
+        sb.Append("# LocalAi-Sandbox (Linux): ohne Netzwerkkarte, ohne Benutzerkonten; Provisionierung vom Seed-Laufwerk.\n");
+        sb.Append("users: []\n");
+        sb.Append("disable_root: true\n");
+        sb.Append("ssh_pwauth: false\n");
+        sb.Append("package_update: false\n");
+        sb.Append("package_upgrade: false\n");
+        sb.Append("package_reboot_if_required: false\n");
+        sb.Append("manage_etc_hosts: false\n");
+        sb.Append("growpart:\n  mode: auto\n  devices: ['/']\n");
+        if (rootPassword is not null)
+        {
+            sb.Append("chpasswd:\n  expire: false\n  users:\n");
+            sb.Append($"    - {{name: root, password: \"{rootPassword}\", type: text}}\n");
+        }
+        sb.Append("runcmd:\n");
+        sb.Append("  - [/bin/bash, -c, \"mkdir -p /mnt/localai-seed && mount -o ro LABEL=CIDATA /mnt/localai-seed && " +
+                  "/bin/bash /mnt/localai-seed/localai/provision.sh >> /var/log/localai-provision.log 2>&1\"]\n");
+        return sb.ToString();
+    }
 
     public static void Build(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, long transferDiskBytes,
         IReadOnlyList<string>? toolchains = null, bool lowIntegrityTools = true)
@@ -511,10 +624,61 @@ public static class GuestPayloadBuilder
     public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools) =>
         JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [], lowIntegrityTools });
 
+    /// <summary>guest-config.json des Linux-Gasts: zusätzlich Gastsystem und die Dateien aus prerequisites.json.</summary>
+    public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools, GuestOs guest,
+        LinuxPrerequisites? prerequisites) =>
+        guest != GuestOs.Linux
+            ? GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools)
+            : JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1,
+                guest = "Linux",
+                transferDiskBytes,
+                toolchains = toolchains ?? [],
+                python = prerequisites?.Python,
+                wheels = prerequisites?.Wheels ?? [],
+                debs = prerequisites?.Debs ?? [],
+            });
+
     /// <summary>
     /// Nutzlast eines Gast-Updates: Paket <c>localai</c> (ohne Caches), Gastskripte und <c>guest-config.json</c>
     /// (siehe localai/worker/update.py). Python-Laufzeit, Pakete und Toolchains sind nicht enthalten.
     /// </summary>
+    public static void BuildUpdate(string zipPath, GuestPayloadSources sources, long transferDiskBytes, IReadOnlyList<string>? toolchains,
+        bool lowIntegrityTools, GuestOs guest)
+    {
+        if (guest != GuestOs.Linux)
+        {
+            BuildUpdate(zipPath, sources, transferDiskBytes, toolchains, lowIntegrityTools);
+            return;
+        }
+        using var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
+        AddPackage(zip, sources);
+        foreach (var file in LinuxScriptFiles)
+        {
+            var entry = zip.CreateEntry("guest/" + file);
+            using var script = new StreamWriter(entry.Open(), new UTF8Encoding(false));
+            script.Write(File.ReadAllText(Path.Combine(sources.GuestScripts, file), Encoding.UTF8).Replace("\r\n", "\n"));
+        }
+        var prerequisites = sources.LinuxPrerequisites is null ? null : LinuxPrerequisites.Load(sources.LinuxPrerequisites);
+        var config = zip.CreateEntry("guest-config.json");
+        using var writer = new StreamWriter(config.Open(), new UTF8Encoding(false));
+        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, GuestOs.Linux, prerequisites));
+    }
+
+    private static void AddPackage(System.IO.Compression.ZipArchive zip, GuestPayloadSources sources)
+    {
+        foreach (var file in Directory.EnumerateFiles(sources.LocalAiPackage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
+            var rel = Path.GetRelativePath(sources.LocalAiPackage, file).Replace('\\', '/');
+            if (rel.Split('/').Contains("__pycache__") || rel.EndsWith(".pyc", StringComparison.Ordinal) || new FileInfo(file).LinkTarget is not null)
+            {
+                continue;
+            }
+            System.IO.Compression.ZipFileExtensions.CreateEntryFromFile(zip, file, "localai/" + rel);
+        }
+    }
+
     public static void BuildUpdate(string zipPath, GuestPayloadSources sources, long transferDiskBytes, IReadOnlyList<string>? toolchains,
         bool lowIntegrityTools)
     {

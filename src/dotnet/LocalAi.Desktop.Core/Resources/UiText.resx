@@ -430,6 +430,12 @@ Empfänger: {7}</value>
   <data name="ToolchainUsedByProject" xml:space="preserve">
     <value>vom Projekt verwendet</value>
   </data>
+  <data name="ToolchainGuestWindows" xml:space="preserve">
+    <value>Windows-VM</value>
+  </data>
+  <data name="ToolchainGuestLinux" xml:space="preserve">
+    <value>Linux-VM</value>
+  </data>
   <data name="ToolchainLicense" xml:space="preserve">
     <value>Lizenz: {0}</value>
   </data>

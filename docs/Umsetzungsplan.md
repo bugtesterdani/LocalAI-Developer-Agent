@@ -52,7 +52,8 @@ Aufwand in Personentagen als Größenordnung; Referenztermine für eine Person i
 | **M6 Web & Übernahme** | B09 Web Fetcher + Content Gate, B10 Übernahme, Abbruch, Wiederanlauf | 11 | bis 24.02.2027 |
 | **M7 Abnahme (MVP)** | B11 SEC-01–24, AC01–17, Demo, Doku | 9 | bis 09.03.2027 |
 | Puffer | | 7 | bis 18.03.2027 |
-| Erweiterungen | B13 Modellvergleich/Embeddings, B14 Git/Paketbeschaffung, B18 Linux-Gast | – | danach |
+| **M8 Linux-Gast** (vorgezogen) | B18 Linux-Gast (Debian 13), mehrere VMs mit Start bei Bedarf, Gastauswahl je Projekt/Toolchain | – | vor Doku/Paketierung |
+| Erweiterungen | B13 Modellvergleich/Embeddings, B14 Git/Paketbeschaffung | – | danach |
 
 Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 → B12 → B19 → B10 → B11.
 
@@ -126,6 +127,30 @@ Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 →
 
 Alle SEC-01–24 und AC01–17; Demo (§16) in allen Sprachen; Runbook durchgespielt; Doku auf Deutsch.
 
+## M8 – Linux-Gast (vorgezogen)
+
+- **B18:** Debian 13 (Cloud-Abbild, generic, amd64) als zweite Offline-VM ohne Netzwerkkarte; Aufbau aus dem Rohabbild,
+  Einrichtung über cloud-init (Seed-Laufwerk CIDATA), Rückweg wie unter Windows über Transfer-VHDX und KVP.
+- Mehrere VMs je Sitzung (Windows und Linux), jede startet erst bei Bedarf und fährt nach einer einstellbaren
+  Leerlaufzeit herunter (Standard 30 min).
+- Gastauswahl: `toolchainGuests` (je Toolchain) → `guestOs` (Projekt) → `sandbox.defaultGuestOs` (Konfiguration);
+  Toolchains haben je System eigene Namen (`dotnet` / `dotnet-linux`), ihr Manifest legt `guest` fest.
+
+**Umgesetzt (Stand 20.10.2026):** Verträge (`GuestOs`, `ProjectConfig.guestOs/toolchainGuests`, `ToolchainManifest.guest`),
+Gastauswahl mit Fehlern bei ausdrücklichem Widerspruch, Linux-Regeln im Toolchain-Validator (`/opt/toolchains/<name>`,
+`{system}/bash|sh|python3`, tar.gz/tar.xz, `.deb`). `HyperVSandbox`: Zustand „ausgeschaltet, startet beim nächsten Job“,
+Leerlauf-Abschaltung (`idleMinutes`, `stopAction` ShutDown/Save), Start bei Bedarf vor dem Erzeugen des Jobs,
+Copy-VMFile-Wiederholung direkt nach dem Start, ein Aufbau zur Zeit. `SandboxPool` (Sammelzustand, Neuaufbau,
+Not-Aus für alle), `MultiGuestToolAdapter` (Toolchain-Aktionen in der VM ihres Systems, Snapshot-Abgleich durch
+Wiederholung von Basisarchiv und bereits freigegebenen Patch.Apply-Vorschlägen mit Prüfung der Snapshot-IDs).
+Linux-Aufbau `New-LocalAiLinuxSandbox.ps1` (Rohabbild → dynamische VHDX ohne Nullblöcke, FAT32-Seed, Secure Boot mit
+Microsoft-UEFI-CA), Bausteine `Get-LocalAiLinuxPrerequisites.ps1` (Debian-Abbild, python-build-standalone, Wheels,
+hyperv-daemons; `prerequisites.json` mit Hashes, Prüfung beim Aufbau). Gast: `provision.sh` + `localai.guest.provision`
+(Netzprüfungen, Toolchains, systemd-Dienste für Worker/KVP/Dateikopie, Seed unbrauchbar machen, cloud-init aus, Bericht),
+Worker mit KVP-Pool-Datei, Transfer-Laufwerk über `/sys/block`, Werkzeugprozesse als `localai-tools` mit eigenem
+Netzwerk-Namespace, `no_new_privs`, Grenzen und Aufräumen. Vorlagen `toolchains/python-linux`, `toolchains/dotnet-linux`,
+Projekte `config/m8-linux-project.json`, `config/m8-gemischt-project.json`. Prüfanleitung `docs/pruefung-M8.md`.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
@@ -136,3 +161,4 @@ Alle SEC-01–24 und AC01–17; Demo (§16) in allen Sprachen; Runbook durchgesp
 | Hash C# ≠ Python | gemeinsame Testvektoren |
 | HALCON-Lizenz in der VM ohne Netzwerkkarte/USB (MAC- oder Dongle-Bindung greift nicht) | Lizenz ohne Bindung (z. B. Evaluierung) über `deploy`; ohne Lizenz bleibt die XML-Prüfung der `.hdev`-Patches, Toolchain `hdevelop` entfällt |
 | Windows-/WPF-/Hyper-V-Teile nur auf Danis PC testbar | Prüfanleitung + Skripte je Meilenstein, kurze Feedbackschleifen |
+| Linux-Gast: hyperv-daemons (KVP, Dateikopie über uio ab Kernel 6.10) verhalten sich je Debian-Stand anders | eigene systemd-Einheiten, Prüfung im Bericht („Dienst für Copy-VMFile läuft nicht“), Protokoll `/var/log/localai-provision.log` |

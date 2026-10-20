@@ -144,7 +144,7 @@ public sealed class HyperVTests : IAsyncLifetime
         }, session: session, fingerprint: () => fingerprint, codeFingerprint: code is null ? null : () => code, buildUpdate: buildUpdate);
         vm.Start();
         var deadline = DateTime.UtcNow.AddSeconds(90);
-        while (vm.Status.State is not (SandboxState.Ready or SandboxState.Locked) && DateTime.UtcNow < deadline)
+        while (vm.Status.State is not (SandboxState.Ready or SandboxState.Locked or SandboxState.Stopped) && DateTime.UtcNow < deadline)
         {
             await Task.Delay(100, TestContext.Current.CancellationToken);
         }
@@ -184,8 +184,8 @@ public sealed class HyperVTests : IAsyncLifetime
         // Absturz während der Sitzung (kein sauberes Ende): keine Wiederverwendung.
         Assert.Null(HyperVSandbox.LoadReusableSession(settings));
         await vm1.DisposeAsync();
-        Assert.Equal(["Save"], host.StateActions);
-        Assert.Contains("gespeichert", vm1.Status.Text, StringComparison.Ordinal);
+        Assert.Equal(["Stop"], host.StateActions); // M8: herunterfahren statt Arbeitsspeicher auf die Platte schreiben
+        Assert.Contains("heruntergefahren", vm1.Status.Text, StringComparison.Ordinal);
 
         // Programm neu gestartet: gleiche Sitzung, Sequenz geht weiter, kein Neuaufbau.
         var second = HyperVSandbox.LoadReusableSession(settings);
@@ -193,11 +193,15 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.Equal("s-erste", second!.SessionId);
         Assert.Equal(first.LastSequence, second.LastSequence);
         var vm2 = await StartReusableAsync(settings, host, second, "fp-1");
-        Assert.True(vm2.Status.State == SandboxState.Ready, vm2.Status.Text);
-        Assert.Contains("wiederverwendet", vm2.Status.Text, StringComparison.Ordinal);
+        // M8: bleibt ausgeschaltet, bis ein Job sie braucht.
+        Assert.True(vm2.Status.State == SandboxState.Stopped, vm2.Status.Text);
+        Assert.Contains("startet beim nächsten Job", vm2.Status.Text, StringComparison.Ordinal);
+        Assert.Equal(["Stop"], host.StateActions);
         Assert.Equal(1, host.Builds);
         var read = await ReadOnceAsync(vm2, second, root, "b");
         Assert.True(read.Status == ResultStatus.Succeeded, read.TargetResults[0].Message);
+        Assert.Equal(["Stop", "Start"], host.StateActions);
+        Assert.Contains("bei Bedarf gestartet", vm2.Status.Text, StringComparison.Ordinal);
         Assert.Equal("# Projekt in der VM\nZeile 2\n", read.TargetResults[0].Text);
         await vm2.DisposeAsync();
 
@@ -267,7 +271,7 @@ public sealed class HyperVTests : IAsyncLifetime
         var again = HyperVSandbox.LoadReusableSession(settings)!;
         var vm3 = await StartReusableAsync(settings, host, again, "basis-1", "code-2", Build);
         _cleanup.Add(vm3);
-        Assert.True(vm3.Status.State == SandboxState.Ready, vm3.Status.Text);
+        Assert.True(vm3.Status.State == SandboxState.Stopped, vm3.Status.Text);
         Assert.DoesNotContain("aktualisiert", vm3.Status.Text, StringComparison.Ordinal);
         Assert.Equal(1, updates);
         Assert.Equal(1, host.Builds);
@@ -301,8 +305,7 @@ public sealed class HyperVTests : IAsyncLifetime
         await vm1.DisposeAsync();
         var vm2 = await startTask;
         _cleanup.Add(vm2);
-        Assert.True(vm2.Status.State == SandboxState.Ready, vm2.Status.Text);
-        Assert.Contains("wiederverwendet", vm2.Status.Text, StringComparison.Ordinal);
+        Assert.True(vm2.Status.State == SandboxState.Stopped, vm2.Status.Text);
         Assert.Equal(1, host.Builds);
         Assert.Equal("s-1", waiting.SessionId);
         var read = await ReadOnceAsync(vm2, waiting, Project(), "w");
@@ -530,7 +533,7 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.True(board.PostProgress("setupcomplete"));
         Assert.False(board.PostHeartbeat("Ok Apps"));
         Assert.True(board.PostHeartbeat("OkApplicationsUnknown"));
-        Assert.Equal("Windows eingerichtet, Provisionierung startet; Heartbeat: Windows läuft", board.DescribeGuest());
+        Assert.Equal("Windows eingerichtet, Provisionierung startet; Heartbeat: System läuft", board.DescribeGuest());
     }
 
     [Fact, Trait("Pruefung", "R17")]
@@ -651,7 +654,7 @@ public sealed class HyperVTests : IAsyncLifetime
     }
 
     /// <summary>Hyper-V-Ersatz: der echte Python-Worker im VM-Modus mit Datei-Eingang, Rohlaufwerk und Signaldatei.</summary>
-    private sealed class SimulatedHost(HyperVSettings settings, string guestRoot) : IHyperVHost, IAsyncDisposable
+    internal sealed class SimulatedHost(HyperVSettings settings, string guestRoot) : IHyperVHost, IAsyncDisposable
     {
         private readonly List<Process> _processes = [];
         private string Raw => Path.Combine(GuestRoot, "transfer.raw");
@@ -671,6 +674,14 @@ public sealed class HyperVTests : IAsyncLifetime
         public string GuestScriptsDir => Path.Combine(GuestRoot, "root");
         private string[]? _workerArgs;
         private volatile bool _stopping;
+
+        /// <summary>Zustand der simulierten VM (Running, Off, Saved).</summary>
+        public string State { get; private set; } = "Off";
+
+        /// <summary>So oft scheitert Copy-VMFile direkt nach einem Start (Dienste im Gast noch nicht bereit).</summary>
+        public int CopyFailuresAfterStart { get; set; }
+
+        private int _copyFailures;
 
         public Task<HostCheck> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(new HostCheck(true, "simuliert"));
 
@@ -702,6 +713,7 @@ public sealed class HyperVTests : IAsyncLifetime
             _workerArgs = ["--inbox", Path.Combine(GuestRoot, "inbox"), "--work", Path.Combine(GuestRoot, "work"),
                 "--key-file", guestKey, "--require-ready", "--poll-ms", "20", "--guest-root", GuestScriptsDir, "--package-dir", PackageDir, .. common];
             StartSupervised(_workerArgs);
+            State = "Running";
             // Provisionierung: Bericht über das Transfer-Laufwerk.
             var report = Path.Combine(GuestRoot, "report.json");
             await File.WriteAllTextAsync(report, ReportJson, cancellationToken);
@@ -739,8 +751,17 @@ public sealed class HyperVTests : IAsyncLifetime
 
         public Task<int> CopyToGuestAsync(IReadOnlyList<string> files, string guestDirectory, CancellationToken cancellationToken)
         {
-            Assert.Equal(HyperVSandbox.GuestInbox, guestDirectory);
+            Assert.Equal(settings.IsLinux ? HyperVSandbox.LinuxGuestInbox : HyperVSandbox.GuestInbox, guestDirectory);
             Assert.EndsWith(".ready", files[^1], StringComparison.Ordinal);
+            if (State != "Running")
+            {
+                throw new HyperVException("Copy-VMFile: VM läuft nicht");
+            }
+            if (_copyFailures > 0)
+            {
+                _copyFailures--;
+                throw new HyperVException("Copy-VMFile: Gastdienst noch nicht bereit");
+            }
             JobsCopied++;
             if (!DropJobs)
             {
@@ -761,26 +782,36 @@ public sealed class HyperVTests : IAsyncLifetime
             return Task.FromResult(Nics);
         }
 
-        public Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken) => Task.FromResult(new VmInfo(_workerArgs is not null, "Saved", Nics));
+        public Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken) => Task.FromResult(new VmInfo(_workerArgs is not null, State, Nics));
 
         /// <summary>Speichern = Worker anhalten (Gastdateien bleiben), Fortsetzen = Worker mit demselben Zustand weiter.</summary>
         public Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken)
         {
-            StateActions.Add(action);
-            if (action is "Save" or "TurnOff")
+            lock (StateActions)
+            {
+                StateActions.Add(action);
+            }
+            if (action is "Save" or "TurnOff" or "Stop")
             {
                 StopAll();
+                State = action == "Save" ? "Saved" : "Off";
             }
-            else if (Nics == 0 && _workerArgs is not null && _processes.All(p => p.HasExited))
+            else if (Nics == 0 && _workerArgs is not null)
             {
-                StartSupervised(_workerArgs);
+                if (_processes.All(p => p.HasExited))
+                {
+                    StartSupervised(_workerArgs);
+                }
+                State = "Running";
+                _copyFailures = CopyFailuresAfterStart;
             }
-            return Task.FromResult(new VmInfo(true, action switch { "Save" => "Saved", "TurnOff" => "Off", _ => "Running" }, Nics));
+            return Task.FromResult(new VmInfo(true, State, Nics));
         }
 
         public Task RemoveVmAsync(CancellationToken cancellationToken)
         {
             StopAll();
+            State = "Off";
             _workerArgs = null;
             return Task.CompletedTask;
         }

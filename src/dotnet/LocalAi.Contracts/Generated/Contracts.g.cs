@@ -159,7 +159,9 @@ public sealed partial record ProjectConfig(
     [property: JsonPropertyName("projectId")] string ProjectId,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("grants")] IReadOnlyList<FolderGrant> Grants,
-    [property: JsonPropertyName("toolchains"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Toolchains = null);
+    [property: JsonPropertyName("toolchains"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Toolchains = null,
+    [property: JsonPropertyName("guestOs"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? GuestOs = null,
+    [property: JsonPropertyName("toolchainGuests"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, GuestOs>? ToolchainGuests = null);
 
 public sealed partial record SnapshotFile(
     [property: JsonPropertyName("path")] string Path,
@@ -214,6 +216,13 @@ public enum ToolchainInstallKind
     Archive,
     Installer,
     None,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<GuestOs>))]
+public enum GuestOs
+{
+    Windows,
+    Linux,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<ToolchainParameterType>))]
@@ -311,6 +320,7 @@ public sealed partial record ToolchainManifest(
     [property: JsonPropertyName("install")] ToolchainInstall Install,
     [property: JsonPropertyName("actions")] IReadOnlyDictionary<string, ToolchainAction> Actions,
     [property: JsonPropertyName("testResultFormat")] TestResultFormat TestResultFormat,
+    [property: JsonPropertyName("guest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? Guest = null,
     [property: JsonPropertyName("deploy"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolchainCopy>? Deploy = null,
     [property: JsonPropertyName("postInstall"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ToolchainCommand>? PostInstall = null,
     [property: JsonPropertyName("selfTest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ToolchainSelfTest? SelfTest = null,
@@ -332,7 +342,8 @@ public sealed partial record ToolchainInfo(
     [property: JsonPropertyName("problems")] IReadOnlyList<string> Problems,
     [property: JsonPropertyName("usedByProject")] bool UsedByProject,
     [property: JsonPropertyName("registeredDigest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RegisteredDigest = null,
-    [property: JsonPropertyName("licenseNote"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LicenseNote = null);
+    [property: JsonPropertyName("licenseNote"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LicenseNote = null,
+    [property: JsonPropertyName("guest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? Guest = null);
 
 /// <summary>Gespeicherte Registrierung mit den bei der Bestätigung festgehaltenen Datei-Hashes.</summary>
 public sealed partial record ToolchainRegistration(

@@ -148,6 +148,8 @@ TEXTS = {
     "ToolchainRegistered": "registriert",
     "ToolchainNotRegistered": "nicht registriert",
     "ToolchainUsedByProject": "vom Projekt verwendet",
+    "ToolchainGuestWindows": "Windows-VM",
+    "ToolchainGuestLinux": "Linux-VM",
     "ToolchainLicense": "Lizenz: {0}",
     "ToolchainDetails": "{0} Dateien · {1} · Prüfsumme {2}… · {3}",
     "ToolchainRegisteredInfo": "Toolchain registriert: {0}",

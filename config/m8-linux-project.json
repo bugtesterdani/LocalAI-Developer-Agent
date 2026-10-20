@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "projectId": "m8-linux",
+  "name": "M8: Kontakte (Python) in der Linux-VM",
+  "guestOs": "Linux",
+  "grants": [
+    {
+      "grantId": "kontakte",
+      "root": "samples/m7-demo-python",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": ["python-linux"]
+}

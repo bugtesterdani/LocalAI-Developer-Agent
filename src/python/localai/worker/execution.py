@@ -9,6 +9,10 @@ Sicherheitsmodell (Spezifikation §8, SEC-13/-20/-21):
 * Unter Windows läuft der Prozess mit einem eingeschränkten Token (alle Privilegien entfernt) auf niedriger
   Integritätsstufe in einem Job Object: er kann Worker, Toolchains und Systemdateien nicht verändern (keine
   Schreibrechte „nach oben“), und am Ende werden alle Prozesse des Baums beendet.
+* Im Linux-Gast (M8) läuft der Prozess als eigener Benutzer ``localai-tools`` ohne Zusatzgruppen, mit
+  ``no_new_privs``, in einem eigenen, leeren Netzwerk-Namespace (nicht einmal Loopback) und mit Grenzen für
+  Speicher und Prozesse; nach jedem Schritt werden alle Prozesse dieses Benutzers beendet und seine Dateien in
+  /tmp, /var/tmp und /dev/shm gelöscht.
 * Umgebung minimal und fest; Zeitgrenze aus dem Manifest; Ausgabe begrenzt.
 """
 
@@ -40,6 +44,10 @@ from localai.worker.snapshot import SnapshotIndex
 ACTIONS = {"Toolchain.Restore": ["restore"], "Toolchain.Build": ["build"], "Toolchain.Test": ["test"],
            "Toolchain.Run": ["run"], "Toolchain.Lint": ["lint", "format"]}
 GUEST_ROOT = "C:\\Toolchains\\"
+LINUX_GUEST_ROOT = "/opt/toolchains/"
+# Programme aus dem Linux-Gast selbst, die ein Manifest als "{system}/…" nennen darf.
+LINUX_SYSTEM_PREFIX = "{system}/"
+LINUX_SYSTEM_BINARIES = {"bash": "/usr/bin/bash", "sh": "/usr/bin/sh", "python3": "/usr/bin/python3"}
 # Programme aus Windows selbst (System32), die ein Manifest als "{system}\\…" nennen darf (Batch, PowerShell 5.1).
 SYSTEM_PREFIX = "{system}\\"
 SYSTEM_BINARIES = {"cmd.exe": ("cmd.exe",),
@@ -67,7 +75,7 @@ WORKER_ENV = {
     "DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK": "true",
     "DOTNET_NOLOGO": "1",
 }
-BLOCKED_ENV = {"PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH"}
+BLOCKED_ENV = {"PATH", "PATHEXT", "COMSPEC", "SYSTEMROOT", "WINDIR", "PSMODULEPATH", "LD_PRELOAD", "LD_AUDIT"}
 # Feste Windows-Systemvariablen ohne Geheimnisse, die Werkzeuge voraussetzen. Ohne ProgramFiles(x86) bricht z. B.
 # NuGet im MSBuild-Prozess mit „Value cannot be null (path1)“ ab (Exitcode 0xE0434352).
 WINDOWS_SYSTEM_ENV = (
@@ -120,9 +128,20 @@ class ToolchainCatalog:
         if not path.is_file():
             raise ExecError(f"Toolchain '{name}' ist in dieser Sandbox nicht installiert")
         manifest = ToolchainManifest.model_validate_json(path.read_text(encoding="utf-8-sig"))
-        if manifest.name != name or manifest.guest_path != GUEST_ROOT + name:
+        if manifest.name != name or manifest.guest_path != expected_guest_path(manifest):
             raise ExecError(f"Toolchain '{name}': Manifest passt nicht zur Installation")
-        return Toolchain(manifest, self.root / name, self.install_root / name)
+        install_root = self.install_root
+        if self.install_root == pathlib.Path(GUEST_ROOT) and is_linux_manifest(manifest):
+            install_root = pathlib.Path(LINUX_GUEST_ROOT)
+        return Toolchain(manifest, self.root / name, install_root / name)
+
+
+def is_linux_manifest(manifest: ToolchainManifest) -> bool:
+    return manifest.guest is not None and manifest.guest.value == "Linux"
+
+
+def expected_guest_path(manifest: ToolchainManifest) -> str:
+    return (LINUX_GUEST_ROOT if is_linux_manifest(manifest) else GUEST_ROOT) + manifest.name
 
 
 def binary_path(toolchain: Toolchain, name: str, system_dir: pathlib.Path | None = None) -> pathlib.Path:
@@ -130,6 +149,13 @@ def binary_path(toolchain: Toolchain, name: str, system_dir: pathlib.Path | None
     binary = next((b for b in toolchain.manifest.binaries if b.name == name), None)
     if binary is None:
         raise ExecError(f"Binary {name} nicht deklariert")
+    if is_linux_manifest(toolchain.manifest) and binary.path.startswith(LINUX_SYSTEM_PREFIX):
+        target = LINUX_SYSTEM_BINARIES.get(binary.path[len(LINUX_SYSTEM_PREFIX):])
+        if target is None:
+            raise ExecError(f"Binary {name}: Programm des Gastsystems nicht erlaubt ({binary.path})")
+        if binary.sha256:
+            raise ExecError(f"Binary {name}: sha256 ist für Programme des Gastsystems nicht vorgesehen")
+        return pathlib.Path(target)
     raw = binary.path.replace("/", "\\")
     if raw.lower().startswith(SYSTEM_PREFIX):
         parts = SYSTEM_BINARIES.get(raw[len(SYSTEM_PREFIX):].lower())
@@ -279,6 +305,7 @@ def environment(toolchain: Toolchain, dirs: JobDirs, fixed: dict[str, str]) -> d
         (home / "ProgramData").mkdir(exist_ok=True)
     else:
         env["PATH"] = os.pathsep.join([str(toolchain.install_dir), "/usr/bin", "/bin"])
+        env.update({"TMPDIR": str(temp), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
     env.update({
         "USERPROFILE": str(home), "HOME": str(home), "APPDATA": str(roaming), "LOCALAPPDATA": str(local),
         "TEMP": str(temp), "TMP": str(temp), "DOTNET_CLI_HOME": str(home),
@@ -301,13 +328,13 @@ class ProcessOutcome:
 
 
 def run_process(exe: pathlib.Path, args: list[str], cwd: pathlib.Path, env: dict[str, str], timeout: int,
-                log_path: pathlib.Path, low_integrity: bool, memory_mb: int = 0) -> ProcessOutcome:
+                log_path: pathlib.Path, low_integrity: bool, memory_mb: int = 0, tools_user: Any = None) -> ProcessOutcome:
     started = time.monotonic()
     if os.name == "nt":
         from localai.worker import winproc
         exit_code, timed_out = winproc.run(str(exe), args, str(cwd), env, timeout, str(log_path), low_integrity, memory_mb)
     else:
-        exit_code, timed_out = _run_posix(str(exe), args, cwd, env, timeout, log_path)
+        exit_code, timed_out = _run_posix(str(exe), args, cwd, env, timeout, log_path, tools_user, memory_mb)
     size = log_path.stat().st_size if log_path.exists() else 0
     with open(log_path, "rb") if log_path.exists() else _Empty() as f:
         if size > MAX_LOG_BYTES:
@@ -334,12 +361,16 @@ class _Empty:
 
 
 def _run_posix(exe: str, args: list[str], cwd: pathlib.Path, env: dict[str, str], timeout: int,
-               log_path: pathlib.Path) -> tuple[int, bool]:
+               log_path: pathlib.Path, tools_user: Any = None, memory_mb: int = 0) -> tuple[int, bool]:
     import signal
 
+    preexec = None
+    if tools_user is not None:
+        from localai.worker import linproc
+        preexec = linproc.isolation(tools_user, memory_mb)
     with open(log_path, "wb") as log:
-        process = subprocess.Popen([exe, *args], cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=log,
-                                   stderr=subprocess.STDOUT, start_new_session=True)
+        process = subprocess.Popen([exe, *args], cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=log,  # noqa: PLW1509
+                                   stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=preexec)
         timed_out = False
         try:
             process.wait(timeout=timeout)
@@ -350,6 +381,10 @@ def _run_posix(exe: str, args: list[str], cwd: pathlib.Path, env: dict[str, str]
                 os.killpg(process.pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
+            if tools_user is not None:
+                # Auch Prozesse, die sich mit setsid aus der Gruppe gelöst haben (alle des Werkzeugbenutzers).
+                from localai.worker import linproc
+                linproc.kill_user_processes(tools_user.uid)
             process.wait()
     return (process.returncode if not timed_out else -1), timed_out
 
@@ -594,10 +629,13 @@ class ExecResult:
 
 
 class Executor:
-    def __init__(self, catalog: ToolchainCatalog, jobs_root: pathlib.Path, low_integrity: bool = True) -> None:
+    def __init__(self, catalog: ToolchainCatalog, jobs_root: pathlib.Path, low_integrity: bool = True,
+                 tools_user: Any = None) -> None:
         self.catalog = catalog
         self.jobs_root = jobs_root
         self.low_integrity = low_integrity and os.name == "nt"
+        # Linux-Gast: linproc.ToolUser (Werkzeugprozesse als eigener Benutzer, eigener Netzwerk-Namespace).
+        self.tools_user = tools_user if os.name != "nt" else None
 
     def run(self, tool: str, job_id: str, arguments: dict[str, Any], index: SnapshotIndex) -> ExecResult:
         toolchain = self.catalog.get(arguments.get("toolchain"))
@@ -628,6 +666,9 @@ class Executor:
                      "packages": str(packages if packages.is_dir() else dirs.root / "no-packages")}
             (dirs.root / "no-packages").mkdir(exist_ok=True)
             env = environment(toolchain, dirs, fixed)
+            if self.tools_user is not None:
+                from localai.worker import linproc
+                linproc.hand_over(dirs.root, self.tools_user)
             system_temp = SystemTempGuard.for_windows() if self.low_integrity else None
             started = time.monotonic()
             logs: list[bytes] = []
@@ -637,7 +678,8 @@ class Executor:
                 args = expand(step, params, fixed, dirs.repo)
                 shown.append(" ".join([exe.name, *[a.replace(str(dirs.root), "{work}") for a in args]]))
                 remaining = max(1, int(timeout - (time.monotonic() - started)))
-                outcome = run_process(exe, args, dirs.repo, env, remaining, dirs.root / f"output-{number}.log", self.low_integrity)
+                outcome = run_process(exe, args, dirs.repo, env, remaining, dirs.root / f"output-{number}.log", self.low_integrity,
+                                      tools_user=self.tools_user)
                 if len(steps) > 1:
                     logs.append(f"\n> Schritt {number}/{len(steps)}: {shown[-1]}\n".encode())
                 logs.append(outcome.log)
@@ -654,6 +696,10 @@ class Executor:
             if system_temp is not None:
                 system_temp.cleanup()
         finally:
+            if self.tools_user is not None:
+                from localai.worker import linproc
+                linproc.kill_user_processes(self.tools_user.uid)
+                linproc.cleanup_temp(self.tools_user.uid)
             remove_tree(dirs.root)
         state = "Zeitüberschreitung" if timed_out else f"Exitcode {exit_code}"
         message = f"{toolchain.manifest.name} {action_name}: {state} nach {seconds:.0f} s"

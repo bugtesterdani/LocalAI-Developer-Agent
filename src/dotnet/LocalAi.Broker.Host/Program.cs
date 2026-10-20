@@ -60,7 +60,7 @@ var clock = SystemClock.Instance;
 CountingTestAdapter? testAdapter;
 IToolAdapter adapter;
 IPolicyContext policy;
-HyperVSandbox? vm;
+SandboxPool? vm;
 SandboxParts parts;
 ToolchainRegistry? toolchains = null;
 IReadOnlyList<string> projectToolchains = [];
@@ -117,7 +117,7 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
     Activity = activity,
     Inbox = inbox,
     Orchestrator = orchestrator,
-    SandboxStatus = () => vm?.Status.Text,
+    SandboxStatus = () => vm?.StatusText,
     RebuildSandbox = vm is null ? null : vm.RebuildAsync,
     ContinueSandbox = vm is null ? null : vm.ContinueAsync,
     Toolchains = toolchains,
@@ -152,16 +152,33 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
 if (vm is not null)
 {
     // Aufbau im Hintergrund; Fortschritt als Ereignis an die Oberfläche und ins Journal.
-    vm.StatusChanged += s =>
+    vm.StatusChanged += text =>
     {
         try
         {
-            broker.PublishInfo("sandbox.status", s.Text);
+            broker.PublishInfo("sandbox.status", text);
         }
         catch (ObjectDisposedException)
         {
         }
     };
+    foreach (var note in vm.Notes)
+    {
+        broker.PublishInfo("sandbox.guest", note);
+    }
+    if (parts.Multi is not null)
+    {
+        parts.Multi.Info = text =>
+        {
+            try
+            {
+                broker.PublishInfo("sandbox.replicated", text);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        };
+    }
     vm.Start();
 }
 var serverTask = server.RunAsync(shutdown.Token);
@@ -213,6 +230,7 @@ finally
     {
         await vm.DisposeAsync();
     }
+    parts.Multi?.Dispose();
     await broker.DisposeAsync();
 }
 return 0;
@@ -293,38 +311,61 @@ static SandboxParts CreateSandbox(
             var (web, store) = CreateWeb(options);
             var export = new ExportStaging(Path.Combine(options.DataDirectory, "export"), new ProjectPolicyContext(project, registry), SystemClock.Instance);
             export.Cleanup();
-            var settings = options.HyperV ?? throw new InvalidDataException("sandbox.hyperv fehlt in config/localai.json");
-            // Große Toolchains (C++-Build-Tools, HALCON) brauchen länger: Aufbauzeit mindestens Windows + 3× erwartete Installationszeit.
-            var needed = ToolchainBuildTime.Minimum(toolchains!.Registrations, project.Toolchains ?? []);
-            if (settings.BuildTimeout < needed)
-            {
-                settings = settings with { BuildTimeout = needed };
-            }
             context = new ProjectPolicyContext(project, registry, new RegisteredToolchainCatalog(toolchains!)) { WebCaptures = store, Exports = export };
-            // reuseVm: Sitzung der zuletzt sauber beendeten VM übernehmen (Schlüssel, Sequenz); sonst neue Sitzung.
-            var session = HyperVSandbox.LoadReusableSession(settings) ?? new SandboxSession(sessionId);
-            var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
-                Path.Combine(options.DataDirectory, "hyperv.log"));
-            var vm = new HyperVSandbox(settings, host, guestDir => Task.Run(() =>
+            // M8: Heimat-VM des Projekts und VM je Toolchain (toolchainGuests → guestOs → sandbox.defaultGuestOs).
+            var plan = GuestSelection.Resolve(project, options.DefaultGuestOs, toolchains!.GuestOf);
+            var vms = new Dictionary<GuestOs, HyperVSandbox>();
+            var adapters = new Dictionary<GuestOs, SandboxToolAdapter>();
+            MultiGuestToolAdapter? multi = null;
+            foreach (var guest in plan.Required)
             {
-                // Toolchains zuerst bereitstellen und gegen die Registrierung prüfen (SEC-19/SEC-24).
-                var staged = toolchains!.Stage(Path.Combine(guestDir, "LocalAi", "toolchain-src"), CancellationToken.None);
-                GuestPayloadBuilder.Build(guestDir, GuestPayloadSources.FromRepository(options.RepoRoot), session.Key, settings.TransferDiskBytes, staged,
-                    settings.LowIntegrityTools);
-            }), project.Toolchains ?? [], session,
-                () => SandboxFingerprint.ComputeBase(settings, GuestPayloadSources.FromRepository(options.RepoRoot), toolchains!.Registrations,
-                    project.Toolchains ?? []),
-                () => SandboxFingerprint.ComputeCode(settings, GuestPayloadSources.FromRepository(options.RepoRoot)),
-                zip => Task.Run(() => GuestPayloadBuilder.BuildUpdate(zip, GuestPayloadSources.FromRepository(options.RepoRoot),
-                    settings.TransferDiskBytes, project.Toolchains ?? [], settings.LowIntegrityTools)));
-            var adapter = new SandboxToolAdapter(session, vm, context, registry, Path.Combine(options.DataDirectory, "sandbox-scratch"), SystemClock.Instance)
-            {
-                JobTimeout = TimeSpan.FromMinutes(settings.JobTimeoutMinutes),
-                SnapshotTimeout = TimeSpan.FromMinutes(settings.SnapshotTimeoutMinutes),
-                ExecutionMargin = TimeSpan.FromMinutes(settings.ToolchainExtraMinutes),
-            };
-            return new SandboxParts(new RoutingToolAdapter(adapter, web, export), context, null, vm, web, store,
-                StopExecution: vm.EmergencyStopAsync);
+                var linux = guest == GuestOs.Linux;
+                var settings = (linux ? options.HyperVLinux : options.HyperV) ?? throw new InvalidDataException(linux
+                    ? "sandbox.hypervLinux fehlt in config/localai.json – das Projekt braucht eine Linux-VM (guestOs, toolchainGuests oder eine Linux-Toolchain)"
+                    : "sandbox.hyperv fehlt in config/localai.json");
+                var guestToolchains = plan.ToolchainsFor(guest, project.Toolchains ?? []);
+                // Große Toolchains (C++-Build-Tools, HALCON) brauchen länger: Aufbauzeit mindestens System + 3× erwartete Installationszeit.
+                var needed = ToolchainBuildTime.Minimum(toolchains!.Registrations, guestToolchains, guest);
+                if (settings.BuildTimeout < needed)
+                {
+                    settings = settings with { BuildTimeout = needed };
+                }
+                var vmSettings = settings;
+                // reuseVm: Sitzung der zuletzt sauber beendeten VM übernehmen (Schlüssel, Sequenz); sonst neue Sitzung.
+                var session = HyperVSandbox.LoadReusableSession(settings)
+                              ?? new SandboxSession(guest == plan.Home ? sessionId : Guid.NewGuid().ToString("D"));
+                var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
+                    Path.Combine(options.DataDirectory, linux ? "hyperv-linux.log" : "hyperv.log"));
+                GuestPayloadSources Sources() => linux
+                    ? GuestPayloadSources.ForLinux(options.RepoRoot, vmSettings.LinuxPrerequisites!)
+                    : GuestPayloadSources.FromRepository(options.RepoRoot);
+                var vm = new HyperVSandbox(settings, host, guestDir => Task.Run(() =>
+                {
+                    // Toolchains zuerst bereitstellen und gegen die Registrierung prüfen (SEC-19/SEC-24).
+                    var staged = toolchains!.Stage(GuestPayloadBuilder.ToolchainStaging(guestDir, guest), CancellationToken.None, guestToolchains);
+                    GuestPayloadBuilder.Build(guestDir, Sources(), session.Key, vmSettings, staged);
+                }), guestToolchains, session,
+                    () => SandboxFingerprint.ComputeBase(vmSettings, Sources(), toolchains!.Registrations, guestToolchains),
+                    () => SandboxFingerprint.ComputeCode(vmSettings, Sources()),
+                    zip => Task.Run(() => GuestPayloadBuilder.BuildUpdate(zip, Sources(), vmSettings.TransferDiskBytes, guestToolchains,
+                        vmSettings.LowIntegrityTools, guest)));
+                var home = guest == plan.Home;
+                adapters[guest] = new SandboxToolAdapter(session, vm, context, registry,
+                    Path.Combine(options.DataDirectory, linux ? "sandbox-scratch-linux" : "sandbox-scratch"), SystemClock.Instance)
+                {
+                    JobTimeout = TimeSpan.FromMinutes(settings.JobTimeoutMinutes),
+                    SnapshotTimeout = TimeSpan.FromMinutes(settings.SnapshotTimeoutMinutes),
+                    ExecutionMargin = TimeSpan.FromMinutes(settings.ToolchainExtraMinutes),
+                    RetainSnapshot = home ? (p, m, a) => multi?.RetainSnapshot(p, m, a) : null,
+                };
+                vms[guest] = vm;
+            }
+            IToolAdapter sandbox = adapters.Count == 1
+                ? adapters.Values.Single()
+                : multi = new MultiGuestToolAdapter(plan, adapters, Path.Combine(options.DataDirectory, "sandbox-abgleich"));
+            var pool = new SandboxPool(vms) { Notes = plan.Notes };
+            return new SandboxParts(new RoutingToolAdapter(sandbox, web, export), context, null, pool, web, store,
+                StopExecution: pool.EmergencyStopAsync, Multi: multi);
         }
         default:
             throw new NotSupportedException($"Betriebsart {options.Mode} wird nicht unterstützt");
@@ -341,8 +382,9 @@ internal sealed record SandboxParts(
     IToolAdapter Adapter,
     IPolicyContext Policy,
     CountingTestAdapter? Test,
-    HyperVSandbox? Vm,
+    SandboxPool? Vm,
     WebToolAdapter? Web = null,
     WebCaptureStore? Captures = null,
     Func<Task<string>>? StopExecution = null,
-    Action? AfterRelease = null);
+    Action? AfterRelease = null,
+    MultiGuestToolAdapter? Multi = null);

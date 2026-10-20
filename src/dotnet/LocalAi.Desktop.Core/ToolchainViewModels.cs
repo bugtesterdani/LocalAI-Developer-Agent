@@ -30,6 +30,7 @@ public sealed class ToolchainItemViewModel
         get
         {
             var parts = new List<string> { UiText.Get(Info.Registered ? "ToolchainRegistered" : "ToolchainNotRegistered") };
+            parts.Add(UiText.Get(Info.Guest == LocalAi.Contracts.GuestOs.Linux ? "ToolchainGuestLinux" : "ToolchainGuestWindows"));
             if (Info.UsedByProject)
             {
                 parts.Add(UiText.Get("ToolchainUsedByProject"));

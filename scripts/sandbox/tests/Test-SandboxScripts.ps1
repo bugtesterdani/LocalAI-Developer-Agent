@@ -48,6 +48,20 @@ try { throw (New-Object System.InvalidOperationException('Fehler beim Einbinden'
 catch { $text = Get-LocalAiErrorText -ErrorRecord $_ }
 Expect ($text -like 'Fehler beim Einbinden | Virtuelle Festplatten muessen unkomprimiert sein zweite Zeile') "Fehlerkette: $text"
 
+# 3c – Rohabbild (Linux-Gast): Daten landen an derselben Stelle, Nullblöcke werden übersprungen
+Initialize-LocalAiRawWriter
+$rawDir = Join-Path ([System.IO.Path]::GetTempPath()) ('lai-raw-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $rawDir | Out-Null
+$image = New-Object byte[] (12MB + 1000)
+$image[5] = 1; $image[9MB] = 2; $image[12MB + 999] = 3
+[System.IO.File]::WriteAllBytes((Join-Path $rawDir 'a.raw'), $image)
+[System.IO.File]::WriteAllBytes((Join-Path $rawDir 'disk.bin'), (New-Object byte[] (16MB)))
+$written = [LocalAiRawWriter]::Copy((Join-Path $rawDir 'a.raw'), (Join-Path $rawDir 'disk.bin'))
+$disk = [System.IO.File]::ReadAllBytes((Join-Path $rawDir 'disk.bin'))
+Expect ($disk[5] -eq 1 -and $disk[9MB] -eq 2 -and $disk[12MB + 999] -eq 3 -and $disk.Length -eq 16MB) 'Rohabbild: Inhalt'
+Expect ($written -eq (4MB + 4MB + 1024)) "Rohabbild: Nullblöcke übersprungen ($written)"
+Remove-Item -LiteralPath $rawDir -Recurse -Force
+
 # 4 – Gast-Provisionierung: Argumente kommen unverändert beim Programm an, Platzhalter, Hashprüfung
 Import-Module (Join-Path $root 'guest\LocalAiGuest.psm1') -Force
 $quoted = @{ 'abc' = 'abc'; 'a b' = '"a b"'; 'a"b' = '"a\"b"'; 'C:\x y\' = '"C:\x y\\"'; '' = '""'; 'a\\"b' = '"a\\\\\"b"' }

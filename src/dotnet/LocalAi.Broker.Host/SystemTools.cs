@@ -104,6 +104,31 @@ public static partial class VersionManifest
             }
         }
 
+        // Linux-VM (M8): nur Hinweis – Pflicht erst, wenn ein Projekt sie braucht (dann scheitert sonst der Start).
+        if (options.HyperVLinux is { } lx)
+        {
+            var image = new FileInfo(lx.ImagePath);
+            var prereqProblem = "";
+            try
+            {
+                LinuxPrerequisites.Load(lx.LinuxPrerequisites ?? "");
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            {
+                prereqProblem = ex.Message;
+            }
+            manifest["sandboxLinux"] = new JsonObject
+            {
+                ["vmName"] = lx.VmName, ["image"] = lx.ImagePath, ["imageExists"] = image.Exists, ["prerequisites"] = lx.LinuxPrerequisites,
+                ["memoryMB"] = lx.MemoryMB, ["processors"] = lx.Processors, ["idleMinutes"] = lx.IdleMinutes, ["stopAction"] = lx.StopAction,
+                ["defaultGuestOs"] = options.DefaultGuestOs.ToString(),
+            };
+            Check("Debian-Abbild (sandbox.hypervLinux.imagePath)", image.Exists,
+                image.Exists ? $"{image.Length / (1024 * 1024)} MB" : $"nicht gefunden: {lx.ImagePath}", required: false);
+            Check("Linux-Bausteine (sandbox.hypervLinux.prerequisites)", prereqProblem.Length == 0,
+                prereqProblem.Length == 0 ? "prerequisites.json geprüft" : GuestReport.Clip(prereqProblem, 300), required: false);
+        }
+
         // Web
         if (options.Web is { } web)
         {

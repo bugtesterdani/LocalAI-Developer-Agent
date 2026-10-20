@@ -534,7 +534,8 @@ class Orchestrator:
                 for pname, p in (spec.get("parameters") or {}).items():
                     kind = p.get("type")
                     params.append(f"{pname}: one of {p.get('values')}" if kind == "Choice" else f"{pname}: {kind}")
-                lines.append(f"- {tc['name']} {action}(" + ", ".join(params) + ")")
+                where = " [runs on Linux]" if tc.get("guest") == "Linux" else ""
+                lines.append(f"- {tc['name']} {action}(" + ", ".join(params) + ")" + where)
         return "\n".join(lines) if lines else "- none (builds and tests cannot run in this session)"
 
     # ------------------------------------------------------------------ Planner

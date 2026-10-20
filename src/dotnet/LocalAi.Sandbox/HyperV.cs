@@ -7,11 +7,32 @@ using LocalAi.Contracts;
 
 namespace LocalAi.Sandbox;
 
-/// <summary>Einstellungen für die Offline-VM (config/localai.json → sandbox.hyperv).</summary>
+/// <summary>Einstellungen einer Offline-VM (config/localai.json → sandbox.hyperv bzw. sandbox.hypervLinux).</summary>
 public sealed record HyperVSettings
 {
-    /// <summary>Windows-ISO oder direkt eine install.wim/install.esd.</summary>
+    /// <summary>Gastsystem der VM: Windows (ISO/WIM) oder Linux (Debian-13-Cloud-Abbild als .raw).</summary>
+    public GuestOs Guest { get; init; } = GuestOs.Windows;
+
+    /// <summary>Windows-ISO bzw. install.wim/install.esd – oder beim Linux-Gast das Debian-Abbild (debian-13-generic-amd64.raw).</summary>
     public required string ImagePath { get; init; }
+
+    /// <summary>
+    /// Nur Linux: Ordner mit den Offline-Bausteinen für den Gast (Python für Linux, Wheels, hyperv-daemons) –
+    /// befüllt von scripts/sandbox/Get-LocalAiLinuxPrerequisites.ps1.
+    /// </summary>
+    public string? LinuxPrerequisites { get; init; }
+
+    /// <summary>
+    /// Nach so vielen Minuten ohne Job wird die VM heruntergefahren (bzw. gespeichert, siehe <see cref="StopAction"/>) und
+    /// beim nächsten Job automatisch wieder gestartet. 0 = nie (M8, Standard 30).
+    /// </summary>
+    public int IdleMinutes { get; init; } = 30;
+
+    /// <summary>
+    /// Wie eine unbenutzte VM angehalten wird (Leerlauf und Programmende mit reuseVm): "ShutDown" (Standard, fährt das
+    /// Gastsystem herunter – kein Arbeitsspeicherabbild auf der Platte) oder "Save" (Zustand speichern, schneller Start).
+    /// </summary>
+    public string StopAction { get; init; } = "ShutDown";
 
     /// <summary>Name der Edition im Abbild, z. B. „Windows 11 Pro“; alternativ <see cref="ImageIndex"/>.</summary>
     public string? ImageName { get; init; }
@@ -72,24 +93,51 @@ public sealed record HyperVSettings
 
     private static readonly Regex VmNamePattern = new("^[A-Za-z0-9-]{1,40}$");
 
+    public bool IsLinux => Guest == GuestOs.Linux;
+
+    /// <summary>Name des Konfigurationsabschnitts (für Meldungen).</summary>
+    public string Section => IsLinux ? "sandbox.hypervLinux" : "sandbox.hyperv";
+
+    /// <summary>"Stop" (herunterfahren) oder "Save" für Set-LocalAiVmState.ps1.</summary>
+    public string StopVmAction => StopAction == "Save" ? "Save" : "Stop";
+
     public void Validate()
     {
         if (!VmNamePattern.IsMatch(VmName))
         {
-            throw new InvalidDataException("sandbox.hyperv.vmName: nur Buchstaben, Ziffern und '-' (höchstens 40 Zeichen)");
+            throw new InvalidDataException($"{Section}.vmName: nur Buchstaben, Ziffern und '-' (höchstens 40 Zeichen)");
         }
-        if (ImageName is null == ImageIndex is null)
+        if (IsLinux)
         {
-            throw new InvalidDataException("sandbox.hyperv: genau eines von imageName oder imageIndex angeben");
+            if (ImageName is not null || ImageIndex is not null || ProductKey is not null)
+            {
+                throw new InvalidDataException($"{Section}: imageName, imageIndex und productKey gibt es nur für Windows");
+            }
+            if (!ImagePath.EndsWith(".raw", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"{Section}.imagePath: Debian-Cloud-Abbild im Rohformat erwartet (debian-13-generic-amd64.raw)");
+            }
         }
-        if (MemoryMB is < 2048 or > 262144 || Processors is < 1 or > 64 || OsDiskGB is < 40 or > 2048
-            || TransferDiskMB is < 32 or > 4096)
+        else if (ImageName is null == ImageIndex is null)
         {
-            throw new InvalidDataException("sandbox.hyperv: memoryMB, processors, osDiskGB oder transferDiskMB außerhalb der Grenzen");
+            throw new InvalidDataException($"{Section}: genau eines von imageName oder imageIndex angeben");
+        }
+        if (MemoryMB is < 1024 or > 262144 || (!IsLinux && MemoryMB < 2048) || Processors is < 1 or > 64
+            || OsDiskGB is < 8 or > 2048 || (!IsLinux && OsDiskGB < 40) || TransferDiskMB is < 32 or > 4096)
+        {
+            throw new InvalidDataException($"{Section}: memoryMB, processors, osDiskGB oder transferDiskMB außerhalb der Grenzen");
+        }
+        if (IdleMinutes is < 0 or > 24 * 60)
+        {
+            throw new InvalidDataException($"{Section}.idleMinutes: 0 (nie) bis 1440");
+        }
+        if (StopAction is not ("ShutDown" or "Save"))
+        {
+            throw new InvalidDataException($"{Section}.stopAction: \"ShutDown\" oder \"Save\"");
         }
         if (ProductKey is not null && !Regex.IsMatch(ProductKey, "^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$"))
         {
-            throw new InvalidDataException("sandbox.hyperv.productKey hat nicht das Format XXXXX-XXXXX-XXXXX-XXXXX-XXXXX");
+            throw new InvalidDataException($"{Section}.productKey hat nicht das Format XXXXX-XXXXX-XXXXX-XXXXX-XXXXX");
         }
     }
 }
@@ -106,11 +154,17 @@ public enum SandboxState
 
     /// <summary>Angehalten nach ausgebliebener Antwort; der Nutzer entscheidet: weiter verwenden oder neu aufbauen.</summary>
     Paused,
+
+    /// <summary>Aufgebaut und geprüft, aber ausgeschaltet (Leerlauf bzw. noch nicht gebraucht) – startet beim nächsten Job (M8).</summary>
+    Stopped,
 }
 
 public sealed record SandboxStatus(SandboxState State, string Text)
 {
     public bool IsReady => State == SandboxState.Ready;
+
+    /// <summary>Kann einen Job annehmen – laufend oder ausgeschaltet (wird dann gestartet).</summary>
+    public bool IsUsable => State is SandboxState.Ready or SandboxState.Stopped;
 }
 
 /// <summary>Letztes Signal des Gasts (KVP) mit Warten auf einen erwarteten Wert.</summary>
@@ -167,8 +221,10 @@ public sealed class SignalBoard
     {
         var progress = Progress switch
         {
-            null => "noch keine Meldung aus dem Gast (Windows-Einrichtung läuft)",
+            null => "noch keine Meldung aus dem Gast (Einrichtung des Systems läuft)",
             "setupcomplete" => "Windows eingerichtet, Provisionierung startet",
+            "cloudinit" => "Linux gestartet, Provisionierung startet",
+            "daemons" => "Hyper-V-Dienste im Gast werden eingerichtet",
             "start" => "Provisionierung läuft",
             "network" => "Netzwerkprüfungen",
             "toolchains" => "Toolchains werden installiert",
@@ -183,7 +239,7 @@ public sealed class SignalBoard
             null => "unbekannt",
             "NoContact" => "kein Kontakt",
             "LostCommunication" => "Verbindung verloren",
-            var h when h.StartsWith("Ok", StringComparison.Ordinal) => "Windows läuft",
+            var h when h.StartsWith("Ok", StringComparison.Ordinal) => "System läuft",
             var h => h,
         };
         return $"{progress}; Heartbeat: {heartbeat}";
@@ -263,7 +319,10 @@ public interface IHyperVHost
 
     Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken);
 
-    /// <summary>Vorhandene VM starten/fortsetzen ("Start", nie mit Netzwerkkarte) oder Zustand speichern ("Save").</summary>
+    /// <summary>
+    /// Vorhandene VM starten/fortsetzen ("Start", nie mit Netzwerkkarte), herunterfahren ("Stop", notfalls ausschalten),
+    /// Zustand speichern ("Save") oder sofort ausschalten ("TurnOff", Not-Aus).
+    /// </summary>
     Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken);
 
     Task RemoveVmAsync(CancellationToken cancellationToken);
@@ -357,6 +416,11 @@ public static class GuestReport
 public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
 {
     public const string GuestInbox = @"C:\LocalAi\inbox";
+
+    /// <summary>Eingang des Workers im Linux-Gast (Copy-VMFile über hv_fcopy).</summary>
+    public const string LinuxGuestInbox = "/var/lib/localai/inbox";
+
+    public string Inbox => _settings.IsLinux ? LinuxGuestInbox : GuestInbox;
     private readonly HyperVSettings _settings;
     private readonly IHyperVHost _host;
     private readonly Func<string, Task> _prepareGuest;
@@ -392,6 +456,31 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private DateTimeOffset _builtAt;
     private CancellationTokenSource? _lifecycleCts;
     private bool _forceRebuild;
+    private CancellationTokenSource? _watchCts;
+    private long _lastUsedTicks = DateTime.UtcNow.Ticks;
+    private Task? _idleLoop;
+    private bool _justStarted;
+
+    /// <summary>Mehrere VMs bauen nie gleichzeitig auf (eine UAC-Abfrage, ein DISM bzw. Abbild-Schreiber zur Zeit).</summary>
+    private static readonly SemaphoreSlim BuildGate = new(1, 1);
+
+    /// <summary>Leerlaufzeit bis zum Herunterfahren; Standard aus <see cref="HyperVSettings.IdleMinutes"/> (Tests: Sekunden).</summary>
+    public TimeSpan? IdleTimeout { get; init; }
+
+    /// <summary>Wie oft der Leerlauf geprüft wird (Tests: kürzer).</summary>
+    public TimeSpan IdleCheckInterval { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Wartezeit auf den Heartbeat nach einem Start bei Bedarf.</summary>
+    public TimeSpan StartTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Nach einem Start nimmt der Gast Dateien erst an, wenn seine Dienste laufen: so lange Copy-VMFile wiederholen.</summary>
+    public TimeSpan CopyRetryWindow { get; init; } = TimeSpan.FromMinutes(3);
+
+    public TimeSpan CopyRetryDelay { get; init; } = TimeSpan.FromSeconds(5);
+
+    public HyperVSettings Settings => _settings;
+
+    private string GuestName => GuestSelection.Name(_settings.Guest);
 
     /// <param name="prepareGuest">Legt die Gastdateien im übergebenen Ordner ab (Python, Worker, Schlüssel, Skripte).</param>
     /// <param name="session">Sitzung (Schlüssel, Sequenz) – nötig für die Wiederverwendung.</param>
@@ -447,6 +536,190 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         _lifecycleCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
         var token = _lifecycleCts.Token;
         _lifecycle = Task.Run(() => LifecycleAsync(token));
+        _idleLoop ??= Task.Run(() => IdleLoopAsync(_shutdown.Token));
+    }
+
+    private void Touch() => Interlocked.Exchange(ref _lastUsedTicks, DateTime.UtcNow.Ticks);
+
+    /// <summary>Zeit seit dem letzten Job (bzw. seit die VM bereit wurde).</summary>
+    public TimeSpan IdleFor => DateTime.UtcNow - new DateTime(Interlocked.Read(ref _lastUsedTicks), DateTimeKind.Utc);
+
+    /// <summary>Fährt eine bereite VM nach <see cref="HyperVSettings.IdleMinutes"/> ohne Job herunter (M8).</summary>
+    private async Task IdleLoopAsync(CancellationToken ct)
+    {
+        var idle = IdleTimeout ?? TimeSpan.FromMinutes(_settings.IdleMinutes);
+        if (idle <= TimeSpan.Zero)
+        {
+            return;
+        }
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(IdleCheckInterval, ct).ConfigureAwait(false);
+                if (Status.State != SandboxState.Ready || _updating || IdleFor < idle)
+                {
+                    continue;
+                }
+                if (!await _exchange.WaitAsync(0, ct).ConfigureAwait(false))
+                {
+                    continue;
+                }
+                try
+                {
+                    if (Status.State == SandboxState.Ready && IdleFor >= idle)
+                    {
+                        await StopVmAsync($"nach {Minutes(idle)} ohne Job", ct).ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    _exchange.Release();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private static string Minutes(TimeSpan t) => t.TotalMinutes >= 1 ? $"{t.TotalMinutes:F0} min" : $"{t.TotalSeconds:F0} s";
+
+    /// <summary>VM herunterfahren bzw. speichern (Leerlauf); danach „bereit, ausgeschaltet“. Aufrufer hält _exchange.</summary>
+    private async Task StopVmAsync(string reason, CancellationToken ct)
+    {
+        try
+        {
+            await StopWatcherAsync().ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromMinutes(5));
+            var info = await _host.SetVmStateAsync(_settings.StopVmAction, timeout.Token).ConfigureAwait(false);
+            if (info.NetworkAdapters != 0)
+            {
+                Lock($"VM hat {info.NetworkAdapters} Netzwerkkarte(n)");
+                return;
+            }
+            SaveReuseState(clean: true);
+            var how = _settings.StopVmAction == "Save" ? "gespeichert" : "heruntergefahren";
+            SetStatus(SandboxState.Stopped, $"Offline-VM bereit – {reason} {how}, startet beim nächsten Job");
+        }
+        catch (Exception ex) when (ex is HyperVException or IOException)
+        {
+            Lock("VM ließ sich nicht anhalten: " + GuestReport.Clip(ex.Message));
+        }
+    }
+
+    private void StartWatcher(CancellationToken ct, Action<string> problem)
+    {
+        _watchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _watchCts.Token;
+        _watcher = Task.Run(() => _host.WatchSignalsAsync(_signals, problem, token), token);
+    }
+
+    private async Task StopWatcherAsync()
+    {
+        if (_watchCts is not null)
+        {
+            await _watchCts.CancelAsync().ConfigureAwait(false);
+        }
+        if (_watcher is not null)
+        {
+            try
+            {
+                await _watcher.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or HyperVException)
+            {
+            }
+        }
+        _watcher = null;
+        _watchCts?.Dispose();
+        _watchCts = null;
+    }
+
+    /// <summary>
+    /// Startet eine ausgeschaltete VM (Start bei Bedarf): Netzwerkkarten prüfen, Heartbeat abwarten, frisches
+    /// Transfer-Laufwerk. Aufrufer hält _exchange. Rückgabe: null = bereit, sonst der Grund.
+    /// </summary>
+    private async Task<string?> StartOnDemandAsync(CancellationToken ct)
+    {
+        try
+        {
+            SetStatus(SandboxState.WaitingForGuest, $"{GuestName}-VM wird gestartet (bei Bedarf)");
+            if (ReuseEnabled && _reuse.Load() is { } l)
+            {
+                // In Benutzung: stürzt das Programm jetzt ab, wird beim nächsten Start neu aufgebaut.
+                _reuse.Save(l.State with { Clean = false }, l.Key);
+            }
+            var started = await _host.SetVmStateAsync("Start", ct).ConfigureAwait(false);
+            if (started.NetworkAdapters != 0)
+            {
+                Lock($"VM hat {started.NetworkAdapters} Netzwerkkarte(n)");
+                return Status.Text;
+            }
+            var running = false;
+            StartWatcher(_shutdown.Token, p =>
+            {
+                if (Volatile.Read(ref running))
+                {
+                    Lock("Beobachtung der VM: " + GuestReport.Clip(p));
+                }
+            });
+            var deadline = DateTime.UtcNow + StartTimeout;
+            while (_signals.Heartbeat?.StartsWith("Ok", StringComparison.Ordinal) != true)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    await StopWatcherAsync().ConfigureAwait(false);
+                    Lock($"VM antwortet nach dem Start nicht ({_signals.DescribeGuest()}) – „VM neu aufbauen“");
+                    return Status.Text;
+                }
+                await Task.Delay(500, ct).ConfigureAwait(false);
+            }
+            var (leftover, nics) = await CollectAsync(ct).ConfigureAwait(false);
+            if (nics != 0)
+            {
+                Lock($"VM hat {nics} Netzwerkkarte(n)");
+                return Status.Text;
+            }
+            Volatile.Write(ref running, true);
+            _justStarted = true;
+            Touch();
+            var note = leftover is null ? "" : " (alte Rückgabe verworfen)";
+            SetStatus(SandboxState.Ready, $"Offline-VM bereit – bei Bedarf gestartet{note}");
+            return null;
+        }
+        catch (Exception ex) when (ex is HyperVException or IOException or VhdxFormatException)
+        {
+            Lock("Start bei Bedarf fehlgeschlagen: " + GuestReport.Clip(ex.Message));
+            return Status.Text;
+        }
+    }
+
+    /// <summary>
+    /// Vor dem Erzeugen eines Jobs: eine ausgeschaltete VM starten, damit die Gültigkeit des Jobs nicht in der Startzeit
+    /// verstreicht. Rückgabe: null = bereit, sonst der Grund.
+    /// </summary>
+    public async Task<string?> EnsureStartedAsync(CancellationToken cancellationToken)
+    {
+        Touch();
+        if (Status.State != SandboxState.Stopped)
+        {
+            return null;
+        }
+        await _exchange.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return Status.State == SandboxState.Stopped ? await StartOnDemandAsync(cancellationToken).ConfigureAwait(false) : null;
+        }
+        finally
+        {
+            Touch();
+            _exchange.Release();
+        }
     }
 
     /// <summary>„VM neu aufbauen“: verwirft die laufende VM (auch eine gesperrte) und baut sie neu auf.</summary>
@@ -459,20 +732,17 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             {
                 await _lifecycleCts.CancelAsync().ConfigureAwait(false);
             }
-            foreach (var task in new[] { _lifecycle, _watcher })
+            if (_lifecycle is not null)
             {
-                if (task is null)
-                {
-                    continue;
-                }
                 try
                 {
-                    await task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                    await _lifecycle.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or HyperVException)
                 {
                 }
             }
+            await StopWatcherAsync().ConfigureAwait(false);
             _reuse.Delete();
             _forceRebuild = true;
             lock (_gate)
@@ -548,9 +818,6 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         {
             return false;
         }
-        SetStatus(SandboxState.WaitingForGuest, "vorhandene VM wird fortgesetzt (Stand passt)");
-        // Ab jetzt gilt die VM als in Benutzung: stürzt das Programm ab, wird beim nächsten Start neu aufgebaut.
-        _reuse.Save(l.State with { Clean = false }, l.Key);
         var codeMatches = _currentCode is null || l.State.CodeFingerprint == _currentCode;
         if (!codeMatches && (l.State.GuestUpdate < 1 || _buildUpdate is null))
         {
@@ -562,36 +829,37 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         _builtAt = l.State.BuiltAt;
         _guestUpdate = l.State.GuestUpdate;
         Directory.CreateDirectory(WorkDirectory);
+        if (codeMatches && info.State is "Off" or "Saved")
+        {
+            // Start bei Bedarf (M8): die VM bleibt aus, bis ein Job sie braucht. Zustand bleibt „sauber“.
+            SetStatus(SandboxState.Stopped,
+                $"Offline-VM bereit – ausgeschaltet, startet beim nächsten Job (aufgebaut {_builtAt.ToLocalTime():dd.MM. HH:mm})");
+            return true;
+        }
+        SetStatus(SandboxState.WaitingForGuest, "vorhandene VM wird fortgesetzt (Stand passt)");
+        // Ab jetzt gilt die VM als in Benutzung: stürzt das Programm ab, wird beim nächsten Start neu aufgebaut.
+        _reuse.Save(l.State with { Clean = false }, l.Key);
         var started = await _host.SetVmStateAsync("Start", ct).ConfigureAwait(false);
         if (started.NetworkAdapters != 0)
         {
             Lock($"VM hat {started.NetworkAdapters} Netzwerkkarte(n)");
             return true;
         }
-        var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var resumed = false;
-        _watcher = Task.Run(() => _host.WatchSignalsAsync(_signals, p =>
+        StartWatcher(ct, p =>
         {
-            if (resumed)
+            if (Volatile.Read(ref resumed))
             {
                 Lock("Beobachtung der VM: " + GuestReport.Clip(p));
             }
-        }, watch.Token), watch.Token);
+        });
         async Task<bool> GiveUp(string text)
         {
             SetStatus(SandboxState.Preparing, text);
-            await watch.CancelAsync().ConfigureAwait(false);
-            try
-            {
-                await _watcher!.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or HyperVException)
-            {
-            }
-            _watcher = null;
+            await StopWatcherAsync().ConfigureAwait(false);
             return false;
         }
-        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
+        var deadline = DateTime.UtcNow + StartTimeout;
         while (_signals.Heartbeat?.StartsWith("Ok", StringComparison.Ordinal) != true)
         {
             if (DateTime.UtcNow > deadline)
@@ -611,6 +879,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         if (!codeMatches)
         {
             SetStatus(SandboxState.WaitingForGuest, "vorhandene VM wird aktualisiert (Worker-Code und Gastskripte, ohne Neuaufbau)");
+            _justStarted = true;
             var problem = await UpdateGuestAsync(ct).ConfigureAwait(false);
             if (Status.State == SandboxState.Locked)
             {
@@ -622,8 +891,9 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             }
             note += " und aktualisiert";
         }
-        resumed = true;
+        Volatile.Write(ref resumed, true);
         SaveReuseState(clean: false);
+        Touch();
         SetStatus(SandboxState.Ready, $"Offline-VM bereit – wiederverwendet{note} (aufgebaut {_builtAt.ToLocalTime():dd.MM. HH:mm})");
         return true;
     }
@@ -767,7 +1037,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     /// </summary>
     public async Task<string> EmergencyStopAsync()
     {
-        var busy = _exchange.CurrentCount == 0 || Status.State == SandboxState.Paused;
+        var busy = (_exchange.CurrentCount == 0 || Status.State == SandboxState.Paused) && Status.State != SandboxState.Stopped;
         if (!busy)
         {
             return "keine laufende Ausführung in der VM";
@@ -796,7 +1066,9 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             SetStatus(SandboxState.Preparing, "Voraussetzungen werden geprüft");
             if (!File.Exists(_settings.ImagePath))
             {
-                Lock($"Windows-Abbild nicht gefunden: {_settings.ImagePath}");
+                Lock(_settings.IsLinux
+                    ? $"Debian-Abbild nicht gefunden: {_settings.ImagePath} (scripts\\sandbox\\Get-LocalAiLinuxPrerequisites.ps1)"
+                    : $"Windows-Abbild nicht gefunden: {_settings.ImagePath}");
                 return;
             }
             var check = await _host.CheckAsync(ct).ConfigureAwait(false);
@@ -832,10 +1104,16 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             _currentDisk = NextDiskPath();
             await File.WriteAllTextAsync(requestFile, BuildRequestJson(guestDir, _currentDisk), new UTF8Encoding(false), ct).ConfigureAwait(false);
 
-            SetStatus(SandboxState.Building, "VM wird aufgebaut (Administratorrechte werden angefragt)");
-            var started = DateTime.UtcNow;
-            using (var buildTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            if (BuildGate.CurrentCount == 0)
             {
+                SetStatus(SandboxState.Preparing, "wartet, bis der Aufbau der anderen VM auf dem Host fertig ist");
+            }
+            await BuildGate.WaitAsync(ct).ConfigureAwait(false);
+            var started = DateTime.UtcNow;
+            try
+            {
+                SetStatus(SandboxState.Building, "VM wird aufgebaut (Administratorrechte werden angefragt)");
+                using var buildTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 buildTimeout.CancelAfter(_settings.BuildTimeout);
                 try
                 {
@@ -848,9 +1126,15 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                     return;
                 }
             }
+            finally
+            {
+                BuildGate.Release();
+            }
 
-            _watcher = Task.Run(() => _host.WatchSignalsAsync(_signals, p => Lock("Beobachtung der VM: " + GuestReport.Clip(p)), ct), ct);
-            SetStatus(SandboxState.WaitingForGuest, "Windows richtet sich in der VM ein (erster Start, dauert einige Minuten)");
+            StartWatcher(ct, p => Lock("Beobachtung der VM: " + GuestReport.Clip(p)));
+            SetStatus(SandboxState.WaitingForGuest, _settings.IsLinux
+                ? "Linux richtet sich in der VM ein (erster Start, cloud-init und Provisionierung)"
+                : "Windows richtet sich in der VM ein (erster Start, dauert einige Minuten)");
             var reported = false;
             string? shown = null;
             while (!reported)
@@ -893,6 +1177,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             _builtAt = DateTimeOffset.UtcNow;
             _guestUpdate = GuestUpdateVersion;
             SaveReuseState(clean: false);
+            Touch();
             SetStatus(SandboxState.Ready, $"Offline-VM bereit – {text}; Aufbau {minutes:F0} min");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -927,6 +1212,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             ["guestDirectory"] = guestDir,
             ["productKey"] = _settings.ProductKey,
             ["keepVmOnExit"] = _settings.KeepVmOnExit,
+            ["guest"] = _settings.IsLinux ? "Linux" : "Windows",
         };
         return request.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
@@ -952,17 +1238,22 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     public async Task<SandboxReply> ExchangeAsync(JobEnvelope envelope, string? payloadPath, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var status = Status;
-        if (!status.IsReady && !_updating)
+        if (!status.IsUsable && !_updating)
         {
             return new SandboxReply(null, $"Sandbox nicht bereit ({status.Text})");
         }
         var job = envelope.Job;
         await _exchange.WaitAsync(cancellationToken).ConfigureAwait(false);
+        Touch();
         var outgoing = Path.Combine(WorkDirectory, "outgoing");
         var stem = $"{job.Sequence:D12}-{job.JobId}";
         var files = new List<string>();
         try
         {
+            if (Status.State == SandboxState.Stopped && !_updating && await StartOnDemandAsync(cancellationToken).ConfigureAwait(false) is { } problem)
+            {
+                return new SandboxReply(null, $"Sandbox nicht bereit ({problem})");
+            }
             if (!Status.IsReady && !_updating)
             {
                 return new SandboxReply(null, $"Sandbox nicht bereit ({Status.Text})");
@@ -982,7 +1273,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             await File.WriteAllTextAsync(ready, stem, Encoding.ASCII, cancellationToken).ConfigureAwait(false);
             files.Add(ready);
 
-            var nics = await _host.CopyToGuestAsync(files, GuestInbox, cancellationToken).ConfigureAwait(false);
+            var nics = await CopyWithRetryAsync(files, cancellationToken).ConfigureAwait(false);
             if (nics != 0)
             {
                 Lock($"VM hat {nics} Netzwerkkarte(n)");
@@ -1048,14 +1339,37 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             {
                 File.Delete(f);
             }
+            Touch();
             _exchange.Release();
+        }
+    }
+
+    /// <summary>
+    /// Copy-VMFile; direkt nach einem Start (bzw. Gast-Update) nimmt der Gast Dateien erst an, wenn seine Dienste laufen
+    /// (Windows: Gastdienstschnittstelle, Linux: hv_fcopy) – dann eine Weile wiederholen.
+    /// </summary>
+    private async Task<int> CopyWithRetryAsync(IReadOnlyList<string> files, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + CopyRetryWindow;
+        while (true)
+        {
+            try
+            {
+                var nics = await _host.CopyToGuestAsync(files, Inbox, ct).ConfigureAwait(false);
+                _justStarted = false;
+                return nics;
+            }
+            catch (HyperVException) when (_justStarted && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(CopyRetryDelay, ct).ConfigureAwait(false);
+            }
         }
     }
 
     public async ValueTask DisposeAsync()
     {
         await _shutdown.CancelAsync().ConfigureAwait(false);
-        foreach (var task in new[] { _lifecycle, _watcher })
+        foreach (var task in new[] { _lifecycle, _watcher, _idleLoop })
         {
             if (task is not null)
             {
@@ -1077,17 +1391,25 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             return;
         }
         var kept = false;
-        if (ReuseEnabled && (Status.IsReady || Status.State == SandboxState.Paused))
+        var how = "gespeichert";
+        if (ReuseEnabled && Status.State == SandboxState.Stopped)
+        {
+            SaveReuseState(clean: true);
+            kept = true;
+            how = "ausgeschaltet";
+        }
+        else if (ReuseEnabled && (Status.IsReady || Status.State == SandboxState.Paused))
         {
             try
             {
-                // Zustand speichern (schnelles Fortsetzen beim nächsten Start) und als sauber markieren.
-                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-                var saved = await _host.SetVmStateAsync("Save", cts.Token).ConfigureAwait(false);
+                // Herunterfahren (Standard) bzw. Zustand speichern und als sauber markieren; beim nächsten Start bei Bedarf.
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+                var saved = await _host.SetVmStateAsync(_settings.StopVmAction, cts.Token).ConfigureAwait(false);
                 if (saved.NetworkAdapters == 0)
                 {
                     SaveReuseState(clean: true);
                     kept = true;
+                    how = _settings.StopVmAction == "Save" ? "gespeichert" : "heruntergefahren";
                 }
             }
             catch (Exception ex) when (ex is HyperVException or OperationCanceledException or IOException)
@@ -1109,7 +1431,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             {
             }
         }
-        SetStatus(SandboxState.Removed, kept ? "VM gespeichert (wird beim nächsten Start fortgesetzt)" : "VM entfernt");
+        SetStatus(SandboxState.Removed, kept ? $"VM {how} (wird beim nächsten Start wiederverwendet)" : "VM entfernt");
         _shutdown.Dispose();
         _exchange.Dispose();
         // Erst jetzt (VM gespeichert, Zustand geschrieben) darf eine andere Instanz die VM übernehmen.

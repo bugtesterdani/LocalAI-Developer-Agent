@@ -17,7 +17,7 @@ try {
     $removed = 0
     if (Test-Path -LiteralPath (Join-Path $VmDirectory $DirectoryMarker)) {
         Get-ChildItem -LiteralPath $VmDirectory -Filter '*.vhdx' -File | Where-Object {
-            $_.Name -eq "$VmName-os.vhdx" -or $_.Name -like 'transfer-*.vhdx'
+            $_.Name -eq "$VmName-os.vhdx" -or $_.Name -eq "$VmName-seed.vhdx" -or $_.Name -like 'transfer-*.vhdx'
         } | ForEach-Object {
             $file = $_.FullName
             Invoke-LocalAiRetry { Remove-Item -LiteralPath $file -Force } | Out-Null

@@ -256,12 +256,57 @@ function Remove-LocalAiVmWithDisks {
         if (-not $disk -or -not (Test-Path -LiteralPath $disk)) { continue }
         $name = Split-Path -Leaf $disk
         $folder = Split-Path -Parent $disk
-        if (($name -like '*-os.vhdx' -or $name -like 'transfer-*.vhdx') -and (Test-Path -LiteralPath (Join-Path $folder $script:DirectoryMarker))) {
+        if (($name -like '*-os.vhdx' -or $name -like '*-seed.vhdx' -or $name -like 'transfer-*.vhdx') -and (Test-Path -LiteralPath (Join-Path $folder $script:DirectoryMarker))) {
             Invoke-LocalAiRetry { Remove-Item -LiteralPath $disk -Force } | Out-Null
             $removed++
         }
     }
     return $removed
+}
+
+function Write-LocalAiRawImage {
+    # Schreibt ein Rohabbild (z. B. debian-13-generic-amd64.raw) sektorweise auf einen eingebundenen Datenträger.
+    # Der Datenträger wird dafür offline geschaltet (Windows bindet keine Partitionen ein, Rohschreiben ist erlaubt).
+    # Blöcke aus lauter Nullen werden übersprungen – die frische dynamische VHDX liefert dort ohnehin Nullen.
+    param([Parameter(Mandatory)][string]$ImagePath, [Parameter(Mandatory)][int]$DiskNumber)
+    Set-Disk -Number $DiskNumber -IsOffline $true -ErrorAction SilentlyContinue
+    Set-Disk -Number $DiskNumber -IsReadOnly $false
+    Initialize-LocalAiRawWriter
+    return [LocalAiRawWriter]::Copy($ImagePath, "\\.\PhysicalDrive$DiskNumber")
+}
+
+function Initialize-LocalAiRawWriter {
+    # Kopierroutine für Rohabbilder (kompiliert, schnell genug für mehrere GB).
+    if (-not ('LocalAiRawWriter' -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.IO;
+public static class LocalAiRawWriter {
+    public static long Copy(string image, string device) {
+        const int Chunk = 4 * 1024 * 1024;
+        byte[] buffer = new byte[Chunk];
+        long written = 0, offset = 0;
+        using (FileStream source = File.OpenRead(image))
+        using (FileStream target = new FileStream(device, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite)) {
+            while (true) {
+                int read = 0, n;
+                while (read < Chunk && (n = source.Read(buffer, read, Chunk - read)) > 0) { read += n; }
+                if (read == 0) { break; }
+                int length = (read + 511) / 512 * 512;
+                if (length > read) { Array.Clear(buffer, read, length - read); }
+                bool empty = true;
+                for (int i = 0; i < length; i++) { if (buffer[i] != 0) { empty = false; break; } }
+                if (!empty) { target.Position = offset; target.Write(buffer, 0, length); written += length; }
+                offset += length;
+                if (read < Chunk) { break; }
+            }
+            target.Flush();
+        }
+        return written;
+    }
+}
+"@
+    }
 }
 
 function Invoke-LocalAiRetry {

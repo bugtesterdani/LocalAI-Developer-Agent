@@ -28,7 +28,7 @@ from localai.pathrules import PathRuleError, normalize_relative
 UPDATE_TOOL = "Sandbox.Update"
 RESTART_EXIT_CODE = 75
 GUEST_FILES = {"guest/provision.ps1": "provision.ps1", "guest/LocalAiGuest.psm1": "LocalAiGuest.psm1",
-               "guest/update.ps1": "update.ps1", "guest-config.json": "guest-config.json"}
+               "guest/update.ps1": "update.ps1", "guest/provision.sh": "provision.sh", "guest-config.json": "guest-config.json"}
 MAX_FILES = 2000
 MAX_BYTES = 64 * 1024 * 1024
 
@@ -79,6 +79,14 @@ def apply_update(job: SandboxJob, payload: pathlib.Path | None, guest_root: path
             if run.returncode != 0:
                 raise UpdateError(f"update.ps1 endete mit Exitcode {run.returncode}: {output}")
             message += "; update.ps1 ok"
+        config_file = guest_root / "guest-config.json"
+        if run_script and os.name != "nt" and config_file.exists():
+            from localai.guest import provision
+            config = provision.load_config(config_file)
+            if config.get("guest") == "Linux":
+                # Linux-Gast: systemd-Einheit des Workers aus der (neuen) Konfiguration schreiben.
+                provision.write_worker_unit(config)
+                message += "; Worker-Einheit aktualisiert"
         _remove(staging)
         results = [TargetResult(target_id="*", status=ResultStatus.Succeeded, message=message)]
         status = ResultStatus.Succeeded

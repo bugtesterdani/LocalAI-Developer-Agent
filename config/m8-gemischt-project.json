@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "projectId": "m8-gemischt",
+  "name": "M8: Windows-Projekt, Python-Tests zusätzlich unter Linux",
+  "guestOs": "Windows",
+  "grants": [
+    {
+      "grantId": "kontakte",
+      "root": "samples/m7-demo-python",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": ["python", "python-linux"],
+  "toolchainGuests": { "python-linux": "Linux" }
+}

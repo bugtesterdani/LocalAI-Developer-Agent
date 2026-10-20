@@ -369,6 +369,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                         ["name"] = manifest.Name,
                         ["displayName"] = manifest.DisplayName,
                         ["version"] = manifest.Version,
+                        ["guest"] = (manifest.Guest ?? GuestOs.Windows).ToString(),
                         ["testResultFormat"] = manifest.TestResultFormat.ToString(),
                         ["actions"] = actions,
                     });

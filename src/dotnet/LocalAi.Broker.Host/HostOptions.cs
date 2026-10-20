@@ -69,6 +69,12 @@ public sealed record HostOptions
     public ProcessCommand? Orchestrator { get; init; }
     public TimeSpan OrchestratorHeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public LocalAi.Sandbox.HyperVSettings? HyperV { get; init; }
+
+    /// <summary>Linux-VM (sandbox.hypervLinux, M8); null = nicht eingerichtet.</summary>
+    public LocalAi.Sandbox.HyperVSettings? HyperVLinux { get; init; }
+
+    /// <summary>Gastsystem für Projekte ohne eigene Angabe (sandbox.defaultGuestOs, Standard Windows).</summary>
+    public LocalAi.Contracts.GuestOs DefaultGuestOs { get; init; } = LocalAi.Contracts.GuestOs.Windows;
     public string? ToolchainsDirectory { get; init; }
 
     /// <summary>Gelesene config/localai.json (für Versionsmanifest, Sicherung).</summary>
@@ -211,23 +217,56 @@ public sealed record HostOptions
             }
             if (sandbox.TryGetProperty("hyperv", out var hyperv) && hyperv.ValueKind == JsonValueKind.Object)
             {
-                options = options with { HyperV = ReadHyperV(hyperv, repoRoot, options.DataDirectory) };
+                options = options with { HyperV = ReadHyperV(hyperv, repoRoot, options.DataDirectory, LocalAi.Contracts.GuestOs.Windows) };
+            }
+            if (sandbox.TryGetProperty("hypervLinux", out var linux) && linux.ValueKind == JsonValueKind.Object)
+            {
+                options = options with { HyperVLinux = ReadHyperV(linux, repoRoot, options.DataDirectory, LocalAi.Contracts.GuestOs.Linux) };
+            }
+            if (sandbox.TryGetProperty("defaultGuestOs", out var guest) && guest.ValueKind == JsonValueKind.String)
+            {
+                options = options with { DefaultGuestOs = ParseGuest(guest.GetString()!, "sandbox.defaultGuestOs") };
             }
         }
         return options;
     }
 
-    private static LocalAi.Sandbox.HyperVSettings ReadHyperV(JsonElement e, string repoRoot, string dataDirectory)
+    public static LocalAi.Contracts.GuestOs ParseGuest(string value, string where) => value.Trim().ToLowerInvariant() switch
     {
+        "windows" => LocalAi.Contracts.GuestOs.Windows,
+        "linux" => LocalAi.Contracts.GuestOs.Linux,
+        _ => throw new JsonException($"{where}: \"Windows\" oder \"Linux\" erwartet, nicht \"{value}\""),
+    };
+
+    private static LocalAi.Sandbox.HyperVSettings ReadHyperV(JsonElement e, string repoRoot, string dataDirectory, LocalAi.Contracts.GuestOs guest)
+    {
+        var linux = guest == LocalAi.Contracts.GuestOs.Linux;
+        var section = linux ? "sandbox.hypervLinux" : "sandbox.hyperv";
         string? Str(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Length > 0 ? v.GetString() : null;
         int? Int(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
-        var image = Str("imagePath") ?? throw new JsonException("sandbox.hyperv.imagePath fehlt (Pfad zur Windows-ISO)");
+        var image = Str("imagePath") ?? throw new JsonException(linux
+            ? $"{section}.imagePath fehlt (Pfad zu debian-13-generic-amd64.raw)"
+            : $"{section}.imagePath fehlt (Pfad zur Windows-ISO)");
         var vmDirectory = Str("vmDirectory") is { } dir
             ? Path.GetFullPath(Path.Combine(repoRoot, dir))
-            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataDirectory))!, "vm");
-        var defaults = new LocalAi.Sandbox.HyperVSettings { ImagePath = "-", VmDirectory = "-" };
+            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataDirectory))!, linux ? "vm-linux" : "vm");
+        var defaults = new LocalAi.Sandbox.HyperVSettings
+        {
+            ImagePath = "-", VmDirectory = "-", Guest = guest,
+            VmName = linux ? "LocalAi-Linux" : "LocalAi-Sandbox",
+            MemoryMB = linux ? 4096 : 8192,
+            OsDiskGB = linux ? 64 : 128,
+            BuildTimeout = TimeSpan.FromMinutes(linux ? 30 : 90),
+        };
+        var prerequisites = Str("prerequisites") is { } pre
+            ? Path.GetFullPath(Path.Combine(repoRoot, pre))
+            : linux ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(Path.Combine(repoRoot, image)))!, "linux-gast") : null;
         return new LocalAi.Sandbox.HyperVSettings
         {
+            Guest = guest,
+            LinuxPrerequisites = linux ? prerequisites : null,
+            IdleMinutes = Int("idleMinutes") ?? defaults.IdleMinutes,
+            StopAction = Str("stopAction") ?? defaults.StopAction,
             ImagePath = Path.GetFullPath(Path.Combine(repoRoot, image)),
             ImageName = Str("imageName"),
             ImageIndex = Int("imageIndex"),

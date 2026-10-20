@@ -17,6 +17,8 @@ Vorlagen in diesem Ordner:
 | `powershell5` | Windows PowerShell 5.1 | nichts (Teil von Windows) + Pester/PSScriptAnalyzer | JUnit (Pester) |
 | `batch` | Batch | nichts (cmd.exe) + Test-Harness | JUnit (Harness) |
 | `hdevelop` | HDevelop | ZIP deiner HALCON-Installation + Lizenz + VC++-Laufzeit | JUnit (HDevEngine-Runner) |
+| `python-linux` | Python (Linux-VM) | tar.gz von python-build-standalone + pytest-Wheels | JUnit (pytest) |
+| `dotnet-linux` | C# (Linux-VM) | tar.gz des .NET SDK für Linux x64 | Trx (`dotnet test`) |
 
 Für die M5-Toolchains legt `scripts\toolchains\New-M5Toolchains.ps1 -Target D:\Agent\Toolchains` die Ordner an und
 lädt bzw. sammelt die nötigen Dateien (einmal, auf dem Host mit Internet).
@@ -135,3 +137,18 @@ der Prozess läuft mit eingeschränktem Token auf niedriger Integritätsstufe in
 Toolchains, Windows und HKLM nicht verändern) und wird nach `timeoutSeconds` (Standard 120 s) samt Kindprozessen
 beendet. Testergebnisse (`testResultFormat`: `Trx`, `JUnit`, `NUnit`, `ExitCode`) werden in ein einheitliches Format
 übersetzt.
+
+## Toolchains für die Linux-VM (M8)
+
+Linux-Toolchains haben einen eigenen Namen (z. B. `python-linux`) und im Manifest `"guest": "Linux"`. Unterschiede zu
+Windows-Toolchains:
+
+- `guestPath`: `/opt/toolchains/<name>` (gehört root, für Werkzeugprozesse nur lesbar).
+- Binaries: relativer Pfad mit `/` (ohne `.exe`), z. B. `python/bin/python3`, oder Programme des Gastsystems
+  `{system}/bash`, `{system}/sh`, `{system}/python3`.
+- `install.kind` `Archive`: `.zip`, `.tar.gz`, `.tgz`, `.tar.xz` (Rechte bleiben erhalten; nichts außerhalb von
+  `guestPath`). `Installer`: nur `.deb` (`dpkg -i`, offline, ohne Abhängigkeitsauflösung – nötige Abhängigkeiten als
+  weitere Toolchain oder in `postInstall`).
+- Pfade in Argumenten mit `/` (`{selftest}/hello.py`, `--junitxml={results}/pytest.xml`).
+- Welche VM eine Toolchain nutzt, steht im Manifest; im Projekt kann `toolchainGuests` das nur bestätigen
+  (Widerspruch = Fehler beim Start). Siehe `docs\pruefung-M8.md`.

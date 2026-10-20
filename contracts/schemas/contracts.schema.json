@@ -436,6 +436,15 @@
           "items": {
             "type": "string"
           }
+        },
+        "guestOs": {
+          "$ref": "#/$defs/GuestOs"
+        },
+        "toolchainGuests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/GuestOs"
+          }
         }
       },
       "required": [
@@ -627,6 +636,14 @@
         "Archive",
         "Installer",
         "None"
+      ]
+    },
+    "GuestOs": {
+      "type": "string",
+      "description": "Betriebssystem einer Sandbox-VM (M8).",
+      "enum": [
+        "Windows",
+        "Linux"
       ]
     },
     "ToolchainParameterType": {
@@ -890,6 +907,9 @@
         "guestPath": {
           "type": "string"
         },
+        "guest": {
+          "$ref": "#/$defs/GuestOs"
+        },
         "license": {
           "$ref": "#/$defs/ToolchainLicense"
         },
@@ -1000,6 +1020,9 @@
         },
         "usedByProject": {
           "type": "boolean"
+        },
+        "guest": {
+          "$ref": "#/$defs/GuestOs"
         }
       },
       "required": [

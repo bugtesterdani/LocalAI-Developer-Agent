@@ -173,6 +173,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guest-root", type=pathlib.Path,
                         help="Gast-Update: Ordner für Gastskripte (Standard: übergeordneter Ordner von --work)")
     parser.add_argument("--package-dir", type=pathlib.Path, help="Gast-Update: installiertes Paket localai (nur Tests)")
+    parser.add_argument("--tools-user", help="Linux-Gast: Werkzeugprozesse als dieser Benutzer, ohne Netz (z. B. localai-tools)")
+    parser.add_argument("--jobs-root", type=pathlib.Path, help="Arbeitsordner der Toolchain-Jobs (Standard: <work>/jobs)")
+    parser.add_argument("--kvp-pool", type=pathlib.Path, help="nur Tests: KVP-Pool-Datei statt /var/lib/hyperv/.kvp_pool_1")
     parser.add_argument("--no-low-integrity", action="store_true",
                         help="Werkzeugprozesse ohne niedrige Integritätsstufe starten (schwächer, nur zur Fehlersuche)")
     args = parser.parse_args(argv)
@@ -181,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.transfer_disk:
         if args.transfer_size <= 0:
             parser.error("--transfer-size fehlt")
-        transfer = TransferSink(TransferDisk(args.transfer_disk, args.transfer_size), Signal(args.signal_file))
+        transfer = TransferSink(TransferDisk(args.transfer_disk, args.transfer_size), Signal(args.signal_file, args.kvp_pool))
 
     if args.report:
         if transfer is None:
@@ -201,8 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     sink = transfer if transfer is not None else DirectorySink(args.outbox)
     executor = None
     if args.toolchains:
-        executor = Executor(ToolchainCatalog(args.toolchains, args.toolchain_root), args.work / "jobs",
-                            low_integrity=not args.no_low_integrity)
+        tools_user = None
+        if args.tools_user:
+            from localai.worker.linproc import ToolUser
+            tools_user = ToolUser.lookup(args.tools_user)
+        executor = Executor(ToolchainCatalog(args.toolchains, args.toolchain_root), args.jobs_root or args.work / "jobs",
+                            low_integrity=not args.no_low_integrity, tools_user=tools_user)
     import localai
     update = None
     if transfer is not None:

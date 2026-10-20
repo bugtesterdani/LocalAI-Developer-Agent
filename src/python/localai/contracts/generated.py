@@ -177,6 +177,8 @@ class ProjectConfig(Contract):
     name: str = Field(alias="name")
     grants: list[FolderGrant] = Field(alias="grants")
     toolchains: list[str] | None = Field(default=None, alias="toolchains")
+    guest_os: GuestOs | None = Field(default=None, alias="guestOs")
+    toolchain_guests: dict[str, GuestOs] | None = Field(default=None, alias="toolchainGuests")
 
 
 class SnapshotFile(Contract):
@@ -239,6 +241,11 @@ class ToolchainInstallKind(str, Enum):
     Archive = "Archive"
     Installer = "Installer"
     None_ = "None"
+
+
+class GuestOs(str, Enum):
+    Windows = "Windows"
+    Linux = "Linux"
 
 
 class ToolchainParameterType(str, Enum):
@@ -340,6 +347,7 @@ class ToolchainManifest(Contract):
     version: str = Field(alias="version")
     display_name: str = Field(alias="displayName")
     guest_path: str = Field(alias="guestPath")
+    guest: GuestOs | None = Field(default=None, alias="guest")
     license: ToolchainLicense = Field(alias="license")
     binaries: list[ToolchainBinary] = Field(alias="binaries")
     install: ToolchainInstall = Field(alias="install")
@@ -369,6 +377,7 @@ class ToolchainInfo(Contract):
     license_note: str | None = Field(default=None, alias="licenseNote")
     problems: list[str] = Field(alias="problems")
     used_by_project: StrictBool = Field(alias="usedByProject")
+    guest: GuestOs | None = Field(default=None, alias="guest")
 
 
 class ToolchainRegistration(Contract):
