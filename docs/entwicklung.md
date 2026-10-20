@@ -217,6 +217,20 @@ Grundsatz: Kein Werkzeug mit freiem Shellstring; ausführende Werkzeuge bleiben 
 Schlüssel in `tools/codegen/make_uitext.py` ergänzen, `python tools/codegen/make_uitext.py` ausführen, in beiden
 Oberflächen binden. `DesktopTests.Xaml_*` prüft, dass alle Schlüssel und Bindings vorhanden sind.
 
+## Dokumentation und Wiki
+
+Die Dokumentation steht in `docs/` (dazu `toolchains/README.md`); das GitHub-Wiki wird daraus erzeugt und **nicht**
+von Hand bearbeitet. `tools/wiki/build_wiki.py` schreibt die Seiten, Links zwischen Dokumenten werden auf
+Wiki-Seiten umgeschrieben; Navigation und Fußzeile stehen ebenfalls dort. Die Action `.github/workflows/wiki.yml`
+veröffentlicht bei jedem Push auf `main`, der `docs/` betrifft (oder von Hand über „Run workflow“). Ein neues Dokument
+in `PAGES` und, falls es in die Navigation gehört, in `SIDEBAR` eintragen.
+
+Lokal ansehen:
+
+```bash
+python3 tools/wiki/build_wiki.py --out /tmp/wiki
+```
+
 ## Arbeitsweise
 
 Jeder Meilenstein liefert Code, Tests und eine Prüfanleitung `docs/pruefung-Mx.md` mit den Befehlen für die echte
