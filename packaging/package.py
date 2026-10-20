@@ -114,6 +114,8 @@ def stage(args: argparse.Namespace) -> None:
         shutil.copy2(ROOT / name, out / name)
     copy_tree(ROOT / "licenses", out / "licenses")
     shutil.copy2(ROOT / "docs" / "lizenzen.md", out / "licenses" / "RELEASE-CHECKLIST.md")
+    (out / "docs").mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "docs" / "lizenzen.md", out / "docs" / "lizenzen.md")
     (out / "VERSION").write_text(args.version + "\n", encoding="utf-8")
     print(f"Installationsordner {out} ({args.platform}, {args.version})")
 
@@ -185,6 +187,8 @@ def docs_zip(args: argparse.Namespace) -> None:
     with zipfile.ZipFile(args.out, "w", zipfile.ZIP_DEFLATED) as z:
         prefix = f"LocalAi-Dokumentation-{args.version}/"
         zip_legal(z, prefix)
+        if "docs/lizenzen.md" not in build_wiki.PAGES:
+            z.write(ROOT / "docs" / "lizenzen.md", prefix + "docs/lizenzen.md")
         z.write(ROOT / "README.md", prefix + "README.md")
         for source in build_wiki.PAGES:
             if source != "README.md":

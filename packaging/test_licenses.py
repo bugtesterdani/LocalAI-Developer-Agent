@@ -160,6 +160,8 @@ class LicenseTests(unittest.TestCase):
             command(argparse.Namespace(out=output, version="test"))
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
+                if command is package.docs_zip:
+                    self.assertTrue(any(n.endswith("/docs/lizenzen.md") for n in names))
                 for suffix in ("/LICENSE", "/THIRD-PARTY-NOTICES.md",
                                "/licenses/Inter-OFL-1.1.txt", "/licenses/RELEASE-CHECKLIST.md"):
                     name = next(n for n in names if n.endswith(suffix))
