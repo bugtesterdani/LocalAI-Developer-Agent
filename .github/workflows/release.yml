@@ -13,8 +13,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    # build/pakete nur zum Erproben des Workflows vor dem Merge, danach entfernen
-    branches: [build/pakete]
   workflow_dispatch:
 
 permissions:
@@ -76,7 +74,7 @@ jobs:
             --out "dist/LocalAi-Konfiguration-${{ needs.version.outputs.version }}.zip"
           python3 packaging/package.py docs-zip --version "${{ needs.version.outputs.version }}" \
             --out "dist/LocalAi-Dokumentation-${{ needs.version.outputs.version }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: archive
           path: dist/*
@@ -119,7 +117,7 @@ jobs:
           mkdir -p dist
           packaging/linux/build-deb.sh build/stage build/icons "${{ needs.version.outputs.deb }}" \
             "dist/localai-developer-agent_${VERSION}_amd64.deb"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: linux
           path: dist/*
@@ -170,6 +168,7 @@ jobs:
           wix build packaging/windows/LocalAi.wxs -arch x64 -d Version=$env:NUMERIC -d StagingDir=build/stage -d IconsDir=build/icons `
             -o "dist/LocalAi-Developer-Agent-$env:VERSION-x64.msi"
           if ($LASTEXITCODE) { throw "wix build fehlgeschlagen" }
+          Remove-Item dist/*.wixpdb -ErrorAction SilentlyContinue
       - name: Signaturzertifikat
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP 'signatur.pfx'
@@ -214,7 +213,7 @@ jobs:
             & $signtool sign /fd SHA256 /f $env:SIGN_PFX /p $env:SIGN_PASSWORD /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem dist/*.msi).FullName
             if ($LASTEXITCODE) { throw "signtool (MSI) fehlgeschlagen" }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: windows
           path: dist/*
@@ -224,7 +223,7 @@ jobs:
     needs: [version, archives, linux, windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
