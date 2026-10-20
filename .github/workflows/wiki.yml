@@ -1,0 +1,50 @@
+# Veröffentlicht die Dokumentation aus docs/ (und toolchains/README.md) im GitHub-Wiki.
+# Quelle bleibt docs/ – Änderungen direkt im Wiki werden beim nächsten Lauf überschrieben.
+# Voraussetzung (einmalig): Wiki in den Repository-Einstellungen aktiviert und die erste Seite über die Weboberfläche
+# angelegt, damit das Wiki-Repository existiert.
+name: Wiki
+
+on:
+  push:
+    # doku/dokumentation nur bis zum Merge (erste Veröffentlichung), danach entfernen
+    branches: [main, doku/dokumentation]
+    paths:
+      - "docs/**"
+      - "toolchains/README.md"
+      - "tools/wiki/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wiki klonen
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+
+      - name: Seiten erzeugen
+        run: python3 tools/wiki/build_wiki.py --out wiki --repo "${GITHUB_REPOSITORY}" --branch "${GITHUB_REF_NAME}"
+
+      - name: Veröffentlichen
+        working-directory: wiki
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki ist aktuell."
+            exit 0
+          fi
+          git commit -m "Wiki aus docs/ (${GITHUB_SHA::7})"
+          git push
