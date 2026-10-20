@@ -35,7 +35,10 @@ mitliefern, kann ein versionsgenauer, manuell geprüfter Nachweis unter
 Er muss `review.json` mit `license`, `source` (HTTPS-URL zur genauen Version)
 und `reason` sowie mindestens einen Originaltext (LICENSE/NOTICE/COPYING)
 enthalten. Dies ist ein bewusst zu prüfender Ausnahmeweg, kein automatischer
-Lizenzdownload. Der Nachweis wird in das Inventar übernommen.
+Lizenzdownload. Der Nachweis wird in das Inventar übernommen. Gemeinsame Originaltexte können
+alternativ über versionsgenaue Einträge in licenses/overrides.json referenziert
+werden. Jede Ausnahme nennt die geprüfte Upstream-Version bzw. einen Commit;
+bei Paketupdates gibt es keinen automatischen Rückgriff auf ältere Versionen.
 
 Alle gesammelten Dateien werden mit SHA-256 und relativen Pfaden dokumentiert.
 Die vollständige Python-Laufzeit einschließlich vorhandener Lizenzordner bleibt

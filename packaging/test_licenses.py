@@ -109,6 +109,22 @@ class LicenseTests(unittest.TestCase):
         self.collector.add("nuget", "Example", "1.0", "MIT", source, [])
         self.assertIn("review", self.collector.entries[0])
 
+    def test_shared_registry_is_version_bound_and_preserves_font_license(self):
+        source = self.root / "empty"
+        source.mkdir()
+        self.file("upstream/LICENSE", "Original copyright")
+        self.file("upstream/OFL.txt", "Original font license")
+        self.file("overrides.json", json.dumps({"schemaVersion": 1, "packages": {
+            "nuget/example/1.0": {"license": "MIT AND OFL-1.1",
+                                  "source": "https://example.com/releases/1.0/LICENSE",
+                                  "reason": "Reviewed source release",
+                                  "files": ["upstream/LICENSE", "upstream/OFL.txt"]}}}))
+        self.collector.add("nuget", "example", "1.0", "MIT", source, [])
+        self.assertEqual(len(self.collector.entries[0]["files"]), 2)
+        self.assertEqual(self.collector.entries[0]["declaredLicense"], "MIT AND OFL-1.1")
+        with self.assertRaises(licensing.LicenseError):
+            self.collector.add("nuget", "example", "1.1", "MIT", source, [])
+
     def test_paths_cannot_escape_package(self):
         self.file("outside.txt", "not a package license")
         directory = self.root / "package"

@@ -60,7 +60,9 @@ jobs:
           global-json-file: global.json
       - uses: astral-sh/setup-uv@v7
       - name: Bauen und testen (scripts/test.sh)
-        run: scripts/test.sh
+        run: |
+          python3 -m unittest discover -s packaging -p "test_licenses.py" -v
+          scripts/test.sh
 
   archives:
     needs: version

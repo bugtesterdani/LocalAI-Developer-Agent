@@ -71,6 +71,18 @@ class Collector:
                 declared = review["license"]
                 source = override
                 documents = legal_files(override)
+            elif (self.overrides.parent / "overrides.json").is_file():
+                registry = read_json(self.overrides.parent / "overrides.json")
+                if registry.get("schemaVersion") != 1:
+                    raise LicenseError("Unknown license override manifest version")
+                review = registry.get("packages", {}).get("/".join(key))
+                if review is not None:
+                    if not all(isinstance(review.get(k), str) and review[k].strip()
+                               for k in ("license", "source", "reason")) or not review["source"].startswith("https://"):
+                        raise LicenseError(f"Invalid registry evidence for {key}")
+                    source = self.overrides.parent
+                    documents = [child(source, p) for p in review.get("files", [])]
+                    declared = review["license"]
         if not declared.strip() or not documents:
             raise LicenseError(f"{ecosystem}:{name}@{version}: missing license declaration/original text; "
                                "supply the original package notices or a version-specific reviewed override")

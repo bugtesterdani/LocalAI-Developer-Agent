@@ -26,7 +26,8 @@ aufgeführt. Die Inventarliste ist keine juristische Freigabe.
 | Gebündelte Python-Distribution | python-build-standalone enthält zusätzliche native Bibliotheken; deren mitgelieferte Hinweise bleiben erhalten |
 
 Die Inter-Schrift bleibt unter OFL; die OFL verlangt nicht, den Anwendungscode
-ebenfalls unter OFL zu veröffentlichen. Die Originaltexte in den konkreten
+ebenfalls unter OFL zu veröffentlichen. Fehlende NuGet-Texte sind versionsgenau in licenses/overrides.json mit
+Upstream-Quellen dokumentiert. Die Originaltexte in den konkreten
 Paketen haben Vorrang vor dieser Übersicht. Tests und Buildwerkzeuge haben
 eigene Bedingungen und werden nicht pauschal durch die Projektlizenz erfasst.
 
