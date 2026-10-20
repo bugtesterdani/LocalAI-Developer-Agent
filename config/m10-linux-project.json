@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "projectId": "m10-linux",
+  "name": "M10: Kontakte (Python) auf einem Linux-Host",
+  "guestOs": "Linux",
+  "grants": [
+    {
+      "grantId": "kontakte",
+      "root": "samples/m7-demo-python",
+      "rights": ["List", "Read", "Modify", "Create", "Execute"],
+      "recursive": true
+    }
+  ],
+  "toolchains": ["python-linux"]
+}

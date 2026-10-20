@@ -16,19 +16,21 @@ public sealed partial class DesktopTests
     private static readonly Type[] ViewModelTypes =
         [typeof(MainViewModel), typeof(ApprovalCardViewModel), typeof(TargetItemViewModel), typeof(AgentViewModel), typeof(ChatEntry), typeof(FeedEntry), typeof(EventLine), typeof(ToolchainItemViewModel)];
 
-    private static string XamlPath() =>
-        Path.Combine(ContractTests.RepoRoot(), "src", "dotnet", "LocalAi.Desktop", "MainWindow.xaml");
+    private static string XamlPath(string file = "LocalAi.Desktop/MainWindow.xaml") =>
+        Path.Combine(ContractTests.RepoRoot(), "src", "dotnet", file);
 
     [GeneratedRegex(@"\{loc:T\s+(?<key>[A-Za-z0-9_.]+)\}")]
     private static partial Regex TextKeyRegex();
 
-    [GeneratedRegex(@"\{Binding\s+(?<path>[A-Za-z][A-Za-z0-9_.]*)(?=\s*[,}])")]
+    [GeneratedRegex(@"\{Binding\s+!?(?<path>[A-Za-z][A-Za-z0-9_.]*)(?=\s*[,}])")]
     private static partial Regex BindingRegex();
 
-    [Fact, Trait("Pruefung", "AC16")]
-    public void Xaml_ist_wohlgeformt_und_alle_Textschluessel_existieren()
+    [Theory, Trait("Pruefung", "AC16")]
+    [InlineData("LocalAi.Desktop/MainWindow.xaml")]
+    [InlineData("LocalAi.Desktop.Linux/MainWindow.axaml")]
+    public void Xaml_ist_wohlgeformt_und_alle_Textschluessel_existieren(string file)
     {
-        var text = File.ReadAllText(XamlPath());
+        var text = File.ReadAllText(XamlPath(file));
         XDocument.Parse(text);
         var keys = TextKeyRegex().Matches(text).Select(m => m.Groups["key"].Value).Distinct().ToList();
         Assert.True(keys.Count > 20, "Texte gefunden");
@@ -36,10 +38,12 @@ public sealed partial class DesktopTests
         Assert.True(missing.Count == 0, "Fehlende Texte: " + string.Join(", ", missing));
     }
 
-    [Fact]
-    public void Alle_Bindings_verweisen_auf_vorhandene_Eigenschaften()
+    [Theory]
+    [InlineData("LocalAi.Desktop/MainWindow.xaml")]
+    [InlineData("LocalAi.Desktop.Linux/MainWindow.axaml")]
+    public void Alle_Bindings_verweisen_auf_vorhandene_Eigenschaften(string file)
     {
-        var text = File.ReadAllText(XamlPath());
+        var text = File.ReadAllText(XamlPath(file));
         var properties = ViewModelTypes
             .SelectMany(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             .Select(p => p.Name)
@@ -68,6 +72,36 @@ public sealed partial class DesktopTests
         Assert.DoesNotContain(doc.Descendants(wpf + "Button"), b => b.Attribute("IsDefault")?.Value == "True"
                                                                      && (b.Attribute("Command")?.Value.Contains("Approve", StringComparison.Ordinal) ?? false));
         Assert.DoesNotContain(doc.Descendants(wpf + "KeyBinding"), k => k.Attribute("Command")?.Value.Contains("Approve", StringComparison.Ordinal) ?? false);
+    }
+
+    [Fact, Trait("Pruefung", "AC10")]
+    public void Linux_Oberflaeche_benennt_Bedienelemente_und_fokussiert_Ablehnen()
+    {
+        var doc = XDocument.Parse(File.ReadAllText(XamlPath("LocalAi.Desktop.Linux/MainWindow.axaml")));
+        XNamespace av = "https://github.com/avaloniaui";
+        static bool Named(XElement e) => e.Attributes().Any(a => a.Name.LocalName == "AutomationProperties.Name" && a.Value.Length > 0);
+        var unnamedText = doc.Descendants(av + "TextBox").Where(e => e.Attribute("Text") is not null && !Named(e)).ToList();
+        Assert.True(unnamedText.Count == 0, "Textfelder ohne Namen: " + string.Join(", ", unnamedText.Select(e => e.Attribute("Text")!.Value)));
+        Assert.DoesNotContain(doc.Descendants(av + "Button"), e => e.Attribute("Content") is null && !Named(e));
+        var deny = doc.Descendants(av + "Button").Single(b => b.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "DenyButton");
+        Assert.Equal("True", deny.Attributes().Single(a => a.Name.LocalName == "FocusOnShow.Enabled").Value);
+        Assert.DoesNotContain(doc.Descendants(av + "Button"), b => b.Attribute("IsDefault")?.Value == "True");
+        Assert.DoesNotContain(doc.Descendants(av + "KeyBinding"), k => k.Attribute("Command")?.Value.Contains("Approve", StringComparison.Ordinal) ?? false);
+    }
+
+    [Fact, Trait("Pruefung", "M10-Pakete")]
+    public void Windows_Oberflaeche_bleibt_ohne_Avalonia()
+    {
+        var root = Path.Combine(ContractTests.RepoRoot(), "src", "dotnet");
+        foreach (var project in new[] { "LocalAi.Desktop/LocalAi.Desktop.csproj", "LocalAi.Desktop.Core/LocalAi.Desktop.Core.csproj",
+                     "LocalAi.Broker.Host/LocalAi.Broker.Host.csproj", "LocalAi.Sandbox/LocalAi.Sandbox.csproj" })
+        {
+            Assert.DoesNotContain("Avalonia", File.ReadAllText(Path.Combine(root, project)), StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.DoesNotContain("Desktop.Linux", File.ReadAllText(Path.Combine(root, "LocalAi.slnx")), StringComparison.Ordinal);
+        var linux = File.ReadAllText(Path.Combine(root, "LocalAi.Linux.slnx"));
+        Assert.Contains("LocalAi.Desktop.Linux/LocalAi.Desktop.Linux.csproj", linux, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalAi.Desktop/LocalAi.Desktop.csproj", linux, StringComparison.Ordinal);
     }
 
     [Fact, Trait("Pruefung", "AC16")]

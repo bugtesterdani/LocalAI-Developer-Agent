@@ -403,7 +403,8 @@ public static class SandboxFingerprint
                 "v1-base-linux",
                 $"image|{settings.ImagePath}|{Facts(settings.ImagePath)}",
                 $"vm|{settings.VmName}|{settings.MemoryMB}|{settings.Processors}|{settings.OsDiskGB}|{settings.TransferDiskMB}|{settings.KeepVmOnExit}"
-                + (settings.NestedVirtualization ? "|nested" : ""),
+                + (settings.NestedVirtualization ? "|nested" : "")
+                + (settings.IsQemu ? $"|qemu|{settings.QemuAccel}" : ""),
                 $"prereq|{LinuxPrerequisites.ManifestHash(sources.LinuxPrerequisites)}",
             };
             var known = toolchains.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
@@ -514,7 +515,7 @@ public static class GuestPayloadBuilder
     public static void BuildLinux(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, HyperVSettings settings, IReadOnlyList<string> toolchains)
     {
         var prerequisites = LinuxPrerequisites.Load(sources.LinuxPrerequisites
-            ?? throw new InvalidDataException("sandbox.hypervLinux.prerequisites fehlt"));
+            ?? throw new InvalidDataException($"{settings.Section}.prerequisites fehlt"), settings.Hypervisor);
         var seed = Path.Combine(guestDirectory, "seed");
         var root = Path.Combine(seed, "localai");
         Directory.CreateDirectory(root);
@@ -530,7 +531,8 @@ public static class GuestPayloadBuilder
         }
         File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
         File.WriteAllText(Path.Combine(root, "guest-config.json"),
-            GuestConfigJson(settings.TransferDiskBytes, toolchains, lowIntegrityTools: true, GuestOs.Linux, prerequisites), new UTF8Encoding(false));
+            GuestConfigJson(settings.TransferDiskBytes, toolchains, lowIntegrityTools: true, GuestOs.Linux, prerequisites, settings.Hypervisor),
+            new UTF8Encoding(false));
         File.WriteAllText(Path.Combine(seed, "meta-data"),
             $"instance-id: localai-{Guid.NewGuid():N}\nlocal-hostname: localai-sbx\n", new UTF8Encoding(false));
         string? password = null;
@@ -541,11 +543,11 @@ public static class GuestPayloadBuilder
             Directory.CreateDirectory(settings.VmDirectory);
             File.WriteAllText(Path.Combine(settings.VmDirectory, "gast-kennwort.txt"), password, Encoding.ASCII);
         }
-        File.WriteAllText(Path.Combine(seed, "user-data"), CloudConfig(password), new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(seed, "user-data"), CloudConfig(password, settings.IsQemu), new UTF8Encoding(false));
     }
 
     /// <summary>cloud-config: keine Benutzer, keine Paketquellen, Root-Partition vergrößern, provision.sh vom Seed starten.</summary>
-    public static string CloudConfig(string? rootPassword)
+    public static string CloudConfig(string? rootPassword, bool serialConsole = false)
     {
         var sb = new StringBuilder();
         sb.Append("#cloud-config\n");
@@ -564,8 +566,12 @@ public static class GuestPayloadBuilder
             sb.Append($"    - {{name: root, password: \"{rootPassword}\", type: text}}\n");
         }
         sb.Append("runcmd:\n");
+        // QEMU (M10): Protokoll zusätzlich auf die serielle Konsole – der Host schreibt sie nach console.log.
+        var output = serialConsole
+            ? "2>&1 | tee -a /var/log/localai-provision.log > /dev/ttyS0"
+            : ">> /var/log/localai-provision.log 2>&1";
         sb.Append("  - [/bin/bash, -c, \"mkdir -p /mnt/localai-seed && mount -o ro LABEL=CIDATA /mnt/localai-seed && " +
-                  "/bin/bash /mnt/localai-seed/localai/provision.sh >> /var/log/localai-provision.log 2>&1\"]\n");
+                  $"/bin/bash /mnt/localai-seed/localai/provision.sh {output}\"]\n");
         return sb.ToString();
     }
 
@@ -627,13 +633,14 @@ public static class GuestPayloadBuilder
 
     /// <summary>guest-config.json des Linux-Gasts: zusätzlich Gastsystem und die Dateien aus prerequisites.json.</summary>
     public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools, GuestOs guest,
-        LinuxPrerequisites? prerequisites) =>
+        LinuxPrerequisites? prerequisites, Hypervisor hypervisor = Hypervisor.HyperV) =>
         guest != GuestOs.Linux
             ? GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools)
             : JsonSerializer.Serialize(new
             {
                 schemaVersion = 1,
                 guest = "Linux",
+                hypervisor = hypervisor.ToString(),
                 transferDiskBytes,
                 toolchains = toolchains ?? [],
                 python = prerequisites?.Python,
@@ -646,7 +653,7 @@ public static class GuestPayloadBuilder
     /// (siehe localai/worker/update.py). Python-Laufzeit, Pakete und Toolchains sind nicht enthalten.
     /// </summary>
     public static void BuildUpdate(string zipPath, GuestPayloadSources sources, long transferDiskBytes, IReadOnlyList<string>? toolchains,
-        bool lowIntegrityTools, GuestOs guest)
+        bool lowIntegrityTools, GuestOs guest, Hypervisor hypervisor = Hypervisor.HyperV)
     {
         if (guest != GuestOs.Linux)
         {
@@ -661,10 +668,10 @@ public static class GuestPayloadBuilder
             using var script = new StreamWriter(entry.Open(), new UTF8Encoding(false));
             script.Write(File.ReadAllText(Path.Combine(sources.GuestScripts, file), Encoding.UTF8).Replace("\r\n", "\n"));
         }
-        var prerequisites = sources.LinuxPrerequisites is null ? null : LinuxPrerequisites.Load(sources.LinuxPrerequisites);
+        var prerequisites = sources.LinuxPrerequisites is null ? null : LinuxPrerequisites.Load(sources.LinuxPrerequisites, hypervisor);
         var config = zip.CreateEntry("guest-config.json");
         using var writer = new StreamWriter(config.Open(), new UTF8Encoding(false));
-        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, GuestOs.Linux, prerequisites));
+        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, GuestOs.Linux, prerequisites, hypervisor));
     }
 
     private static void AddPackage(System.IO.Compression.ZipArchive zip, GuestPayloadSources sources)

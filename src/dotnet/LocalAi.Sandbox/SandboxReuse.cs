@@ -61,6 +61,11 @@ public sealed class SandboxReuseStore(string vmDirectory)
         var (protectedKey, protection) = KeyProtection.Protect(key);
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(state with { Key = protectedKey, Protection = protection }, Options), new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            // Ohne DPAPI (Linux-Host, M10): Schlüssel nur für den eigenen Benutzer lesbar.
+            File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
         File.Move(tmp, FilePath, overwrite: true);
     }
 

@@ -55,7 +55,7 @@ public static partial class VersionManifest
         // Python (Orchestrator, Tools; Laufzeit des Gasts)
         var python = Python(options.RepoRoot);
         manifest["python"] = python;
-        var needsPython = options.Mode is SandboxMode.DevLocalUnsafe or SandboxMode.HyperV;
+        var needsPython = options.Mode is SandboxMode.DevLocalUnsafe or SandboxMode.HyperV or SandboxMode.Qemu;
         Check("Python-Umgebung (uv sync --project src/python)", python["ok"]!.GetValue<bool>(),
             python["detail"]?.GetValue<string>() ?? "", needsPython);
 
@@ -78,7 +78,7 @@ public static partial class VersionManifest
             Check($"Toolchain {name}", reg is not null && Directory.Exists(reg.Directory),
                 reg is null ? "nicht registriert (Oberfläche → TOOLCHAINS)" : Directory.Exists(reg.Directory)
                     ? $"{reg.Version}, {reg.Files.Count} Dateien, Digest {reg.Digest[..12]}" : $"Ordner fehlt: {reg.Directory}",
-                options.Mode == SandboxMode.HyperV);
+                options.UsesVm);
         }
 
         // Offline-VM
@@ -127,6 +127,40 @@ public static partial class VersionManifest
                 image.Exists ? $"{image.Length / (1024 * 1024)} MB" : $"nicht gefunden: {lx.ImagePath}", required: false);
             Check("Linux-Bausteine (sandbox.hypervLinux.prerequisites)", prereqProblem.Length == 0,
                 prereqProblem.Length == 0 ? "prerequisites.json geprüft" : GuestReport.Clip(prereqProblem, 300), required: false);
+        }
+
+        // QEMU auf dem Linux-Host (M10)
+        if (options.Qemu is { } qm)
+        {
+            var image = new FileInfo(qm.ImagePath);
+            var prereqProblem = "";
+            try
+            {
+                LinuxPrerequisites.Load(qm.LinuxPrerequisites ?? "", Hypervisor.Qemu);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or IOException or JsonException or UnauthorizedAccessException)
+            {
+                prereqProblem = ex.Message;
+            }
+            var required = options.Mode == SandboxMode.Qemu;
+            var kvm = OperatingSystem.IsLinux() && QemuVmHost.KvmUsable();
+            manifest["sandboxQemu"] = new JsonObject
+            {
+                ["vmName"] = qm.VmName, ["image"] = qm.ImagePath, ["imageExists"] = image.Exists, ["prerequisites"] = qm.LinuxPrerequisites,
+                ["memoryMB"] = qm.MemoryMB, ["processors"] = qm.Processors, ["idleMinutes"] = qm.IdleMinutes, ["accel"] = qm.QemuAccel,
+                ["kvm"] = kvm,
+            };
+            Check("Debian-Abbild (sandbox.qemu.imagePath)", image.Exists,
+                image.Exists ? $"{image.Length / (1024 * 1024)} MB" : $"nicht gefunden: {qm.ImagePath}", required);
+            Check("Linux-Bausteine (sandbox.qemu.prerequisites)", prereqProblem.Length == 0,
+                prereqProblem.Length == 0 ? "prerequisites.json geprüft" : GuestReport.Clip(prereqProblem, 300), required);
+            foreach (var (program, package) in new[] { (qm.QemuBinary, "qemu-system-x86"), ("qemu-img", "qemu-utils"), ("mkfs.fat", "dosfstools"), ("mcopy", "mtools") })
+            {
+                var found = QemuVmHost.FindProgram(program);
+                Check($"{program} (Paket {package})", found is not null, found ?? "nicht im PATH – scripts/linux/install-host.sh", required);
+            }
+            Check("KVM (/dev/kvm)", kvm, kvm ? "nutzbar" : "nicht nutzbar – QEMU emuliert (sehr langsam); Benutzer in Gruppe kvm aufnehmen",
+                required && qm.QemuAccel == "Kvm");
         }
 
         // Web

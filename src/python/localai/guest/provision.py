@@ -41,6 +41,7 @@ EMU_USER = "localai-emu"  # M9: QEMU der Debug-Sitzungen
 WORKER_UNIT = "localai-worker.service"
 FCOPY_UNIT = "localai-fcopy.service"
 KVP_UNIT = "localai-kvp.service"
+LINK_UNIT = "localai-link.service"  # M10: Verbindungskanal unter QEMU statt KVP/Copy-VMFile
 # Dienste, die ohne Netz nichts tun, aber schreiben oder den Start verzögern.
 QUIET_UNITS = ["ssh.service", "ssh.socket", "apt-daily.timer", "apt-daily-upgrade.timer", "unattended-upgrades.service",
                "man-db.timer", "e2scrub_all.timer", "dpkg-db-backup.timer", "systemd-networkd-wait-online.service"]
@@ -411,7 +412,7 @@ def worker_unit(config: dict[str, Any], paths: Paths = Paths()) -> str:  # noqa:
     return "\n".join([
         "[Unit]",
         "Description=LocalAi Sandbox-Worker",
-        "After=local-fs.target " + KVP_UNIT,
+        "After=local-fs.target " + (LINK_UNIT if config.get("hypervisor") == "Qemu" else KVP_UNIT),
         "",
         "[Service]",
         "Type=simple",
@@ -473,7 +474,29 @@ def daemon_units(paths: Paths) -> list[str]:
     return problems
 
 
-def start_daemons(paths: Paths) -> list[str]:
+def link_unit(paths: Paths) -> str:
+    """M10 (QEMU-Host): Verbindungskanal über virtio-serial statt hv_kvp_daemon/hv_fcopy."""
+    return "\n".join([
+        "[Unit]", "Description=LocalAi: Verbindungskanal zum Host (QEMU)",
+        "ConditionPathExists=/dev/virtio-ports/org.localai.link", "",
+        "[Service]", f"ExecStart={paths.python} -I -m localai.guest.qemulink", "Restart=always", "RestartSec=1", "",
+        "[Install]", "WantedBy=multi-user.target", ""])
+
+
+def start_link(paths: Paths) -> list[str]:
+    (paths.systemd / LINK_UNIT).write_text(link_unit(paths), encoding="utf-8")
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", LINK_UNIT])
+    time.sleep(2)
+    if run(["systemctl", "is-active", LINK_UNIT]).stdout.strip() != "active":
+        status = run(["systemctl", "status", "--no-pager", "-n", "5", LINK_UNIT]).stdout.replace("\n", " ")[-400:]
+        return [f"Verbindungskanal zum Host läuft nicht ({status})"]
+    return []
+
+
+def start_daemons(paths: Paths, config: dict[str, Any] | None = None) -> list[str]:
+    if (config or {}).get("hypervisor") == "Qemu":
+        return start_link(paths)
     # Gleichnamige Dienste des Debian-Pakets anhalten, damit nicht zwei Dienste dieselben Geräte öffnen.
     listed = run(["systemctl", "list-unit-files", "--no-legend", "--type=service"]).stdout
     for line in listed.splitlines():
@@ -547,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
     config: dict[str, Any] = {}
     try:
         config = load_config(paths.root / "guest-config.json")
-        report.errors.extend(start_daemons(paths))
+        report.errors.extend(start_daemons(paths, config))
         quiet_services()
 
         set_progress("network")

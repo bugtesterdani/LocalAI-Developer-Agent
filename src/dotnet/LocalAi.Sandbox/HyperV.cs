@@ -40,6 +40,24 @@ public sealed record HyperVSettings
     /// </summary>
     public bool NestedVirtualization { get; init; }
 
+    /// <summary>
+    /// Wer die VM betreibt: Hyper-V unter Windows (Standard) oder QEMU direkt auf einem Linux-Host (M10, Abschnitt
+    /// sandbox.qemu, nur Linux-Gast).
+    /// </summary>
+    public Hypervisor Hypervisor { get; init; } = Hypervisor.HyperV;
+
+    /// <summary>Nur QEMU (M10): Programm, Standard qemu-system-x86_64 aus dem PATH.</summary>
+    public string QemuBinary { get; init; } = "qemu-system-x86_64";
+
+    /// <summary>Nur QEMU (M10): Beschleunigung „Auto“ (KVM, wenn /dev/kvm nutzbar, sonst TCG), „Kvm“ oder „Tcg“.</summary>
+    public string QemuAccel { get; init; } = "Auto";
+
+    /// <summary>
+    /// Nur QEMU und nur für automatische Tests (sandbox.qemu.directBoot): Linux-Kern und initramfs direkt starten statt
+    /// von der Systemfestplatte. Netzwerk, Sockets und Prüfungen bleiben unverändert.
+    /// </summary>
+    public QemuDirectBoot? QemuTestBoot { get; init; }
+
     /// <summary>Name der Edition im Abbild, z. B. „Windows 11 Pro“; alternativ <see cref="ImageIndex"/>.</summary>
     public string? ImageName { get; init; }
 
@@ -101,8 +119,10 @@ public sealed record HyperVSettings
 
     public bool IsLinux => Guest == GuestOs.Linux;
 
+    public bool IsQemu => Hypervisor == Hypervisor.Qemu;
+
     /// <summary>Name des Konfigurationsabschnitts (für Meldungen).</summary>
-    public string Section => IsLinux ? "sandbox.hypervLinux" : "sandbox.hyperv";
+    public string Section => IsQemu ? "sandbox.qemu" : IsLinux ? "sandbox.hypervLinux" : "sandbox.hyperv";
 
     /// <summary>"Stop" (herunterfahren) oder "Save" für Set-LocalAiVmState.ps1.</summary>
     public string StopVmAction => StopAction == "Save" ? "Save" : "Stop";
@@ -113,7 +133,30 @@ public sealed record HyperVSettings
         {
             throw new InvalidDataException($"{Section}.vmName: nur Buchstaben, Ziffern und '-' (höchstens 40 Zeichen)");
         }
-        if (IsLinux)
+        if (IsQemu)
+        {
+            if (!IsLinux)
+            {
+                throw new InvalidDataException($"{Section}: QEMU betreibt nur den Linux-Gast");
+            }
+            if (ImageName is not null || ImageIndex is not null || ProductKey is not null)
+            {
+                throw new InvalidDataException($"{Section}: imageName, imageIndex und productKey gibt es nur für Windows");
+            }
+            if (StopAction == "Save")
+            {
+                throw new InvalidDataException($"{Section}.stopAction: QEMU kennt nur \"ShutDown\"");
+            }
+            if (QemuAccel is not ("Auto" or "Kvm" or "Tcg"))
+            {
+                throw new InvalidDataException($"{Section}.accel: \"Auto\", \"Kvm\" oder \"Tcg\"");
+            }
+            if (!ImagePath.EndsWith(".raw", StringComparison.OrdinalIgnoreCase) && !ImagePath.EndsWith(".qcow2", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"{Section}.imagePath: Debian-Cloud-Abbild (debian-13-generic-amd64.raw oder .qcow2) erwartet");
+            }
+        }
+        else if (IsLinux)
         {
             if (ImageName is not null || ImageIndex is not null || ProductKey is not null)
             {
@@ -146,6 +189,18 @@ public sealed record HyperVSettings
             throw new InvalidDataException($"{Section}.productKey hat nicht das Format XXXXX-XXXXX-XXXXX-XXXXX-XXXXX");
         }
     }
+}
+
+/// <summary>Direktstart eines Linux-Kerns (nur Tests, M10).</summary>
+public sealed record QemuDirectBoot(string Kernel, string Initrd, string Append);
+
+/// <summary>Betreiber der Offline-VM.</summary>
+public enum Hypervisor
+{
+    HyperV,
+
+    /// <summary>QEMU direkt auf einem Linux-Host (M10).</summary>
+    Qemu,
 }
 
 public enum SandboxState
@@ -332,6 +387,18 @@ public interface IHyperVHost
     Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken);
 
     Task RemoveVmAsync(CancellationToken cancellationToken);
+
+    /// <summary>Dateiendung der Transfer-Laufwerke (Hyper-V: VHDX, QEMU: Rohformat).</summary>
+    string DiskExtension => ".vhdx";
+
+    /// <summary>Statustext während des Aufbaus auf dem Host.</summary>
+    string BuildingText => "VM wird aufgebaut (Administratorrechte werden angefragt)";
+
+    /// <summary>Wo man nachsieht, wenn sich der Gast nicht meldet.</summary>
+    string GuestLogHint => @"Konsole der VM im Hyper-V-Manager prüfen, Gastprotokolle mit scripts\sandbox\Get-LocalAiGuestLogs.ps1";
+
+    /// <summary>Was zu tun ist, wenn der Not-Aus die VM nicht ausschalten konnte.</summary>
+    string TurnOffHint => "in Hyper-V-Manager ausschalten";
 }
 
 /// <summary>Bericht der Provisionierung im Gast (untrusted) und seine Prüfung.</summary>
@@ -532,7 +599,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         get { lock (_gate) { return _status; } }
     }
 
-    public string TemplateDisk => Path.Combine(_settings.VmDirectory, "transfer-template.vhdx");
+    public string TemplateDisk => Path.Combine(_settings.VmDirectory, "transfer-template" + _host.DiskExtension);
 
     public string WorkDirectory => Path.Combine(_settings.VmDirectory, "host");
 
@@ -1057,7 +1124,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         }
         catch (Exception ex) when (ex is HyperVException or OperationCanceledException or IOException)
         {
-            Lock("Not-Aus: VM konnte nicht ausgeschaltet werden (" + GuestReport.Clip(ex.Message) + ") – in Hyper-V-Manager ausschalten");
+            Lock("Not-Aus: VM konnte nicht ausgeschaltet werden (" + GuestReport.Clip(ex.Message) + ") – " + _host.TurnOffHint);
         }
         return Status.Text;
     }
@@ -1074,7 +1141,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             if (!File.Exists(_settings.ImagePath))
             {
                 Lock(_settings.IsLinux
-                    ? $"Debian-Abbild nicht gefunden: {_settings.ImagePath} (scripts\\sandbox\\Get-LocalAiLinuxPrerequisites.ps1)"
+                    ? $"Debian-Abbild nicht gefunden: {_settings.ImagePath} ({(_settings.IsQemu ? "scripts/linux/get-prerequisites.sh" : @"scripts\sandbox\Get-LocalAiLinuxPrerequisites.ps1")})"
                     : $"Windows-Abbild nicht gefunden: {_settings.ImagePath}");
                 return;
             }
@@ -1119,7 +1186,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             var started = DateTime.UtcNow;
             try
             {
-                SetStatus(SandboxState.Building, "VM wird aufgebaut (Administratorrechte werden angefragt)");
+                SetStatus(SandboxState.Building, _host.BuildingText);
                 using var buildTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 buildTimeout.CancelAfter(_settings.BuildTimeout);
                 try
@@ -1163,7 +1230,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             if (!reported)
             {
                 Lock($"VM hat sich nicht innerhalb von {_settings.BuildTimeout.TotalMinutes:F0} Minuten gemeldet (letzter Stand: {_signals.DescribeGuest()}) – " +
-                     "Konsole der VM im Hyper-V-Manager prüfen, Gastprotokolle mit scripts\\sandbox\\Get-LocalAiGuestLogs.ps1");
+                     _host.GuestLogHint);
                 return;
             }
 
@@ -1198,7 +1265,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     }
 
     private string NextDiskPath() =>
-        Path.Combine(_settings.VmDirectory, $"transfer-{Interlocked.Increment(ref _diskCounter):D6}.vhdx");
+        Path.Combine(_settings.VmDirectory, $"transfer-{Interlocked.Increment(ref _diskCounter):D6}{_host.DiskExtension}");
 
     private string BuildRequestJson(string guestDir, string transferDisk)
     {
@@ -1221,6 +1288,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             ["keepVmOnExit"] = _settings.KeepVmOnExit,
             ["guest"] = _settings.IsLinux ? "Linux" : "Windows",
             ["nestedVirtualization"] = _settings.NestedVirtualization,
+            ["hypervisor"] = _settings.Hypervisor.ToString(),
         };
         return request.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
@@ -1296,7 +1364,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 if (_settings.PauseOnNoAnswer && !_updating)
                 {
                     SetStatus(SandboxState.Paused, $"angehalten: {reason} – „VM weiter verwenden“ oder „VM neu aufbauen“ " +
-                                                   "(Gastprotokolle: scripts\\sandbox\\Get-LocalAiGuestLogs.ps1)");
+                                                   $"({_host.GuestLogHint})");
                     return new SandboxReply(null, $"Keine Antwort der Sandbox ({reason}) – Ergebnis unklar, Sandbox angehalten");
                 }
                 Lock($"{reason} – VM neu aufbauen");
@@ -1339,7 +1407,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         catch (HyperVException ex)
         {
             Lock(GuestReport.Clip(ex.Message));
-            return new SandboxReply(null, "Hyper-V-Fehler: " + GuestReport.Clip(ex.Message));
+            return new SandboxReply(null, (_settings.IsQemu ? "QEMU-Fehler: " : "Hyper-V-Fehler: ") + GuestReport.Clip(ex.Message));
         }
         finally
         {
@@ -1440,6 +1508,11 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             }
         }
         SetStatus(SandboxState.Removed, kept ? $"VM {how} (wird beim nächsten Start wiederverwendet)" : "VM entfernt");
+        if (_host is IAsyncDisposable disposable)
+        {
+            // QEMU (M10): die VM ist ein Kindprozess und endet mit dem Broker (auch bei keepVmOnExit bleiben nur die Dateien).
+            await disposable.DisposeAsync().ConfigureAwait(false);
+        }
         _shutdown.Dispose();
         _exchange.Dispose();
         // Erst jetzt (VM gespeichert, Zustand geschrieben) darf eine andere Instanz die VM übernehmen.

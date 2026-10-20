@@ -519,7 +519,7 @@ class Orchestrator:
             notes.append(f"Patches können nicht angewendet werden: der Projektfreigabe fehlen die Rechte {', '.join(missing)} "
                          "(in der Projektdatei unter rights ergänzen). Die Agenten liefern dann nur Vorschläge.")
         if not bridge.toolchains():
-            notes.append("Builds und Tests laufen nur in der Offline-VM (Betriebsart hyperv) mit registrierten Toolchains und "
+            notes.append("Builds und Tests laufen nur in der Offline-VM (Betriebsart hyperv bzw. qemu) mit registrierten Toolchains und "
                          "dem Recht Execute – in dieser Sitzung werden Tests nicht ausgeführt.")
         elif FolderRight.Execute not in rights:
             notes.append("Builds und Tests sind gesperrt: der Projektfreigabe fehlt das Recht Execute.")

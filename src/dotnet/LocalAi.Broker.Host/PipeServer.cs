@@ -380,7 +380,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 var available = new JsonObject
                 {
                     ["enabled"] = ToolchainCatalog is not null,
-                    ["reason"] = ToolchainCatalog is null ? "Toolchain-Aktionen nur in der Betriebsart hyperv" : null,
+                    ["reason"] = ToolchainCatalog is null ? "Toolchain-Aktionen nur in der Betriebsart hyperv bzw. qemu" : null,
                     ["toolchains"] = list,
                 };
                 if (OsDebug is not null)
@@ -455,14 +455,14 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             }
             case M.SandboxRebuild:
             {
-                var rebuild = RebuildSandbox ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Neuaufbau gibt es nur in der Betriebsart hyperv");
+                var rebuild = RebuildSandbox ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Neuaufbau gibt es nur in der Betriebsart hyperv bzw. qemu");
                 broker.PublishInfo("sandbox.status", "VM wird neu aufgebaut (auf Wunsch)");
                 await rebuild().ConfigureAwait(false);
                 return new JsonObject { ["rebuilding"] = true };
             }
             case M.SandboxContinue:
             {
-                var resume = ContinueSandbox ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Gibt es nur in der Betriebsart hyperv");
+                var resume = ContinueSandbox ?? throw new BrokerException(BrokerErrorCodes.Unprocessable, "Gibt es nur in der Betriebsart hyperv bzw. qemu");
                 var text = await resume().ConfigureAwait(false);
                 broker.PublishInfo("sandbox.status", text);
                 return new JsonObject { ["sandbox"] = text };

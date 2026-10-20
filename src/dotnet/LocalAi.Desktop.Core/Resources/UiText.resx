@@ -346,6 +346,15 @@ Empfänger: {7}</value>
   <data name="Starting" xml:space="preserve">
     <value>Broker wird gestartet …</value>
   </data>
+  <data name="Stopping" xml:space="preserve">
+    <value>Broker und VM werden beendet …</value>
+  </data>
+  <data name="ConfirmYes" xml:space="preserve">
+    <value>Ja</value>
+  </data>
+  <data name="ConfirmNo" xml:space="preserve">
+    <value>Nein</value>
+  </data>
   <data name="Connected" xml:space="preserve">
     <value>Verbunden mit Broker (Sitzung {0})</value>
   </data>

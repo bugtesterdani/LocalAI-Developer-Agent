@@ -74,7 +74,7 @@ public static class ToolchainTools
         if (catalog is null)
         {
             throw new BrokerException(BrokerErrorCodes.Forbidden,
-                "Toolchain-Aktionen gibt es nur in der Betriebsart hyperv (Offline-VM) – nie auf dem Host");
+                "Toolchain-Aktionen gibt es nur in der Betriebsart hyperv bzw. qemu (Offline-VM) – nie auf dem Host");
         }
         var name = arguments.TryGetProperty("toolchain", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : null;
         if (name is null || !Name.IsMatch(name))

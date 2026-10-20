@@ -97,7 +97,7 @@ public sealed class BrokerProcess : IAsyncDisposable
         {
             _process.StandardInput.Close();
             // Mit VM braucht das Herunterfahren länger: der Broker löscht die Sandbox-VM.
-            using var timeout = new CancellationTokenSource(Handshake.Mode == "hyperv" ? TimeSpan.FromMinutes(3) : TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(Handshake.Mode is "hyperv" or "qemu" ? TimeSpan.FromMinutes(3) : TimeSpan.FromSeconds(5));
             await _process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or IOException)

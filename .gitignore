@@ -17,3 +17,6 @@ data/
 
 # Persönliche Modellkonfiguration (überschreibt config/models.json, wird nie synchronisiert)
 config/models.local.json
+
+# Linux-Build (scripts/linux/build.sh)
+out/

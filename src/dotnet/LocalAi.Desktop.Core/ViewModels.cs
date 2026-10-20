@@ -663,17 +663,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>Betriebsart mit Offline-VM: Knopf „VM neu aufbauen“ sichtbar.</summary>
-    public bool IsHyperV => SandboxMode == "hyperv";
+    public bool IsHyperV => SandboxMode is "hyperv" or "qemu";
 
     /// <summary>Rückfrage vor dem Neuaufbau (dauert Minuten). Die Oberfläche setzt hier einen Dialog ein.</summary>
     public Func<bool> ConfirmRebuild { get; set; } = () => false;
+
+    /// <summary>Asynchrone Rückfrage (Avalonia unter Linux, M10); hat Vorrang vor <see cref="ConfirmRebuild"/>.</summary>
+    public Func<Task<bool>>? ConfirmRebuildAsync { get; set; }
 
     /// <summary>Weg der Webabrufe laut Broker (direkt oder über den konfigurierten Proxy).</summary>
     public string? WebRoute { get; private set; }
 
     private async Task RebuildSandboxAsync()
     {
-        if (!ConfirmRebuild())
+        if (!(ConfirmRebuildAsync is { } ask ? await ask().ConfigureAwait(true) : ConfirmRebuild()))
         {
             return;
         }
@@ -857,6 +860,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Bestätigung für proprietäre Toolchains (Lizenz). Die Oberfläche setzt hier einen Dialog ein.</summary>
     public Func<ToolchainInfo, bool> ConfirmLicense { get; set; } = _ => false;
 
+    /// <summary>Asynchrone Lizenzbestätigung (Avalonia unter Linux, M10); hat Vorrang vor <see cref="ConfirmLicense"/>.</summary>
+    public Func<ToolchainInfo, Task<bool>>? ConfirmLicenseAsync { get; set; }
+
     public string? ToolchainsEmptyText
     {
         get => _toolchainsEmptyText;
@@ -879,7 +885,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     internal async Task RegisterToolchainAsync(ToolchainItemViewModel item)
     {
-        if (item.Info.Proprietary && !ConfirmLicense(item.Info))
+        if (item.Info.Proprietary && !(ConfirmLicenseAsync is { } ask ? await ask(item.Info).ConfigureAwait(true) : ConfirmLicense(item.Info)))
         {
             return;
         }

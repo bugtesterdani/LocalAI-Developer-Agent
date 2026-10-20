@@ -89,6 +89,19 @@ def _block_size(handle_file) -> int:  # pragma: no cover - nur Linux-Gast
     return struct.unpack("<Q", buf)[0]
 
 
+def _drop_cache(handle_file) -> None:  # pragma: no cover - nur Linux-Gast
+    """Seitencache des Geräts verwerfen: unter QEMU (M10) tauscht der Host den Inhalt hinter demselben Gerät aus."""
+    import fcntl
+
+    blkflsbuf = 0x1261
+    try:
+        fcntl.ioctl(handle_file.fileno(), blkflsbuf)
+    except OSError:
+        pass
+    if hasattr(os, "posix_fadvise"):
+        os.posix_fadvise(handle_file.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+
+
 def _size_of(path: str, f) -> int:
     if path.startswith("\\\\.\\"):
         return _device_size(f)
@@ -126,6 +139,8 @@ class TransferDisk:
                 raise TransferError(f"Transfer-Laufwerk hat {size} statt {self.expected_size} Bytes")
             if len(image) > size:
                 raise TransferError("Container passt nicht auf das Transfer-Laufwerk")
+            if path.startswith("/dev/"):
+                _drop_cache(f)
             f.seek(0)
             first = f.read(HEADER_SIZE)
             if any(first):
@@ -158,9 +173,10 @@ def _read_header_uncached(path: str) -> bytes:
 
 def find_transfer_disk_linux(expected_size: int, sys_block: pathlib.Path = pathlib.Path("/sys/block"),
                              dev: pathlib.Path = pathlib.Path("/dev")) -> str:
-    """Linux-Gast (M8): SCSI-Laufwerk mit genau der Größe des Transfer-Laufwerks und leerem Kopf (``/dev/sdX``)."""
+    """Linux-Gast: Laufwerk mit genau der Größe des Transfer-Laufwerks und leerem Kopf – ``/dev/sdX`` unter Hyper-V (M8),
+    ``/dev/vdX`` (virtio) unter QEMU (M10)."""
     candidates = []
-    for entry in sorted(sys_block.glob("sd*")):
+    for entry in sorted([*sys_block.glob("sd*"), *sys_block.glob("vd*")]):
         try:
             sectors = int((entry / "size").read_text(encoding="ascii").strip())
         except (OSError, ValueError):

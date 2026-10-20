@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import pathlib
+import shutil
 import ssl
 import subprocess
 import sys
@@ -41,13 +42,29 @@ def _stage(stage: str, args: list[str], work: pathlib.Path, timeout: int, low: b
     if os.name == "nt" and low:
         from localai.worker import winproc
         return winproc.run(sys.executable, command, str(work), env, timeout, str(log), True, 512)
+    prefix: list[str] = []
+    if sys.platform == "linux" and low:
+        prefix = linux_isolation(work, network=stage == "fetch")
     with open(log, "wb") as out:
         try:
-            process = subprocess.run([sys.executable, *command], cwd=work, env={**env, "PATH": os.environ.get("PATH", "")},
+            process = subprocess.run([*prefix, sys.executable, *command], cwd=work, env={**env, "PATH": os.environ.get("PATH", "")},
                                      stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False)
             return process.returncode, False
         except subprocess.TimeoutExpired:
             return -1, True
+
+
+def linux_isolation(work: pathlib.Path, network: bool) -> list[str]:
+    """Linux-Host (M10) – Gegenstück zur niedrigen Integritätsstufe unter Windows: bubblewrap mit nur lesbarem
+    Dateisystem (schreibbar nur der Quarantäneordner), eigenen Namensräumen, ohne Netz außer beim Abruf selbst."""
+    bwrap = shutil.which("bwrap")
+    if bwrap is None:
+        raise OSError("bubblewrap (bwrap) fehlt – scripts/linux/install-host.sh ausführen oder web.lowIntegrity: false setzen")
+    args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+            "--bind", str(work), str(work), "--unshare-all", "--die-with-parent", "--new-session"]
+    if network:
+        args.append("--share-net")
+    return [*args, "--"]
 
 
 def _label_low(work: pathlib.Path) -> None:

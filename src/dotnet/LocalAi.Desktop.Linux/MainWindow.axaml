@@ -1,0 +1,478 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:LocalAi.Desktop.Linux"
+        x:Class="LocalAi.Desktop.Linux.MainWindow"
+        Title="{loc:T AppTitle}"
+        Width="1440" Height="860" MinWidth="1000" MinHeight="600"
+        FontSize="13"
+        Background="#F9FAFB">
+    <!-- M10: Linux-Oberfläche (Avalonia) – gleicher Aufbau und dieselben Bindungen wie LocalAi.Desktop/MainWindow.xaml (WPF). -->
+    <Window.Styles>
+        <Style Selector="TabItem">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="10,4" />
+        </Style>
+        <Style Selector="Button.top">
+            <Setter Property="Foreground" Value="#111827" />
+            <Setter Property="Background" Value="#E5E7EB" />
+        </Style>
+        <Style Selector="Button.top:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#374151" />
+            <Setter Property="Foreground" Value="#9CA3AF" />
+        </Style>
+        <Style Selector="TextBlock.section">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="#111827" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style Selector="TextBlock.label">
+            <Setter Property="Foreground" Value="#4B5563" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+        </Style>
+        <!-- Kopierbare, nicht editierbare Werte; Inhalte werden nie als Markup interpretiert. -->
+        <Style Selector="TextBox.copy">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="TextBox.mono">
+            <Setter Property="FontFamily" Value="DejaVu Sans Mono, Liberation Mono, Noto Sans Mono, monospace" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="TextBlock.mono">
+            <Setter Property="FontFamily" Value="DejaVu Sans Mono, Liberation Mono, Noto Sans Mono, monospace" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="Button.top">
+            <Setter Property="Padding" Value="12,4" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+        <Style Selector="TextBlock.sandbox">
+            <Setter Property="Foreground" Value="#FCD34D" />
+        </Style>
+        <Style Selector="TextBlock.sandbox.problem, TextBlock.sandbox.unsafe">
+            <Setter Property="Foreground" Value="#FCA5A5" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="TextBlock.state">
+            <Setter Property="Foreground" Value="#374151" />
+        </Style>
+        <Style Selector="TextBlock.state.problem">
+            <Setter Property="Foreground" Value="#B91C1C" />
+            <Setter Property="FontWeight" Value="Bold" />
+        </Style>
+        <Style Selector="TextBlock.sender">
+            <Setter Property="Foreground" Value="#1F2937" />
+        </Style>
+        <Style Selector="TextBlock.sender.user">
+            <Setter Property="Foreground" Value="#1D4ED8" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel>
+        <!-- Kopfzeile -->
+        <Border DockPanel.Dock="Top" Background="#1F2937" Padding="12,8">
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                    <Button Classes="top" Content="{loc:T StartFakeRun}" Command="{Binding StartFakeRunCommand}" />
+                    <Button Classes="top" Content="{loc:T ContinueSandbox}" Command="{Binding ContinueSandboxCommand}"
+                            IsVisible="{Binding IsSandboxPaused}" />
+                    <Button Classes="top" Content="{loc:T RebuildSandbox}" Command="{Binding RebuildSandboxCommand}"
+                            IsVisible="{Binding IsHyperV}" />
+                    <Button Classes="top" Content="{loc:T ReleaseStop}" Command="{Binding ReleaseCommand}" />
+                    <Button Content="{loc:T EmergencyStop}" Command="{Binding EmergencyStopCommand}"
+                            AutomationProperties.Name="{loc:T EmergencyStop}"
+                            Background="#B91C1C" Foreground="White" FontWeight="Bold" Padding="16,4" />
+                </StackPanel>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" ClipToBounds="True">
+                    <TextBlock Text="{loc:T AppTitle}" Foreground="White" FontWeight="Bold" />
+                    <TextBlock Text="  |  " Foreground="#9CA3AF" />
+                    <TextBlock Text="{loc:T Project}" Foreground="#D1D5DB" />
+                    <TextBlock Text=": " Foreground="#D1D5DB" />
+                    <TextBlock Text="{Binding ProjectText}" Foreground="#D1D5DB" MaxWidth="320" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding ProjectText}" />
+                    <TextBlock Text="  |  " Foreground="#9CA3AF" />
+                    <TextBlock Classes="sandbox" Text="{Binding SandboxText}" ToolTip.Tip="{Binding SandboxText}" MaxWidth="420"
+                               TextTrimming="CharacterEllipsis"
+                               Classes.problem="{Binding IsSandboxProblem}" Classes.unsafe="{Binding IsUnsafeSandbox}" />
+                    <TextBlock Text="  |  " Foreground="#9CA3AF" />
+                    <TextBlock Text="{Binding StatusText}" Foreground="#D1D5DB" />
+                    <TextBlock x:Name="StartupStatus" Foreground="#D1D5DB" Margin="8,0,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Not-Aus-Hinweis: Text, nicht nur Farbe -->
+        <Border DockPanel.Dock="Top" Background="#FEE2E2" BorderBrush="#B91C1C" BorderThickness="0,0,0,2" Padding="12,6"
+                IsVisible="{Binding IsStopped}">
+            <TextBlock Text="{loc:T StoppedBanner}" Foreground="#7F1D1D" FontWeight="Bold" />
+        </Border>
+
+        <!-- Meldungen -->
+        <StackPanel DockPanel.Dock="Top" Margin="12,4,12,0">
+            <SelectableTextBlock Text="{Binding ErrorText}" Foreground="#B91C1C" TextWrapping="Wrap"
+                                 IsVisible="{Binding ErrorText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            <SelectableTextBlock Text="{Binding InfoText}" Foreground="#065F46" TextWrapping="Wrap"
+                                 IsVisible="{Binding InfoText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+
+        <Grid Margin="12" ColumnDefinitions="230,*,600">
+            <!-- Agenten: Zustand als Text (nicht nur Farbe), Abbruch pro Agent -->
+            <DockPanel Grid.Column="0" Margin="0,0,12,0">
+                <TextBlock DockPanel.Dock="Top" Text="{loc:T Agents}" Classes="section" />
+                <Border DockPanel.Dock="Bottom" BorderBrush="#E5E7EB" BorderThickness="1" Background="White" Padding="6" Margin="0,8,0,0">
+                    <StackPanel>
+                        <TextBlock Classes="state" Text="{Binding OrchestratorText}" TextWrapping="Wrap" FontSize="11"
+                                   Classes.problem="{Binding IsOrchestratorProblem}" />
+                        <Button Content="{loc:T StopOrchestrator}" Command="{Binding StopOrchestratorCommand}" Margin="0,6,0,0" Padding="8,2"
+                                IsVisible="{Binding IsOrchestratorProblem}" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding Agents}" SelectedItem="{Binding SelectedAgent}"
+                         AutomationProperties.Name="{loc:T Agents}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="0,3">
+                                <Button DockPanel.Dock="Right" Content="{loc:T CancelAgent}" Command="{Binding CancelCommand}"
+                                        Padding="6,0" Margin="6,0,0,0" VerticalAlignment="Center"
+                                        AutomationProperties.Name="{Binding Name}"
+                                        IsVisible="{Binding CanCancel}" />
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                    <TextBlock Classes="state" Text="{Binding StateText}" TextTrimming="CharacterEllipsis"
+                                               ToolTip.Tip="{Binding DetailText}" Classes.problem="{Binding IsStalled}" />
+                                </StackPanel>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <!-- Chat, Live-Aktivität, Ereignisse, Toolchains, System -->
+            <TabControl Grid.Column="1" Margin="0,0,12,0" SelectedIndex="{Binding SelectedTab}">
+                <TabItem Header="{loc:T TabChat}">
+                    <DockPanel Margin="0,6,0,0">
+                        <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                            <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0">
+                                <Button Content="{loc:T SendChat}" Command="{Binding SendChatCommand}" Padding="14,6" FontWeight="SemiBold" />
+                                <Button Content="{loc:T CancelRun}" Command="{Binding CancelRunCommand}" Padding="14,4" Margin="0,6,0,0" />
+                            </StackPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatHint}" Foreground="#4B5563" FontSize="11" Margin="0,0,0,2" />
+                            <TextBox Text="{Binding ChatInput}" AcceptsReturn="True" TextWrapping="Wrap"
+                                     MinHeight="56" MaxHeight="160"
+                                     AutomationProperties.Name="{loc:T ChatHint}">
+                                <TextBox.KeyBindings>
+                                    <KeyBinding Gesture="Ctrl+Enter" Command="{Binding SendChatCommand}" />
+                                </TextBox.KeyBindings>
+                            </TextBox>
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatEmpty}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,0,0,8"
+                                   IsVisible="{Binding !HasChat}" />
+                        <ListBox ItemsSource="{Binding Chat}" loc:AutoScroll.ToEnd="True"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,4">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Classes="sender" Text="{Binding Sender}" FontWeight="Bold" Classes.user="{Binding IsUser}" />
+                                            <TextBlock Text="{Binding Time}" Foreground="#6B7280" Margin="8,0,0,0" />
+                                        </StackPanel>
+                                        <TextBox Classes="copy" AutomationProperties.Name="{Binding Text}" Text="{Binding Text, Mode=OneWay}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabActivity}">
+                    <DockPanel Margin="0,6,0,0" DataContext="{Binding SelectedAgent}">
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Content="{loc:T CancelAgent}" Command="{Binding CancelCommand}" Padding="10,2"
+                                    VerticalAlignment="Top" AutomationProperties.Name="{Binding Name}" />
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" />
+                                    <TextBlock Text="{Binding StateText}" Margin="12,3,0,0" FontWeight="SemiBold" />
+                                </StackPanel>
+                                <TextBlock Text="{loc:T LabelCurrentTask}" Classes="label" />
+                                <TextBlock Text="{Binding TaskText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{loc:T LabelMetrics}" Classes="label" />
+                                <TextBlock Text="{Binding MetricText}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding DetailText}" Foreground="#4B5563" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Bottom" Text="{loc:T ActivityHint}" Foreground="#6B7280" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <Grid Margin="0,8,0,0" RowDefinitions="Auto,2*,Auto,Auto,Auto,*">
+                            <TextBlock Grid.Row="0" Text="{loc:T LabelOutput}" Classes="section" />
+                            <TextBox Grid.Row="1" Classes="mono" Text="{Binding OutputText, Mode=OneWay}" IsReadOnly="True"
+                                     TextWrapping="Wrap" loc:AutoScroll.ToEnd="True"
+                                     AutomationProperties.Name="{loc:T LabelOutput}" />
+                            <Expander Grid.Row="2" Header="{loc:T LabelThinking}" Margin="0,6,0,0" HorizontalAlignment="Stretch"
+                                      IsVisible="{Binding HasThinking}">
+                                <TextBox Classes="mono" Text="{Binding ThinkingText, Mode=OneWay}" IsReadOnly="True"
+                                         TextWrapping="Wrap" MaxHeight="200" loc:AutoScroll.ToEnd="True"
+                                         Foreground="#4B5563" AutomationProperties.Name="{loc:T LabelThinking}" />
+                            </Expander>
+                            <GridSplitter Grid.Row="3" Height="5" HorizontalAlignment="Stretch" Background="#E5E7EB" Margin="0,6,0,6" />
+                            <TextBlock Grid.Row="4" Text="{loc:T LabelFeed}" Classes="section" />
+                            <ListBox Grid.Row="5" ItemsSource="{Binding Entries}" loc:AutoScroll.ToEnd="True" MinHeight="80"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Foreground="#6B7280" Width="60" />
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding Kind}" FontWeight="SemiBold" Width="80" />
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabEvents}">
+                    <ListBox ItemsSource="{Binding EventLog}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Time}" Foreground="#6B7280" Width="64" />
+                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabToolchains}">
+                    <!-- Toolchains: Registrierung als sichtbare, bestätigte Aktion -->
+                    <DockPanel Margin="0,6,0,0">
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Content="{loc:T ScanToolchains}" Command="{Binding ScanToolchainsCommand}" Padding="8,2" />
+                            <TextBlock Text="{loc:T Toolchains}" Classes="section" />
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{loc:T ToolchainsHint}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="11" />
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding ToolchainsEmptyText}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,4,0,0"
+                                   IsVisible="{Binding ToolchainsEmptyText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Toolchains}" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#E5E7EB" BorderThickness="1" Background="White" Padding="6" Margin="0,4,0,0">
+                                            <DockPanel>
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                                                    <Button Content="{loc:T RegisterToolchain}" Command="{Binding RegisterCommand}" Padding="8,2" Margin="4,0,0,0" />
+                                                    <Button Content="{loc:T UnregisterToolchain}" Command="{Binding UnregisterCommand}" Padding="8,2" Margin="4,0,0,0" />
+                                                </StackPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding TitleText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding StatusText}" Foreground="#374151" TextWrapping="Wrap" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{Binding TitleText}" Text="{Binding DetailText, Mode=OneWay}" FontSize="11" />
+                                                    <TextBlock Text="{Binding ProblemsText}" Foreground="#B91C1C" TextWrapping="Wrap"
+                                                               IsVisible="{Binding ProblemsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="{loc:T TabSystem}">
+                    <!-- System (M7): Versions-/Offline-Manifest, Audit-Prüfung, Diagnosepaket, Sicherung -->
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                        <StackPanel>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="{loc:T SystemRefresh}" Command="{Binding RefreshManifestCommand}" Padding="8,2" />
+                                <TextBlock Text="{loc:T SystemVersions}" Classes="section" />
+                            </DockPanel>
+                            <TextBlock Text="{loc:T SystemMissing}" Classes="label" Foreground="DarkRed"
+                                       IsVisible="{Binding ManifestProblemsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBox Classes="copy" Text="{Binding ManifestProblemsText, Mode=OneWay}" Foreground="#B91C1C"
+                                     AutomationProperties.Name="{loc:T SystemMissing}"
+                                     IsVisible="{Binding ManifestProblemsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBox Classes="copy mono" Text="{Binding ManifestText, Mode=OneWay}"
+                                     AutomationProperties.Name="{loc:T SystemVersions}" Margin="0,4,0,0" />
+
+                            <TextBlock Text="{loc:T SystemActions}" Classes="section" Margin="0,12,0,4" />
+                            <TextBlock Text="{loc:T SystemHint}" TextWrapping="Wrap" Foreground="#4B5563" FontSize="11" />
+                            <WrapPanel Margin="0,6,0,0">
+                                <Button Content="{loc:T VerifyAudit}" Command="{Binding VerifyAuditCommand}" Padding="8,2" Margin="0,0,6,4" />
+                                <Button Content="{loc:T CreateBackup}" Command="{Binding CreateBackupCommand}" Padding="8,2" Margin="0,0,6,4" />
+                                <Button Content="{loc:T ExportDiagnostics}" Command="{Binding ExportDiagnosticsCommand}" Padding="8,2" Margin="0,0,6,4" />
+                            </WrapPanel>
+                            <CheckBox Content="{loc:T IncludeLogs}" IsChecked="{Binding IncludeLogs}" Margin="0,2,0,0" />
+                            <TextBox Classes="copy" Text="{Binding SystemResultText, Mode=OneWay}" Margin="0,8,0,0"
+                                     AutomationProperties.Name="{loc:T SystemActions}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+
+            <!-- Freigaben -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Text="{Binding ApprovalsHeader}" Classes="section" />
+                <TextBlock DockPanel.Dock="Top" Text="{loc:T NoApprovals}" Foreground="#4B5563" IsVisible="{Binding !HasApprovals}" />
+                <ListBox DockPanel.Dock="Top" ItemsSource="{Binding Approvals}" SelectedItem="{Binding SelectedApproval}"
+                         MaxHeight="170" Margin="0,0,0,8" IsVisible="{Binding HasApprovals}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,2">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Summary}" Foreground="#4B5563" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <!-- Freigabekarte -->
+                <ContentControl Content="{Binding SelectedApproval}" Focusable="False"
+                                IsVisible="{Binding SelectedApproval, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate>
+                            <Border Background="White" BorderBrush="#D1D5DB" BorderThickness="1" Padding="12">
+                                <DockPanel>
+                                    <!-- Entscheidungsleiste: Fokus standardmäßig auf Ablehnen, Enter erlaubt nie. -->
+                                    <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                        <TextBlock Text="{loc:T SelectionChangedHint}" Foreground="#92400E" TextWrapping="Wrap" Margin="0,0,0,6"
+                                                   IsVisible="{Binding SelectionChanged}" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <Button x:Name="DenyButton" Content="{loc:T Deny}" Command="{Binding DenyCommand}"
+                                                    Padding="14,6" Margin="0,0,8,0" IsDefault="False" IsCancel="False"
+                                                    loc:FocusOnShow.Enabled="True" />
+                                            <Button Content="{loc:T ApplySelection}" Command="{Binding ApplySelectionCommand}"
+                                                    Padding="14,6" Margin="0,0,8,0" IsVisible="{Binding IsBatch}" />
+                                            <Button Content="{Binding ApproveText}" Command="{Binding ApproveCommand}"
+                                                    AutomationProperties.Name="{Binding ApproveText}"
+                                                    Padding="14,6" IsDefault="False" FontWeight="SemiBold" />
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="Bold" />
+
+                                            <TextBlock Text="{loc:T LabelPurpose}" Classes="label" />
+                                            <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelPurpose}" Text="{Binding PurposeText, Mode=OneWay}" />
+
+                                            <Grid Margin="0,4,0,0" ColumnDefinitions="*,*">
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="{loc:T LabelRole}" Classes="label" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelRole}" Text="{Binding RoleText, Mode=OneWay}" />
+                                                    <TextBlock Text="{loc:T LabelTool}" Classes="label" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelTool}" Text="{Binding ToolText, Mode=OneWay}" />
+                                                    <TextBlock Text="{loc:T LabelValidUntil}" Classes="label" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelValidUntil}" Text="{Binding ValidUntilText, Mode=OneWay}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{loc:T LabelSnapshot}" Classes="label" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelSnapshot}" Text="{Binding SnapshotText, Mode=OneWay}" />
+                                                    <TextBlock Text="{loc:T LabelSandbox}" Classes="label" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelSandbox}" Text="{Binding SandboxText, Mode=OneWay}" />
+                                                    <TextBlock Text="{loc:T LabelParent}" Classes="label" IsVisible="{Binding HasParent}" />
+                                                    <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelParent}" Text="{Binding ParentText, Mode=OneWay}"
+                                                             IsVisible="{Binding HasParent}" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <TextBlock Text="{loc:T LabelHash}" Classes="label" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelHash}" Text="{Binding HashText, Mode=OneWay}" />
+
+                                            <TextBlock Text="{loc:T LabelSideEffects}" Classes="label" />
+                                            <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelSideEffects}" Text="{Binding SideEffectsText, Mode=OneWay}" />
+
+                                            <TextBlock Text="{loc:T LabelArguments}" Classes="label" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelArguments}" Text="{Binding ArgumentsText, Mode=OneWay}" />
+
+                                            <!-- Toolchain.* und OsDebug.*: Aktion bzw. Sitzung und Parameter in Klartext -->
+                                            <TextBlock Text="{loc:T LabelCommand}" Classes="label" IsVisible="{Binding HasCommand}" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelCommand}" Text="{Binding CommandText, Mode=OneWay}"
+                                                     IsVisible="{Binding HasCommand}" />
+
+                                            <!-- Web.Fetch: genau eine URL mit Grenzen (erste Freigabe) -->
+                                            <TextBlock Text="{loc:T LabelWebFetch}" Classes="label" IsVisible="{Binding IsWebFetch}" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelWebFetch}" Text="{Binding WebFetchText, Mode=OneWay}"
+                                                     IsVisible="{Binding IsWebFetch}" />
+                                            <TextBlock Text="{loc:T LabelWebDataWarnings}" Classes="label" Foreground="DarkRed" IsVisible="{Binding HasWebDataWarnings}" />
+                                            <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelWebDataWarnings}" Text="{Binding WebDataWarningsText, Mode=OneWay}"
+                                                     IsVisible="{Binding HasWebDataWarnings}" />
+                                            <TextBlock Text="{loc:T LabelWebData}" Classes="label" IsVisible="{Binding IsWebFetch}" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelWebData}" Text="{Binding WebDataText, Mode=OneWay}"
+                                                     IsVisible="{Binding IsWebFetch}" />
+                                            <TextBlock Text="{loc:T LabelWebRequest}" Classes="label" IsVisible="{Binding IsWebFetch}" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelWebRequest}" Text="{Binding WebRequestText, Mode=OneWay}"
+                                                     IsVisible="{Binding IsWebFetch}" />
+
+                                            <!-- Web.Content: exakt dieser bereinigte Text an genau diesen Agenten (zweite Freigabe) -->
+                                            <TextBlock Text="{loc:T LabelWebSource}" Classes="label" IsVisible="{Binding IsWebContent}" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelWebSource}" Text="{Binding WebSourceText, Mode=OneWay}"
+                                                     IsVisible="{Binding IsWebContent}" />
+                                            <TextBlock Text="{loc:T LabelWebResponse}" Classes="label" IsVisible="{Binding IsWebContent}" />
+                                            <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelWebResponse}" Text="{Binding WebResponseText, Mode=OneWay}"
+                                                     IsVisible="{Binding IsWebContent}" />
+                                            <TextBlock Text="{loc:T LabelWebWarnings}" Classes="label" Foreground="DarkRed" IsVisible="{Binding HasWebWarnings}" />
+                                            <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelWebWarnings}" Text="{Binding WebWarningsText, Mode=OneWay}"
+                                                     IsVisible="{Binding HasWebWarnings}" />
+                                            <TextBlock Text="{loc:T LabelWebText}" Classes="label" IsVisible="{Binding IsWebContent}" />
+                                            <TextBox Classes="mono" Text="{Binding WebText, Mode=OneWay}" IsReadOnly="True"
+                                                     TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="420"
+                                                     AutomationProperties.Name="{loc:T LabelWebText}" IsVisible="{Binding IsWebContent}" />
+
+                                            <!-- Patch.Apply / Workspace.ExportPatch: vollständiger Diff je Datei, lesbar -->
+                                            <TextBlock Text="{loc:T LabelPatch}" Classes="label" IsVisible="{Binding HasPatch}" />
+                                            <TextBox Classes="mono" Text="{Binding PatchText, Mode=OneWay}" IsReadOnly="True"
+                                                     TextWrapping="NoWrap" AcceptsReturn="True" MaxHeight="420"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                     AutomationProperties.Name="{loc:T LabelPatch}" IsVisible="{Binding HasPatch}" />
+
+                                            <DockPanel Margin="0,10,0,4">
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding CountText}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{loc:T LabelTargets}" Classes="section" Margin="0" />
+                                            </DockPanel>
+
+                                            <!-- Sammelfreigabe: Filter und Sammelauswahl -->
+                                            <DockPanel Margin="0,0,0,4" IsVisible="{Binding IsBatch}">
+                                                <Button DockPanel.Dock="Right" Content="{loc:T DeselectAllVisible}"
+                                                        Command="{Binding DeselectAllVisibleCommand}" Padding="8,2" Margin="6,0,0,0" />
+                                                <Button DockPanel.Dock="Right" Content="{loc:T SelectAllVisible}"
+                                                        Command="{Binding SelectAllVisibleCommand}" Padding="8,2" Margin="6,0,0,0" />
+                                                <TextBox Text="{Binding FilterText}" AutomationProperties.Name="{loc:T Filter}"
+                                                         PlaceholderText="{loc:T Filter}" ToolTip.Tip="{loc:T Filter}" />
+                                            </DockPanel>
+
+                                            <ListBox ItemsSource="{Binding VisibleTargets}" MaxHeight="320">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <DockPanel Margin="0,1">
+                                                            <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0"
+                                                                      IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                      IsEnabled="{Binding $parent[ListBox].DataContext.IsBatch}"
+                                                                      AutomationProperties.Name="{Binding Path}" />
+                                                            <TextBlock DockPanel.Dock="Right" Classes="mono" Text="{Binding HashText}" Foreground="#6B7280" Margin="8,0,0,0" />
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding LinesText}" Foreground="#6B7280" Margin="8,0,0,0" />
+                                                            <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" />
+                                                        </DockPanel>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+
+                                            <TextBlock Text="{loc:T UntrustedHint}" Foreground="#6B7280" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                        </StackPanel>
+                                    </ScrollViewer>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

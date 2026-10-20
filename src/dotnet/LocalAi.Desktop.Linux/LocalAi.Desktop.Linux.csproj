@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    M10: Oberfläche für Linux (Avalonia). Eigenes Projekt, damit die Windows-Oberfläche (WPF, LocalAi.Desktop) keine
+    Avalonia-Pakete bekommt. Gemeinsam ist nur LocalAi.Desktop.Core (ViewModels, Texte, Broker-Verbindung).
+    Nicht in LocalAi.slnx, sondern in LocalAi.Linux.slnx.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>LocalAi.Desktop.Linux</AssemblyName>
+    <RootNamespace>LocalAi.Desktop.Linux</RootNamespace>
+    <ApplicationManifest />
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LocalAi.Desktop.Core\LocalAi.Desktop.Core.csproj" />
+    <!-- Broker-Prozess wird neben die Anwendung kopiert und von ihr gestartet (wie unter Windows). -->
+    <ProjectReference Include="..\LocalAi.Broker.Host\LocalAi.Broker.Host.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LocalAi.Desktop.Linux.Tests" />
+  </ItemGroup>
+</Project>

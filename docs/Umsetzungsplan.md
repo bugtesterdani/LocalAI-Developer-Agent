@@ -54,7 +54,7 @@ Aufwand in Personentagen als Größenordnung; Referenztermine für eine Person i
 | Puffer | | 7 | bis 18.03.2027 |
 | **M8 Linux-Gast** (vorgezogen) | B18 Linux-Gast (Debian 13), mehrere VMs mit Start bei Bedarf, Gastauswahl je Projekt/Toolchain | – | vor Doku/Paketierung |
 | **M9 OS-Debugging** | QEMU in der Linux-VM: eigenes Betriebssystem booten, debuggen, bedienen; Debug-Sitzung mit einer Freigabe | – | vor Doku/Paketierung |
-| **M10 Linux-Host** | Broker, Orchestrator und Oberfläche unter Linux (eigenes Avalonia-Projekt, WPF bleibt ohne Avalonia-Pakete), QEMU statt Hyper-V | – | vor Doku/Paketierung |
+| **M10 Linux-Host** | Broker, Orchestrator und Oberfläche unter Linux (eigenes Avalonia-Projekt, WPF bleibt ohne Avalonia-Pakete), QEMU statt Hyper-V | – | umgesetzt 20.10.2026 |
 | Erweiterungen | B13 Modellvergleich/Embeddings, B14 Git/Paketbeschaffung | – | danach |
 
 Kritischer Pfad: B01 → B02 → B04 → B16 → B05 → B06 → B07 → B08 → B12 → B19 → B10 → B11.
@@ -166,6 +166,21 @@ QEMU als `localai-emu` ohne Netz mit `no_new_privs`. Orchestrator: Aktion `debug
 Sitzung endet mit der Aufgabe. Linux-VM: QEMU-Pakete samt Abhängigkeiten (`tools/prereq/debian_closure.py`),
 `nestedVirtualization`. Oberfläche: Freigabekarte der Debug-Sitzung. Prüfanleitung `docs/pruefung-M9.md`.
 
+## M10 – Linux-Host (QEMU)
+
+**Umgesetzt (Stand 20.10.2026):** Betriebsart `qemu` mit Abschnitt `sandbox.qemu` (Vorlage `config/localai.linux.json`,
+Projekt `config/m10-linux-project.json`). `QemuVmHost` ersetzt die PowerShell-/Hyper-V-Seite hinter derselben
+VM-Steuerung (Aufbau, Selbsttest, Start bei Bedarf, Leerlauf, Wiederverwendung, Not-Aus): Aufbau ohne root
+(`qemu-img`, `mkfs.fat`/`mcopy`), QEMU mit fester Befehlszeile (`-nodefaults`, `-nic none`, seccomp, Unix-Sockets),
+Netzwerkgeräte per QMP gezählt, Verbindungskanal über virtio-serial (Gastdienst `localai.guest.qemulink` statt KVP und
+Copy-VMFile), Transfer-Laufwerk im Rohformat mit Tausch per `blockdev-reopen`, Konsolenprotokoll. Gast:
+Provisionierung wählt Link-Dienst statt hyperv-daemons, Transfer-Laufwerk auch als virtio (`/dev/vdX`, Seitencache
+verworfen). Linux-Host: Datenordner 0700, Schlüssel 0600, Webabruf in bubblewrap, Diagnose prüft QEMU, Werkzeuge und
+KVM. Oberfläche: eigenes Projekt `LocalAi.Desktop.Linux` (Avalonia 12) nur mit `LocalAi.Desktop.Core`, Lösung
+`LocalAi.Linux.slnx`, Kopftests ohne Bildschirm; asynchrone Rückfragen im Core. Skripte `scripts/linux/*`,
+`tools/prereq/linux_prerequisites.py`. Echter QEMU-Test mit Test-Gast (`tests/qemu`, `test_m10_qemu.py`).
+Prüfanleitung `docs/pruefung-M10.md`.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
@@ -177,3 +192,4 @@ Sitzung endet mit der Aufgabe. Linux-VM: QEMU-Pakete samt Abhängigkeiten (`tool
 | HALCON-Lizenz in der VM ohne Netzwerkkarte/USB (MAC- oder Dongle-Bindung greift nicht) | Lizenz ohne Bindung (z. B. Evaluierung) über `deploy`; ohne Lizenz bleibt die XML-Prüfung der `.hdev`-Patches, Toolchain `hdevelop` entfällt |
 | Windows-/WPF-/Hyper-V-Teile nur auf Danis PC testbar | Prüfanleitung + Skripte je Meilenstein, kurze Feedbackschleifen |
 | Linux-Gast: hyperv-daemons (KVP, Dateikopie über uio ab Kernel 6.10) verhalten sich je Debian-Stand anders | eigene systemd-Einheiten, Prüfung im Bericht („Dienst für Copy-VMFile läuft nicht“), Protokoll `/var/log/localai-provision.log` |
+| Linux-Host: Debian-Abbild, cloud-init und KVM nur auf echter Hardware prüfbar; Avalonia-Darstellung je Desktop verschieden | Test-Gast mit echtem QEMU für alle Host-Wege, `console.log` mit Provisionierungsprotokoll, Prüfanleitung M10 |

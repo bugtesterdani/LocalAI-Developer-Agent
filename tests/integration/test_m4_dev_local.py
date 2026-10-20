@@ -82,7 +82,7 @@ def test_patch_ziele_und_rechte_im_broker(tmp_path, broker_factory):
 
 def test_sec20_toolchain_nie_auf_dem_host(tmp_path, broker_factory):
     ui, orch, snap, _root = sandbox(tmp_path, broker_factory)
-    assert orch.toolchains_available() == {"enabled": False, "reason": "Toolchain-Aktionen nur in der Betriebsart hyperv",
+    assert orch.toolchains_available() == {"enabled": False, "reason": "Toolchain-Aktionen nur in der Betriebsart hyperv bzw. qemu",
                                            "toolchains": []}
     for tool, args in (("Toolchain.Test", {"toolchain": "python", "parameters": {"path": "."}}),
                        ("Toolchain.Run", {"toolchain": "python", "parameters": {"script": "src/calc.py"}})):

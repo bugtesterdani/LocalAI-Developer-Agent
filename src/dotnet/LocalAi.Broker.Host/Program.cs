@@ -24,6 +24,11 @@ catch (Exception ex) when (ex is ArgumentException or JsonException or IOExcepti
     return 2;
 }
 Directory.CreateDirectory(options.DataDirectory);
+if (!OperatingSystem.IsWindows())
+{
+    // M10 (Linux-Host): Journal, Schlüssel und Protokolle nur für den eigenen Benutzer.
+    File.SetUnixFileMode(options.DataDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+}
 
 if (options.RestoreFrom is not null)
 {
@@ -315,8 +320,11 @@ static SandboxParts CreateSandbox(
                 });
         }
         case SandboxMode.HyperV:
+        case SandboxMode.Qemu:
         {
             var project = loadedProject!;
+            // M10: auf einem Linux-Host betreibt QEMU die VM – dort gibt es nur den Linux-Gast.
+            var qemu = options.Mode == SandboxMode.Qemu;
             var registry = new SnapshotRegistry();
             ProjectPolicyContext context;
             var (web, store) = CreateWeb(options);
@@ -324,15 +332,21 @@ static SandboxParts CreateSandbox(
             export.Cleanup();
             context = new ProjectPolicyContext(project, registry, new RegisteredToolchainCatalog(toolchains!)) { WebCaptures = store, Exports = export };
             // M8: Heimat-VM des Projekts und VM je Toolchain (toolchainGuests → guestOs → sandbox.defaultGuestOs).
-            var plan = GuestSelection.Resolve(project, options.DefaultGuestOs, toolchains!.GuestOf);
+            var plan = GuestSelection.Resolve(project, qemu ? GuestOs.Linux : options.DefaultGuestOs, toolchains!.GuestOf);
+            if (qemu && plan.Required.Contains(GuestOs.Windows))
+            {
+                throw new InvalidDataException("Auf einem Linux-Host (sandbox.mode \"qemu\") gibt es nur den Linux-Gast – das Projekt verlangt " +
+                                               "Windows (guestOs, toolchainGuests oder eine Windows-Toolchain)");
+            }
             var vms = new Dictionary<GuestOs, HyperVSandbox>();
             var adapters = new Dictionary<GuestOs, SandboxToolAdapter>();
             MultiGuestToolAdapter? multi = null;
             foreach (var guest in plan.Required)
             {
                 var linux = guest == GuestOs.Linux;
-                var settings = (linux ? options.HyperVLinux : options.HyperV) ?? throw new InvalidDataException(linux
-                    ? "sandbox.hypervLinux fehlt in config/localai.json – das Projekt braucht eine Linux-VM (guestOs, toolchainGuests oder eine Linux-Toolchain)"
+                var settings = (qemu ? options.Qemu : linux ? options.HyperVLinux : options.HyperV) ?? throw new InvalidDataException(
+                    qemu ? "sandbox.qemu fehlt in config/localai.json (Vorlage: config/localai.linux.json)"
+                    : linux ? "sandbox.hypervLinux fehlt in config/localai.json – das Projekt braucht eine Linux-VM (guestOs, toolchainGuests oder eine Linux-Toolchain)"
                     : "sandbox.hyperv fehlt in config/localai.json");
                 var guestToolchains = plan.ToolchainsFor(guest, project.Toolchains ?? []);
                 // Große Toolchains (C++-Build-Tools, HALCON) brauchen länger: Aufbauzeit mindestens System + 3× erwartete Installationszeit.
@@ -345,8 +359,10 @@ static SandboxParts CreateSandbox(
                 // reuseVm: Sitzung der zuletzt sauber beendeten VM übernehmen (Schlüssel, Sequenz); sonst neue Sitzung.
                 var session = HyperVSandbox.LoadReusableSession(settings)
                               ?? new SandboxSession(guest == plan.Home ? sessionId : Guid.NewGuid().ToString("D"));
-                var host = new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
-                    Path.Combine(options.DataDirectory, linux ? "hyperv-linux.log" : "hyperv.log"));
+                IHyperVHost host = qemu
+                    ? new QemuVmHost(settings, Path.Combine(options.DataDirectory, "qemu-vm.log"))
+                    : new PowerShellHyperVHost(settings, Path.Combine(options.RepoRoot, "scripts", "sandbox"),
+                        Path.Combine(options.DataDirectory, linux ? "hyperv-linux.log" : "hyperv.log"));
                 GuestPayloadSources Sources() => linux
                     ? GuestPayloadSources.ForLinux(options.RepoRoot, vmSettings.LinuxPrerequisites!)
                     : GuestPayloadSources.FromRepository(options.RepoRoot);
@@ -359,7 +375,7 @@ static SandboxParts CreateSandbox(
                     () => SandboxFingerprint.ComputeBase(vmSettings, Sources(), toolchains!.Registrations, guestToolchains),
                     () => SandboxFingerprint.ComputeCode(vmSettings, Sources()),
                     zip => Task.Run(() => GuestPayloadBuilder.BuildUpdate(zip, Sources(), vmSettings.TransferDiskBytes, guestToolchains,
-                        vmSettings.LowIntegrityTools, guest)));
+                        vmSettings.LowIntegrityTools, guest, vmSettings.Hypervisor)));
                 var home = guest == plan.Home;
                 adapters[guest] = new SandboxToolAdapter(session, vm, context, registry,
                     Path.Combine(options.DataDirectory, linux ? "sandbox-scratch-linux" : "sandbox-scratch"), SystemClock.Instance)

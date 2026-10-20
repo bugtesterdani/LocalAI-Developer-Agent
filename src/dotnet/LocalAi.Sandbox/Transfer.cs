@@ -37,13 +37,63 @@ public static class Crc32C
 
 public sealed class VhdxFormatException(string message) : Exception(message);
 
+/// <summary>Lesezugriff auf ein vom Gast beschriebenes Laufwerk (VHDX unter Hyper-V, Rohformat unter QEMU).</summary>
+public interface IVirtualDiskReader : IDisposable
+{
+    long VirtualSize { get; }
+
+    void ReadAt(long position, Span<byte> buffer);
+}
+
+/// <summary>
+/// Transfer-Laufwerk im Rohformat (QEMU, M10): die Datei ist das Laufwerk. Größer als erlaubt → Ablehnung;
+/// hinter dem Dateiende liest es sich als Nullen (Datei kann sparse sein).
+/// </summary>
+public sealed class RawDiskReader : IVirtualDiskReader
+{
+    private readonly FileStream _file;
+
+    private RawDiskReader(FileStream file) => _file = file;
+
+    public long VirtualSize => _file.Length;
+
+    public static RawDiskReader Open(string path, long maxVirtualSize)
+    {
+        var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.RandomAccess);
+        var length = file.Length;
+        if (length > maxVirtualSize)
+        {
+            file.Dispose();
+            throw new VhdxFormatException($"Transfer-Laufwerk ist größer als erlaubt ({length} Bytes)");
+        }
+        return new RawDiskReader(file);
+    }
+
+    public void ReadAt(long position, Span<byte> buffer)
+    {
+        buffer.Clear();
+        var done = 0;
+        while (done < buffer.Length && position + done < _file.Length)
+        {
+            var read = RandomAccess.Read(_file.SafeFileHandle, buffer[done..], position + done);
+            if (read <= 0)
+            {
+                break;
+            }
+            done += read;
+        }
+    }
+
+    public void Dispose() => _file.Dispose();
+}
+
 /// <summary>
 /// Liest den Inhalt einer VHDX-Datei direkt aus der Datei – ohne Einbinden ins Host-Betriebssystem.
 /// Die Transfer-VHDX wird vom Gast beschrieben und ist deshalb nicht vertrauenswürdig: jede Struktur wird
 /// gegen Dateigröße, Ausrichtung und Prüfsummen geprüft; nicht benötigte Funktionen (Log, Elternlaufwerk)
 /// führen zur Ablehnung. Unterstützt feste und dynamische VHDX (fehlende Blöcke lesen sich als Nullen).
 /// </summary>
-public sealed class VhdxReader : IDisposable
+public sealed class VhdxReader : IVirtualDiskReader
 {
     public const long Mib = 1024 * 1024;
     private static readonly Guid BatRegion = new("2DC27766-F623-4200-9D64-115E9BFD4A08");
@@ -359,10 +409,15 @@ public static class TransferContainer
         return image;
     }
 
-    /// <summary>Liest den Container aus einer vom Gast zurückgegebenen VHDX. <c>null</c>: Laufwerk ist leer.</summary>
-    public static TransferMessage? Read(string vhdxPath, long maxDiskBytes)
+    /// <summary>
+    /// Liest den Container aus einem vom Gast zurückgegebenen Laufwerk (.vhdx unter Hyper-V, .raw unter QEMU).
+    /// <c>null</c>: Laufwerk ist leer.
+    /// </summary>
+    public static TransferMessage? Read(string diskPath, long maxDiskBytes)
     {
-        using var disk = VhdxReader.Open(vhdxPath, maxDiskBytes);
+        using IVirtualDiskReader disk = diskPath.EndsWith(".raw", StringComparison.OrdinalIgnoreCase)
+            ? RawDiskReader.Open(diskPath, maxDiskBytes)
+            : VhdxReader.Open(diskPath, maxDiskBytes);
         var header = new byte[HeaderSize];
         disk.ReadAt(0, header);
         if (header.AsSpan(0, 8).IndexOfAnyExcept((byte)0) < 0)

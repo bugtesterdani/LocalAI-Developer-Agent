@@ -1,0 +1,11 @@
+<Solution>
+  <!-- M10: alles für einen Linux-Host – ohne die WPF-Oberfläche, mit der Avalonia-Oberfläche. -->
+  <Project Path="LocalAi.Broker.Host/LocalAi.Broker.Host.csproj" />
+  <Project Path="LocalAi.Broker/LocalAi.Broker.csproj" />
+  <Project Path="LocalAi.Contracts/LocalAi.Contracts.csproj" />
+  <Project Path="LocalAi.Desktop.Core/LocalAi.Desktop.Core.csproj" />
+  <Project Path="LocalAi.Desktop.Linux/LocalAi.Desktop.Linux.csproj" />
+  <Project Path="LocalAi.Desktop.Linux.Tests/LocalAi.Desktop.Linux.Tests.csproj" />
+  <Project Path="LocalAi.Sandbox/LocalAi.Sandbox.csproj" />
+  <Project Path="LocalAi.Tests/LocalAi.Tests.csproj" />
+</Solution>

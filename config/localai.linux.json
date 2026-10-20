@@ -1,0 +1,64 @@
+{
+  "project": "config/m10-linux-project.json",
+  "toolchains": {
+    "directory": "/home/BENUTZER/LocalAi/Toolchains"
+  },
+  "sandbox": {
+    "mode": "qemu",
+    "qemu": {
+      "imagePath": "/home/BENUTZER/LocalAi/linux/debian-13-generic-amd64.raw",
+      "prerequisites": "/home/BENUTZER/LocalAi/linux/linux-gast",
+      "binary": "qemu-system-x86_64",
+      "accel": "Auto",
+      "nestedVirtualization": false,
+      "vmName": "LocalAi-Linux",
+      "vmDirectory": null,
+      "memoryMB": 4096,
+      "processors": 4,
+      "osDiskGB": 64,
+      "transferDiskMB": 64,
+      "buildTimeoutMinutes": 30,
+      "keepVmOnExit": false,
+      "reuseVm": false,
+      "idleMinutes": 30,
+      "stopAction": "ShutDown"
+    },
+    "devWorker": {
+      "command": "uv",
+      "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.worker"],
+      "workingDirectory": "."
+    }
+  },
+  "orchestrator": {
+    "command": "uv",
+    "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.orchestrator"],
+    "workingDirectory": ".",
+    "heartbeatTimeoutSeconds": 30
+  },
+  "web": {
+    "enabled": true,
+    "command": {
+      "command": "uv",
+      "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.web"],
+      "workingDirectory": "."
+    },
+    "maxBytes": 2097152,
+    "timeoutSeconds": 15,
+    "maxChars": 20000,
+    "lowIntegrity": true,
+    "allowedHosts": [],
+    "caFile": null,
+    "proxy": {
+      "url": null,
+      "username": null,
+      "passwordFile": null,
+      "dnsViaProxy": false,
+      "connectByAddress": false
+    }
+  },
+  "fakeAgent": {
+    "command": "uv",
+    "arguments": ["run", "--no-sync", "--project", "src/python", "python", "-m", "localai.fake_agent"],
+    "workingDirectory": "."
+  }
+}

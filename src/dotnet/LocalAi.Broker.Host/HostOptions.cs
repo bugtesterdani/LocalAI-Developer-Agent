@@ -24,6 +24,9 @@ public enum SandboxMode
 
     /// <summary>Offline-VM über Hyper-V (M2b).</summary>
     HyperV,
+
+    /// <summary>Offline-Linux-VM mit QEMU direkt auf einem Linux-Host (M10).</summary>
+    Qemu,
 }
 
 /// <summary>Zufällige Tokens pro Broker-Start; nur der UI-Token darf Entscheidungen treffen.</summary>
@@ -72,6 +75,9 @@ public sealed record HostOptions
 
     /// <summary>Linux-VM (sandbox.hypervLinux, M8); null = nicht eingerichtet.</summary>
     public LocalAi.Sandbox.HyperVSettings? HyperVLinux { get; init; }
+
+    /// <summary>Linux-VM mit QEMU auf einem Linux-Host (sandbox.qemu, M10); null = nicht eingerichtet.</summary>
+    public LocalAi.Sandbox.HyperVSettings? Qemu { get; init; }
 
     /// <summary>Gastsystem für Projekte ohne eigene Angabe (sandbox.defaultGuestOs, Standard Windows).</summary>
     public LocalAi.Contracts.GuestOs DefaultGuestOs { get; init; } = LocalAi.Contracts.GuestOs.Windows;
@@ -135,8 +141,12 @@ public sealed record HostOptions
         "test" => SandboxMode.Test,
         "dev-local-unsafe" => SandboxMode.DevLocalUnsafe,
         "hyperv" => SandboxMode.HyperV,
-        _ => throw new ArgumentException($"Unbekannte Betriebsart: {value} (none, test, dev-local-unsafe, hyperv)"),
+        "qemu" => SandboxMode.Qemu,
+        _ => throw new ArgumentException($"Unbekannte Betriebsart: {value} (none, test, dev-local-unsafe, hyperv, qemu)"),
     };
+
+    /// <summary>Betriebsart mit Offline-VM (Hyper-V unter Windows, QEMU unter Linux): nur dort gibt es Ausführung.</summary>
+    public bool UsesVm => Mode is SandboxMode.HyperV or SandboxMode.Qemu;
 
     public static string ModeName(SandboxMode mode) => mode switch
     {
@@ -144,6 +154,7 @@ public sealed record HostOptions
         SandboxMode.Test => "test",
         SandboxMode.DevLocalUnsafe => "dev-local-unsafe",
         SandboxMode.HyperV => "hyperv",
+        SandboxMode.Qemu => "qemu",
         _ => "unbekannt",
     };
 
@@ -223,6 +234,13 @@ public sealed record HostOptions
             {
                 options = options with { HyperVLinux = ReadHyperV(linux, repoRoot, options.DataDirectory, LocalAi.Contracts.GuestOs.Linux) };
             }
+            if (sandbox.TryGetProperty("qemu", out var qemu) && qemu.ValueKind == JsonValueKind.Object)
+            {
+                options = options with
+                {
+                    Qemu = ReadHyperV(qemu, repoRoot, options.DataDirectory, LocalAi.Contracts.GuestOs.Linux, LocalAi.Sandbox.Hypervisor.Qemu),
+                };
+            }
             if (sandbox.TryGetProperty("defaultGuestOs", out var guest) && guest.ValueKind == JsonValueKind.String)
             {
                 options = options with { DefaultGuestOs = ParseGuest(guest.GetString()!, "sandbox.defaultGuestOs") };
@@ -238,10 +256,12 @@ public sealed record HostOptions
         _ => throw new JsonException($"{where}: \"Windows\" oder \"Linux\" erwartet, nicht \"{value}\""),
     };
 
-    private static LocalAi.Sandbox.HyperVSettings ReadHyperV(JsonElement e, string repoRoot, string dataDirectory, LocalAi.Contracts.GuestOs guest)
+    private static LocalAi.Sandbox.HyperVSettings ReadHyperV(JsonElement e, string repoRoot, string dataDirectory, LocalAi.Contracts.GuestOs guest,
+        LocalAi.Sandbox.Hypervisor hypervisor = LocalAi.Sandbox.Hypervisor.HyperV)
     {
         var linux = guest == LocalAi.Contracts.GuestOs.Linux;
-        var section = linux ? "sandbox.hypervLinux" : "sandbox.hyperv";
+        var qemu = hypervisor == LocalAi.Sandbox.Hypervisor.Qemu;
+        var section = qemu ? "sandbox.qemu" : linux ? "sandbox.hypervLinux" : "sandbox.hyperv";
         string? Str(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString()!.Length > 0 ? v.GetString() : null;
         int? Int(string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
         var image = Str("imagePath") ?? throw new JsonException(linux
@@ -249,7 +269,7 @@ public sealed record HostOptions
             : $"{section}.imagePath fehlt (Pfad zur Windows-ISO)");
         var vmDirectory = Str("vmDirectory") is { } dir
             ? Path.GetFullPath(Path.Combine(repoRoot, dir))
-            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataDirectory))!, linux ? "vm-linux" : "vm");
+            : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataDirectory))!, qemu ? "vm-qemu" : linux ? "vm-linux" : "vm");
         var defaults = new LocalAi.Sandbox.HyperVSettings
         {
             ImagePath = "-", VmDirectory = "-", Guest = guest,
@@ -264,6 +284,15 @@ public sealed record HostOptions
         return new LocalAi.Sandbox.HyperVSettings
         {
             Guest = guest,
+            Hypervisor = hypervisor,
+            QemuBinary = qemu ? Str("binary") ?? defaults.QemuBinary : defaults.QemuBinary,
+            QemuAccel = qemu ? Str("accel") ?? defaults.QemuAccel : defaults.QemuAccel,
+            QemuTestBoot = qemu && e.TryGetProperty("directBoot", out var boot) && boot.ValueKind == JsonValueKind.Object
+                ? new LocalAi.Sandbox.QemuDirectBoot(
+                    Path.GetFullPath(Path.Combine(repoRoot, boot.GetProperty("kernel").GetString()!)),
+                    Path.GetFullPath(Path.Combine(repoRoot, boot.GetProperty("initrd").GetString()!)),
+                    boot.TryGetProperty("append", out var append) ? append.GetString() ?? "" : "console=ttyS0")
+                : null,
             LinuxPrerequisites = linux ? prerequisites : null,
             IdleMinutes = Int("idleMinutes") ?? defaults.IdleMinutes,
             StopAction = Str("stopAction") ?? defaults.StopAction,

@@ -27,12 +27,13 @@ public sealed record LinuxPrerequisites(
     private static readonly Regex SafeName = new(@"^[A-Za-z0-9][A-Za-z0-9._+~-]{0,200}(/[A-Za-z0-9][A-Za-z0-9._+~-]{0,200})?$");
     private static readonly Regex Hex64 = new("^[0-9a-f]{64}$");
 
-    public static LinuxPrerequisites Load(string directory)
+    /// <param name="hypervisor">Unter Hyper-V ist hyperv-daemons Pflicht, unter QEMU (M10) nicht.</param>
+    public static LinuxPrerequisites Load(string directory, Hypervisor hypervisor = Hypervisor.HyperV)
     {
         var path = Path.Combine(directory, ManifestFile);
         if (!File.Exists(path))
         {
-            throw new InvalidDataException($"{path} fehlt – scripts\\sandbox\\Get-LocalAiLinuxPrerequisites.ps1 ausführen (lädt Python für Linux, Wheels und hyperv-daemons)");
+            throw new InvalidDataException($"{path} fehlt – scripts\\sandbox\\Get-LocalAiLinuxPrerequisites.ps1 ausführen (lädt Python für Linux, Wheels und hyperv-daemons) – auf einem Linux-Host scripts/linux/get-prerequisites.sh");
         }
         using var doc = JsonDocument.Parse(File.ReadAllText(path, Encoding.UTF8));
         var root = doc.RootElement;
@@ -51,7 +52,7 @@ public sealed record LinuxPrerequisites(
             }
         }
         var result = new LinuxPrerequisites(Path.GetFullPath(directory), Str("python"), Str("pythonVersion"), List("wheels"), List("debs"), hashes);
-        var problems = result.Validate();
+        var problems = result.Validate(hypervisor);
         if (problems.Count > 0)
         {
             throw new InvalidDataException($"{path}: {string.Join("; ", problems)}");
@@ -61,7 +62,7 @@ public sealed record LinuxPrerequisites(
 
     public IEnumerable<string> Files => new[] { Python }.Concat(Wheels).Concat(Debs);
 
-    public List<string> Validate()
+    public List<string> Validate(Hypervisor hypervisor = Hypervisor.HyperV)
     {
         var problems = new List<string>();
         if (!Python.EndsWith(".tar.gz", StringComparison.Ordinal) || !Python.Contains("x86_64-unknown-linux-gnu", StringComparison.Ordinal))
@@ -84,7 +85,7 @@ public sealed record LinuxPrerequisites(
         {
             problems.Add("pydantic_core: Wheel für Linux (manylinux, x86_64) erwartet");
         }
-        if (!Debs.Any(d => Path.GetFileName(d).StartsWith("hyperv-daemons_", StringComparison.Ordinal)))
+        if (hypervisor == Hypervisor.HyperV && !Debs.Any(d => Path.GetFileName(d).StartsWith("hyperv-daemons_", StringComparison.Ordinal)))
         {
             problems.Add("Debian-Paket hyperv-daemons fehlt (KVP-Datenaustausch und Copy-VMFile im Gast)");
         }
