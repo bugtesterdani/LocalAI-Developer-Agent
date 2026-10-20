@@ -7,6 +7,7 @@
 set -euo pipefail
 stage="$1"; icons="$2"; version="$3"; output="$4"
 here="$(cd "$(dirname "$0")" && pwd)"
+python3 "$here/../licenses.py" --stage "$stage" --verify
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
 
@@ -16,6 +17,8 @@ cp -a "$stage" "$root/opt/localai"
 install -m 0755 "$here/localai" "$root/usr/bin/localai"
 install -m 0644 "$here/localai.desktop" "$root/usr/share/applications/localai.desktop"
 install -m 0644 "$icons/localai.png" "$root/usr/share/icons/hicolor/256x256/apps/localai.png"
+install -m 0644 "$stage/LICENSE" "$root/usr/share/doc/localai-developer-agent/copyright"
+install -m 0644 "$stage/THIRD-PARTY-NOTICES.md" "$root/usr/share/doc/localai-developer-agent/THIRD-PARTY-NOTICES.md"
 install -m 0644 "$stage/README.md" "$root/usr/share/doc/localai-developer-agent/README.md"
 install -m 0755 "$here/postinst" "$root/DEBIAN/postinst"
 

@@ -60,7 +60,9 @@ jobs:
           global-json-file: global.json
       - uses: astral-sh/setup-uv@v7
       - name: Bauen und testen (scripts/test.sh)
-        run: scripts/test.sh
+        run: |
+          python3 -m unittest discover -s packaging -p "test_licenses.py" -v
+          scripts/test.sh
 
   archives:
     needs: version
@@ -105,11 +107,17 @@ jobs:
           uv export --project src/python --frozen --no-dev --no-emit-project --no-hashes -o build/requirements.txt
           uv pip install --python "$py/bin/python3" --target "$site" -r build/requirements.txt
           echo "PY_RUNTIME=$py" >> "$GITHUB_ENV"
+          "$py/bin/python3" -c "import sys; print('PY_RUNTIME_VERSION=' + sys.version.split()[0])" >> "$GITHUB_ENV"
       - name: Installationsordner
         run: |
           python3 packaging/package.py stage --platform linux --app build/app --runtime "$PY_RUNTIME" \
             --version "$VERSION" --out build/stage
           python3 packaging/package.py icons --out build/icons
+      - name: Original-Lizenzen sammeln und prüfen
+        run: |
+          python3 packaging/licenses.py --stage build/stage --runtime "$PY_RUNTIME" --runtime-version "$PY_RUNTIME_VERSION" \
+            --assets src/dotnet/LocalAi.Desktop.Linux/obj/project.assets.json \
+            --assets src/dotnet/LocalAi.Broker.Host/obj/project.assets.json
       - name: Prüfen, dass das mitgelieferte Python den Orchestrator laden kann
         run: build/stage/runtime/python/bin/python3 -c "import localai.orchestrator.run, localai.web.fetch, localai.worker.execution; print('ok')"
       - name: Debian-Paket
@@ -155,6 +163,8 @@ jobs:
           uv pip install --python "$py\python.exe" --target "$py\Lib\site-packages" -r build/requirements.txt
           if ($LASTEXITCODE) { throw "uv pip install fehlgeschlagen" }
           "PY_RUNTIME=$py" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          & "$py\python.exe" -c "import sys; print('PY_RUNTIME_VERSION=' + sys.version.split()[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          if ($LASTEXITCODE) { throw "Python-Version konnte nicht ermittelt werden" }
       - name: Installationsordner
         run: |
           python packaging/package.py stage --platform windows --app build/app --runtime $env:PY_RUNTIME --version $env:VERSION --out build/stage
@@ -162,6 +172,14 @@ jobs:
           & build/stage/runtime/python/python.exe -c "import localai.orchestrator.run, localai.web.fetch, localai.worker.execution; print('ok')"
           if ($LASTEXITCODE) { throw "mitgeliefertes Python kann localai nicht laden" }
           New-Item -ItemType Directory -Force dist | Out-Null
+      - name: Original-Lizenzen sammeln und prüfen
+        run: |
+          python packaging/licenses.py --stage build/stage --runtime $env:PY_RUNTIME --runtime-version $env:PY_RUNTIME_VERSION `
+            --assets src/dotnet/LocalAi.Desktop/obj/project.assets.json `
+            --assets src/dotnet/LocalAi.Broker.Host/obj/project.assets.json
+          if ($LASTEXITCODE) { throw "Lizenzsammlung fehlgeschlagen" }
+          python packaging/licenses.py --stage build/stage --verify
+          if ($LASTEXITCODE) { throw "Lizenznachweise unvollständig" }
       - name: MSI (WiX)
         run: |
           dotnet tool install --global wix --version 5.0.2

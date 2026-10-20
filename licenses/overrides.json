@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "nuget/avalonia/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.desktop/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.fonts.inter/12.1.4": {
+      "license": "MIT AND OFL-1.1",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt",
+        "Inter-OFL-1.1.txt"
+      ]
+    },
+    "nuget/avalonia.freedesktop/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.freedesktop.atspi/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.harfbuzz/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.native/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.remote.protocol/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.skia/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.themes.fluent/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.win32/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/avalonia.x11/12.1.4": {
+      "license": "MIT",
+      "source": "https://github.com/AvaloniaUI/Avalonia/blob/12.1.4/licence.md",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Avalonia-12.1.4/LICENSE.txt"
+      ]
+    },
+    "nuget/microsoft.data.sqlite/10.0.13": {
+      "license": "MIT",
+      "source": "https://github.com/dotnet/efcore/blob/v10.0.13/LICENSE.txt",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Microsoft.Data.Sqlite-10.0.13/LICENSE.txt"
+      ]
+    },
+    "nuget/microsoft.data.sqlite.core/10.0.13": {
+      "license": "MIT",
+      "source": "https://github.com/dotnet/efcore/blob/v10.0.13/LICENSE.txt",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Microsoft.Data.Sqlite-10.0.13/LICENSE.txt"
+      ]
+    },
+    "nuget/sqlitepclraw.bundle_e_sqlite3/2.1.13": {
+      "license": "Apache-2.0",
+      "source": "https://github.com/ericsink/SQLitePCL.raw/blob/0873d14f6dcb3a8537444679468499ab9f5a782a/LICENSE.TXT",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/SQLitePCLRaw-2.1.13/LICENSE.txt",
+        "upstream/SQLitePCLRaw-2.1.13/NOTICE.txt"
+      ],
+      "versionEvidence": "https://github.com/ericsink/SQLitePCL.raw/commit/0873d14f6dcb3a8537444679468499ab9f5a782a",
+      "note": "The upstream aggregate NOTICE is retained unchanged; references to optional SQLCipher/OpenSSL do not assert these are shipped in e_sqlite3."
+    },
+    "nuget/sqlitepclraw.core/2.1.13": {
+      "license": "Apache-2.0",
+      "source": "https://github.com/ericsink/SQLitePCL.raw/blob/0873d14f6dcb3a8537444679468499ab9f5a782a/LICENSE.TXT",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/SQLitePCLRaw-2.1.13/LICENSE.txt",
+        "upstream/SQLitePCLRaw-2.1.13/NOTICE.txt"
+      ],
+      "versionEvidence": "https://github.com/ericsink/SQLitePCL.raw/commit/0873d14f6dcb3a8537444679468499ab9f5a782a",
+      "note": "The upstream aggregate NOTICE is retained unchanged; references to optional SQLCipher/OpenSSL do not assert these are shipped in e_sqlite3."
+    },
+    "nuget/sqlitepclraw.lib.e_sqlite3/2.1.13": {
+      "license": "Apache-2.0",
+      "source": "https://github.com/ericsink/SQLitePCL.raw/blob/0873d14f6dcb3a8537444679468499ab9f5a782a/LICENSE.TXT",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/SQLitePCLRaw-2.1.13/LICENSE.txt",
+        "upstream/SQLitePCLRaw-2.1.13/NOTICE.txt"
+      ],
+      "versionEvidence": "https://github.com/ericsink/SQLitePCL.raw/commit/0873d14f6dcb3a8537444679468499ab9f5a782a",
+      "note": "The upstream aggregate NOTICE is retained unchanged; references to optional SQLCipher/OpenSSL do not assert these are shipped in e_sqlite3."
+    },
+    "nuget/sqlitepclraw.provider.e_sqlite3/2.1.13": {
+      "license": "Apache-2.0",
+      "source": "https://github.com/ericsink/SQLitePCL.raw/blob/0873d14f6dcb3a8537444679468499ab9f5a782a/LICENSE.TXT",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/SQLitePCLRaw-2.1.13/LICENSE.txt",
+        "upstream/SQLitePCLRaw-2.1.13/NOTICE.txt"
+      ],
+      "versionEvidence": "https://github.com/ericsink/SQLitePCL.raw/commit/0873d14f6dcb3a8537444679468499ab9f5a782a",
+      "note": "The upstream aggregate NOTICE is retained unchanged; references to optional SQLCipher/OpenSSL do not assert these are shipped in e_sqlite3."
+    },
+    "nuget/microcom.runtime/0.11.6": {
+      "license": "MIT",
+      "source": "https://github.com/kekekeks/MicroCom/blob/76785efcafd91b5902fd19dd11145f6dd655b7b4/LICENSE",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/MicroCom-0.11.6/LICENSE.txt"
+      ],
+      "versionEvidence": "https://github.com/kekekeks/MicroCom/commit/76785efcafd91b5902fd19dd11145f6dd655b7b4"
+    },
+    "nuget/tmds.dbus.protocol/0.94.1": {
+      "license": "MIT",
+      "source": "https://github.com/tmds/Tmds.DBus/blob/rel/0.94.1/COPYING",
+      "reason": "Original license texts retained from the verified upstream release because the NuGet package omits them.",
+      "files": [
+        "upstream/Tmds.DBus-0.94.1/COPYING.txt"
+      ]
+    }
+  }
+}

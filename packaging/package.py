@@ -42,6 +42,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # Ordner bzw. Dateien des Repositorys, die zur Laufzeit gebraucht werden
 STAGE_TREES = ["config", "contracts/schemas", "samples", "scripts/sandbox", "scripts/toolchains", "src/python/localai",
                "toolchains", "tools/prereq"]
+LEGAL_FILES = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
+
 LINUX_SCRIPTS = ["scripts/linux/install-host.sh", "scripts/linux/get-prerequisites.sh"]
 SKIP = {"__pycache__", ".pytest_cache", "bin", "obj", ".venv"}
 
@@ -108,6 +110,12 @@ def stage(args: argparse.Namespace) -> None:
     (out / "config" / "localai.json").write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (out / "config" / "models.local.json").unlink(missing_ok=True)  # persönliche Datei, gehört in den Benutzerordner
     shutil.copy2(ROOT / "README.md", out / "README.md")
+    for name in LEGAL_FILES:
+        shutil.copy2(ROOT / name, out / name)
+    copy_tree(ROOT / "licenses", out / "licenses")
+    shutil.copy2(ROOT / "docs" / "lizenzen.md", out / "licenses" / "RELEASE-CHECKLIST.md")
+    (out / "docs").mkdir(exist_ok=True)
+    shutil.copy2(ROOT / "docs" / "lizenzen.md", out / "docs" / "lizenzen.md")
     (out / "VERSION").write_text(args.version + "\n", encoding="utf-8")
     print(f"Installationsordner {out} ({args.platform}, {args.version})")
 
@@ -143,9 +151,19 @@ FOLDERS = {
 }
 
 
+def zip_legal(z: zipfile.ZipFile, prefix: str) -> None:
+    for name in LEGAL_FILES:
+        z.write(ROOT / name, prefix + name)
+    for file in sorted((ROOT / "licenses").rglob("*")):
+        if file.is_file():
+            z.write(file, prefix + file.relative_to(ROOT).as_posix())
+    z.write(ROOT / "docs" / "lizenzen.md", prefix + "licenses/RELEASE-CHECKLIST.md")
+
+
 def config_zip(args: argparse.Namespace) -> None:
     with zipfile.ZipFile(args.out, "w", zipfile.ZIP_DEFLATED) as z:
         prefix = f"LocalAi-Konfiguration-{args.version}/"
+        zip_legal(z, prefix)
         z.writestr(prefix + "LIESMICH.txt", CONFIG_README.format(version=args.version))
         for platform, template in (("windows", "localai.json"), ("linux", "localai.linux.json")):
             config = installed_config(platform, template)
@@ -168,6 +186,9 @@ def docs_zip(args: argparse.Namespace) -> None:
 
     with zipfile.ZipFile(args.out, "w", zipfile.ZIP_DEFLATED) as z:
         prefix = f"LocalAi-Dokumentation-{args.version}/"
+        zip_legal(z, prefix)
+        if "docs/lizenzen.md" not in build_wiki.PAGES:
+            z.write(ROOT / "docs" / "lizenzen.md", prefix + "docs/lizenzen.md")
         z.write(ROOT / "README.md", prefix + "README.md")
         for source in build_wiki.PAGES:
             if source != "README.md":

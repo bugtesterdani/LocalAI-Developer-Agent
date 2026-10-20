@@ -86,3 +86,10 @@ Ausführlich: [Entwicklung](docs/entwicklung.md#repository).
   Pipe ist auf den aktuellen Benutzer beschränkt. Getrennte Benutzerkonten für den Orchestrator gibt es noch nicht.
 - **reuseVm** weicht auf ausdrücklichen Wunsch von R17 (Neuaufbau je Sitzung) ab; standardmäßig aus.
 - **Kalibrierung:** Profile über 8K und Offload sind nur nutzbar, wenn die Hardware sie stabil trägt.
+
+## Lizenz
+
+Eigener Code und eigene Dokumentation: [MIT](LICENSE).
+Abhängigkeiten, Schriften, Laufzeiten, externe Werkzeuge und Modelle behalten
+ihre eigenen Bedingungen; siehe [Drittanbieterhinweise](THIRD-PARTY-NOTICES.md)
+und [Lizenzprüfung vor Releases](docs/lizenzen.md).
