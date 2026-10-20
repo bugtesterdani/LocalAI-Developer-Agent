@@ -12,7 +12,7 @@ Vorlagen in diesem Ordner:
 | `dotnet` | C# | ZIP des .NET SDK | Trx (`dotnet test`) |
 | `python` | Python | Installer + pytest-Wheels | JUnit (pytest) |
 | `cpp` | C++ | Visual Studio Build Tools 2022 aus Offline-Layout (MSVC, CMake, CTest) | JUnit (CTest) |
-| `cpp-clang` | C++ | ZIP mit llvm-mingw, CMake, Ninja (Alternative ohne Microsoft-Lizenz) | JUnit (CTest) |
+| `cpp-clang` | C++ | ZIP mit llvm-mingw, CMake, Ninja (Alternative zu MSVC; eigene Open-Source-Lizenzen beachten) | JUnit (CTest) |
 | `powershell` | PowerShell 7 | ZIP von PowerShell + Pester/PSScriptAnalyzer | JUnit (Pester) |
 | `powershell5` | Windows PowerShell 5.1 | nichts (Teil von Windows) + Pester/PSScriptAnalyzer | JUnit (Pester) |
 | `batch` | Batch | nichts (cmd.exe) + Test-Harness | JUnit (Harness) |
@@ -152,3 +152,16 @@ Windows-Toolchains:
 - Pfade in Argumenten mit `/` (`{selftest}/hello.py`, `--junitxml={results}/pytest.xml`).
 - Welche VM eine Toolchain nutzt, steht im Manifest; im Projekt kann `toolchainGuests` das nur bestätigen
   (Widerspruch = Fehler beim Start). Siehe `docs\pruefung-M8.md`.
+
+## Lizenzrechte und Weitergabe
+
+Die Vorlagen und eigenen Runner unterliegen der Projektlizenz. Sie erteilen
+keine Nutzungs- oder Weitergaberechte für installierte Fremdprogramme.
+Windows-Gäste, MSVC/Windows SDK, HALCON und VC++-Laufzeit benötigen jeweils
+passende Rechte auch für die VM. Eine technisch funktionierende Evaluierungs-
+oder sonstige Lizenz erlaubt nicht automatisch jeden Einsatzzweck.
+Bei Open-Source-Toolchains bleiben die Originaltexte und gegebenenfalls
+Quellcodepflichten erhalten. Bei Weitergabe kompletter Toolchain- oder Gast-
+Bundles ist jede enthaltene Komponente gesondert zu prüfen.
+Keine persönlichen Lizenzdateien in GitHub oder öffentliche Pakete aufnehmen.
+Siehe [Drittanbieterhinweise](../THIRD-PARTY-NOTICES.md).

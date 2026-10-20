@@ -2,6 +2,8 @@
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Version>0.10.0</Version>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 bugtesterdani</Copyright>
     <Product>Local AI Developer Agent</Product>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

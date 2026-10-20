@@ -2,6 +2,8 @@
 name = "localai"
 version = "0.1.0"
 description = "Local AI Developer Agent – Python-Teil (Orchestrator, Agenten, Tools)"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.9,<3",
