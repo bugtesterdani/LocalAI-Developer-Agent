@@ -3,6 +3,11 @@
 Stand: M5 (Commit `ec1c2bf`, 19.10.2026). Diese Anleitung bringt den aktuellen Stand des Local AI Developer Agent
 auf einen weiteren Windows-PC: Oberfläche, Broker, Agenten, Offline-VM und Toolchains.
 
+> Ergänzungen seit M5: Webabrufe (M6, Abschnitt 5), Linux-Gast unter Hyper-V ([pruefung-M8.md](pruefung-M8.md)),
+> OS-Debugging ([pruefung-M9.md](pruefung-M9.md)). Für einen **Linux-Host** gilt stattdessen
+> [pruefung-M10.md, Abschnitt 0](pruefung-M10.md#0-einrichtung). Alle Einstellungen:
+> [Konfiguration](konfiguration.md).
+
 **Kurz gesagt:** Das Repository und deine Dateien (Konfiguration, Toolchain-Ordner, Windows-ISO) mitnehmen. Alles,
 was an die Hardware oder an den alten PC gebunden ist (VM, Kalibrierung, Registrierungen), **auf dem neuen Rechner neu
 erzeugen**.
