@@ -2,6 +2,8 @@
 # Baut und testet alles außer der WPF-Oberfläche (Linux/macOS, z. B. CI) – einschließlich der Linux-Oberfläche (M10).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Python-Umgebung zuerst: C#-Tests starten Fake-Agent und Worker mit "uv run --no-sync" und lesen src/python/.venv.
+uv sync --project src/python
 echo "==> 1/5 Generierte Verträge aktuell?"
 python3 tools/codegen/generate.py --check
 echo "==> 2/5 C# bauen (ohne WPF, mit Avalonia-Oberfläche)"
