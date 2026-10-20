@@ -1,0 +1,235 @@
+# Baut die Installationspakete und – bei einem Tag v* – ein GitHub-Release:
+#   LocalAi-Developer-Agent-<v>-x64.msi          Windows-Installer (Program Files, Startmenü)
+#   LocalAi-Developer-Agent-<v>-x64.msixbundle   Windows-App-Paket (signiert)
+#   LocalAi-Developer-Agent-<v>-signatur.cer     nur bei selbstsigniertem MSIX: Zertifikat zum Vertrauen
+#   localai-developer-agent_<v>_amd64.deb        Linux (Debian/Ubuntu), Abhängigkeiten über apt
+#   LocalAi-Konfiguration-<v>.zip                Vorlagen für den Benutzerordner, Toolchain-Vorlagen, Ordnerstruktur
+#   LocalAi-Dokumentation-<v>.zip                Dokumentation (Markdown)
+#
+# Signatur (optional, Repository-Secrets): MSIX_CERTIFICATE (PFX als Base64) und MSIX_CERTIFICATE_PASSWORD. Ohne sie
+# wird das MSIX-Paket mit einem selbstsignierten Zertifikat signiert, das als .cer beiliegt.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  PYTHON_VERSION: "3.15"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      numeric: ${{ steps.v.outputs.numeric }}
+      msix: ${{ steps.v.outputs.msix }}
+      deb: ${{ steps.v.outputs.deb }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            numeric="${version%%-*}"
+            msix="$numeric.0"
+            deb="${version/-/\~}"
+          else
+            numeric="$(grep -oP '(?<=<Version>)[^<]+' src/dotnet/Directory.Build.props)"
+            version="$numeric-build.$GITHUB_RUN_NUMBER"
+            msix="$numeric.$((GITHUB_RUN_NUMBER % 65535))"
+            deb="$numeric~build.$GITHUB_RUN_NUMBER"
+          fi
+          [[ "$numeric" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version muss X.Y.Z sein: $numeric"; exit 1; }
+          { echo "version=$version"; echo "numeric=$numeric"; echo "msix=$msix"; echo "deb=$deb"; } >> "$GITHUB_OUTPUT"
+          echo "Version $version (MSI $numeric, MSIX $msix, deb $deb)"
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: astral-sh/setup-uv@v7
+      - name: Bauen und testen (scripts/test.sh)
+        run: scripts/test.sh
+
+  archives:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Konfiguration und Dokumentation
+        run: |
+          mkdir -p dist
+          python3 packaging/package.py config-zip --version "${{ needs.version.outputs.version }}" \
+            --out "dist/LocalAi-Konfiguration-${{ needs.version.outputs.version }}.zip"
+          python3 packaging/package.py docs-zip --version "${{ needs.version.outputs.version }}" \
+            --out "dist/LocalAi-Dokumentation-${{ needs.version.outputs.version }}.zip"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: archive
+          path: dist/*
+
+  linux:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: astral-sh/setup-uv@v7
+      - name: .NET veröffentlichen (linux-x64, eigenständig)
+        run: |
+          for p in LocalAi.Desktop.Linux LocalAi.Broker.Host; do
+            dotnet publish "src/dotnet/$p" -c Release -r linux-x64 --self-contained \
+              -p:Version=${{ needs.version.outputs.numeric }} -o build/app
+          done
+      - name: Python-Laufzeit
+        run: |
+          uv python install "$PYTHON_VERSION" --install-dir build/py
+          py="$(find build/py -mindepth 1 -maxdepth 1 -type d -name 'cpython-*' | head -1)"
+          site="$(ls -d "$py"/lib/python3.*/site-packages)"
+          uv export --project src/python --frozen --no-dev --no-emit-project --no-hashes -o build/requirements.txt
+          uv pip install --python "$py/bin/python3" --target "$site" -r build/requirements.txt
+          echo "PY_RUNTIME=$py" >> "$GITHUB_ENV"
+      - name: Installationsordner
+        run: |
+          python3 packaging/package.py stage --platform linux --app build/app --runtime "$PY_RUNTIME" \
+            --version "$VERSION" --out build/stage
+          python3 packaging/package.py icons --out build/icons
+      - name: Prüfen, dass das mitgelieferte Python den Orchestrator laden kann
+        run: build/stage/runtime/python/bin/python3 -c "import localai.orchestrator.run, localai.web.fetch, localai.worker.execution; print('ok')"
+      - name: Debian-Paket
+        run: |
+          mkdir -p dist
+          packaging/linux/build-deb.sh build/stage build/icons "${{ needs.version.outputs.deb }}" \
+            "dist/localai-developer-agent_${VERSION}_amd64.deb"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: linux
+          path: dist/*
+
+  windows:
+    needs: [version, test]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NUMERIC: ${{ needs.version.outputs.numeric }}
+      MSIX_VERSION: ${{ needs.version.outputs.msix }}
+      MSIX_CERTIFICATE: ${{ secrets.MSIX_CERTIFICATE }}
+      MSIX_CERTIFICATE_PASSWORD: ${{ secrets.MSIX_CERTIFICATE_PASSWORD }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: astral-sh/setup-uv@v7
+      - name: .NET veröffentlichen (win-x64, eigenständig)
+        run: |
+          foreach ($p in 'LocalAi.Desktop', 'LocalAi.Broker.Host') {
+            dotnet publish "src/dotnet/$p" -c Release -r win-x64 --self-contained -p:Version=$env:NUMERIC -o build/app
+            if ($LASTEXITCODE) { throw "dotnet publish $p fehlgeschlagen" }
+          }
+      - name: Python-Laufzeit
+        run: |
+          uv python install $env:PYTHON_VERSION --install-dir build/py
+          $py = (Get-ChildItem build/py -Directory -Filter 'cpython-*' | Select-Object -First 1).FullName
+          uv export --project src/python --frozen --no-dev --no-emit-project --no-hashes -o build/requirements.txt
+          uv pip install --python "$py\python.exe" --target "$py\Lib\site-packages" -r build/requirements.txt
+          if ($LASTEXITCODE) { throw "uv pip install fehlgeschlagen" }
+          "PY_RUNTIME=$py" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Installationsordner
+        run: |
+          python packaging/package.py stage --platform windows --app build/app --runtime $env:PY_RUNTIME --version $env:VERSION --out build/stage
+          python packaging/package.py icons --out build/icons
+          & build/stage/runtime/python/python.exe -c "import localai.orchestrator.run, localai.web.fetch, localai.worker.execution; print('ok')"
+          if ($LASTEXITCODE) { throw "mitgeliefertes Python kann localai nicht laden" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+      - name: MSI (WiX)
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix build packaging/windows/LocalAi.wxs -arch x64 -d Version=$env:NUMERIC -d StagingDir=build/stage -d IconsDir=build/icons `
+            -o "dist/LocalAi-Developer-Agent-$env:VERSION-x64.msi"
+          if ($LASTEXITCODE) { throw "wix build fehlgeschlagen" }
+          Remove-Item dist/*.wixpdb -ErrorAction SilentlyContinue
+      - name: Signaturzertifikat
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'signatur.pfx'
+          if ($env:MSIX_CERTIFICATE) {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:MSIX_CERTIFICATE))
+            $password = $env:MSIX_CERTIFICATE_PASSWORD
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfx, $password)
+            "SELF_SIGNED=0" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          } else {
+            $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=LocalAi Developer Agent' -KeyUsage DigitalSignature `
+              -FriendlyName 'LocalAi Developer Agent (selbstsigniert)' -CertStoreLocation Cert:\CurrentUser\My `
+              -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}') -NotAfter (Get-Date).AddYears(3)
+            $password = [Guid]::NewGuid().ToString('N')
+            Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $password -AsPlainText -Force) | Out-Null
+            Export-Certificate -Cert $cert -FilePath "dist/LocalAi-Developer-Agent-$env:VERSION-signatur.cer" | Out-Null
+            "SELF_SIGNED=1" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+          Write-Host "::add-mask::$password"
+          "SIGN_PFX=$pfx" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SIGN_PASSWORD=$password" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SIGN_SUBJECT=$($cert.Subject)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: MSIX-Bundle
+        run: |
+          $sdk = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory -Filter '10.*' | Sort-Object Name -Descending |
+            Where-Object { Test-Path (Join-Path $_.FullName 'x64\makeappx.exe') } | Select-Object -First 1
+          $makeappx = Join-Path $sdk.FullName 'x64\makeappx.exe'
+          $signtool = Join-Path $sdk.FullName 'x64\signtool.exe'
+          Copy-Item -Recurse build/stage build/msix
+          New-Item -ItemType Directory -Force build/msix/Assets, build/bundle | Out-Null
+          Copy-Item build/icons/Square44x44Logo.png, build/icons/Square150x150Logo.png, build/icons/StoreLogo.png build/msix/Assets
+          $publisher = [Security.SecurityElement]::Escape($env:SIGN_SUBJECT)
+          (Get-Content -Raw packaging/windows/AppxManifest.xml).Replace('__VERSION__', $env:MSIX_VERSION).Replace('__PUBLISHER__', $publisher) |
+            Set-Content -Encoding utf8 build/msix/AppxManifest.xml
+          & $makeappx pack /d build/msix /p build/bundle/LocalAi-Developer-Agent-x64.msix /o
+          if ($LASTEXITCODE) { throw "makeappx pack fehlgeschlagen" }
+          $bundle = "dist/LocalAi-Developer-Agent-$env:VERSION-x64.msixbundle"
+          & $makeappx bundle /d build/bundle /p $bundle /bv $env:MSIX_VERSION /o
+          if ($LASTEXITCODE) { throw "makeappx bundle fehlgeschlagen" }
+          & $signtool sign /fd SHA256 /f $env:SIGN_PFX /p $env:SIGN_PASSWORD $bundle
+          if ($LASTEXITCODE) { throw "signtool (MSIX) fehlgeschlagen" }
+          if ($env:SELF_SIGNED -eq '0') {
+            & $signtool sign /fd SHA256 /f $env:SIGN_PFX /p $env:SIGN_PASSWORD /tr http://timestamp.digicert.com /td SHA256 (Get-ChildItem dist/*.msi).FullName
+            if ($LASTEXITCODE) { throw "signtool (MSI) fehlgeschlagen" }
+          }
+      - uses: actions/upload-artifact@v5
+        with:
+          name: windows
+          path: dist/*
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, archives, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Local AI Developer Agent ${{ needs.version.outputs.version }}
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
+          generate_release_notes: true
+          files: dist/*

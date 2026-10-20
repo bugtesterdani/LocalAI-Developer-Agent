@@ -8,6 +8,9 @@ Set-Location $root
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Check($what) { if ($LASTEXITCODE -ne 0) { throw "$what fehlgeschlagen (Exitcode $LASTEXITCODE)" } }
 
+# Python-Umgebung zuerst: C#-Tests starten Fake-Agent und Worker mit "uv run --no-sync" und lesen src/python/.venv.
+uv sync --project src/python; Check "uv sync"
+
 Step "1/4 Generierte Verträge aktuell?"
 uv run --project src/python python tools/codegen/generate.py --check; Check "Vertragsprüfung"
 

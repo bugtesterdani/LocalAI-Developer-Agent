@@ -10,6 +10,7 @@ Werkzeugen, Betrieb, Entwicklung und Glossar.
 | Thema | Dokument |
 |---|---|
 | Wie ist das System aufgebaut? | [Architektur](docs/architektur.md) |
+| Installieren aus den Paketen (MSI, MSIX, .deb) | [Installation](docs/installation.md) |
 | Einrichten unter Windows | [Inbetriebnahme auf einem neuen Rechner](docs/inbetriebnahme-neuer-rechner.md) |
 | Einrichten unter Linux | [Prüfanleitung M10](docs/pruefung-M10.md#0-einrichtung) |
 | Arbeiten mit der Oberfläche | [Bedienung](docs/bedienung.md) |

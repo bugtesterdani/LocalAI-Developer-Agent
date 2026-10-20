@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
+    cat <<'EOF'
+Local AI Developer Agent installiert (/opt/localai, Start: localai).
+Für QEMU mit KVM: Benutzer in die Gruppe kvm aufnehmen (sudo usermod -aG kvm $USER) und neu anmelden.
+Eigene Einstellungen: ~/.config/localai/localai.json – Vorlage /opt/localai/config/localai.json.
+Bausteine für die Linux-VM: /opt/localai/scripts/linux/get-prerequisites.sh ~/LocalAi/linux
+EOF
+fi
+exit 0

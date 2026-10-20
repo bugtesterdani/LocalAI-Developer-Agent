@@ -349,12 +349,21 @@ public sealed record GuestPayloadSources(
     public static readonly IReadOnlyList<string> DefaultPackages =
         ["pydantic", "pydantic_core", "annotated_types", "typing_extensions", "typing_inspection"];
 
-    /// <summary>Ermittelt Python-Laufzeit und site-packages aus der uv-Umgebung <c>src/python/.venv</c>.</summary>
+    /// <summary>
+    /// Ermittelt Python-Laufzeit und site-packages aus der uv-Umgebung <c>src/python/.venv</c> – in der installierten
+    /// Fassung (ohne .venv) aus der mitgelieferten Laufzeit <c>runtime/python</c>.
+    /// </summary>
     public static GuestPayloadSources FromRepository(string repoRoot)
     {
         var python = Path.Combine(repoRoot, "src", "python");
         var venv = Path.Combine(python, ".venv");
         var cfg = Path.Combine(venv, "pyvenv.cfg");
+        var bundled = Path.Combine(repoRoot, "runtime", "python");
+        if (!File.Exists(cfg) && File.Exists(Path.Combine(bundled, "python.exe")))
+        {
+            return new GuestPayloadSources(bundled, Path.Combine(bundled, "Lib", "site-packages"), Path.Combine(python, "localai"),
+                Path.Combine(repoRoot, "scripts", "sandbox", "guest"), DefaultPackages);
+        }
         if (!File.Exists(cfg))
         {
             throw new InvalidDataException($"Python-Umgebung fehlt ({cfg}) – 'uv sync --project src/python' ausführen");

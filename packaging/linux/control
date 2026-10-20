@@ -1,0 +1,15 @@
+Package: localai-developer-agent
+Version: __VERSION__
+Section: devel
+Priority: optional
+Architecture: amd64
+Installed-Size: __SIZE__
+Maintainer: Local AI Developer Agent <noreply@github.com>
+Depends: qemu-system-x86, qemu-utils, dosfstools, mtools, bubblewrap, ca-certificates, libc6, zlib1g, libgcc-s1, libstdc++6, libicu76 | libicu74 | libicu72 | libicu70, libssl3t64 | libssl3, libfontconfig1, libfreetype6, libx11-6, libice6, libsm6, libxext6, libxrandr2, libxi6, libxcursor1
+Recommends: xdg-utils
+Homepage: https://github.com/bugtesterdani/LocalAI-Developer-Agent
+Description: Lokaler KI-Entwicklungsagent mit Freigabe jedes Werkzeugaufrufs
+ Fünf Rollen (Planner, Coder, Tester, Debugger, Reviewer) auf Basis von Ollama.
+ Jeder Werkzeugaufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in
+ einer Offline-Linux-VM mit QEMU. Enthält .NET-Laufzeit und Python; Ollama wird
+ separat installiert.

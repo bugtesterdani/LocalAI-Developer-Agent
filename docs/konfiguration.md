@@ -28,7 +28,11 @@ Mitgelieferte Vorlagen:
 
 ## `config/localai.json`
 
-Der Broker sucht die Datei vom Programmverzeichnis aufwärts (`config/localai.json`) oder nimmt `--config <pfad>`.
+Suchreihenfolge: `--config <pfad>`, dann `LOCALAI_CONFIG` (Datei), dann `localai.json` im Benutzerordner
+(`%LOCALAPPDATA%\LocalAi\config` bzw. `~/.config/localai`, abweichend mit `LOCALAI_CONFIG_DIR`), zuletzt
+`config/localai.json` vom Programmverzeichnis aufwärts. Bei einer Datei im Benutzerordner gelten relative Pfade
+relativ zum Installationsordner (siehe [Installation](installation.md#eigene-konfiguration)); `models.local.json` wird
+zusätzlich auch dort gelesen.
 Ungültige Werte führen zu einem Startfehler mit Meldung (Exitcode 2).
 
 ### Oberste Ebene

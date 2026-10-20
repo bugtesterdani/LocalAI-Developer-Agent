@@ -11,7 +11,8 @@ ausdrückliche Freigabe, ausgeführt wird nur in einer Offline-VM ohne Netzwerkk
 | Du willst … | Lies |
 |---|---|
 | verstehen, was das System macht und wie es aufgebaut ist | [Architektur](architektur.md) |
-| es auf einem Windows-PC einrichten | [Inbetriebnahme auf einem neuen Rechner](inbetriebnahme-neuer-rechner.md) |
+| es aus den fertigen Paketen installieren (MSI, MSIX, .deb) | [Installation](installation.md) |
+| es auf einem Windows-PC einrichten | [Inbetriebnahme auf einem neuen Rechner](inbetriebnahme-neuer-rechner.md) | (aus dem Repository)
 | es auf einem Linux-Host einrichten | [Prüfanleitung M10, Abschnitt 0](pruefung-M10.md#0-einrichtung) |
 | damit arbeiten (Chat, Freigaben, Übernahme, Not-Aus) | [Bedienung](bedienung.md) |
 | eine Einstellung nachschlagen | [Konfiguration](konfiguration.md) |
@@ -45,6 +46,7 @@ ausdrückliche Freigabe, ausgeführt wird nur in einer Offline-VM ohne Netzwerkk
 
 ### Einrichtung
 
+- [Installation aus den Paketen](installation.md) – MSI, MSIX, Debian-Paket, eigene Konfiguration, Pakete bauen
 - [Inbetriebnahme auf einem neuen Rechner (Windows)](inbetriebnahme-neuer-rechner.md)
 - [Toolchains für die Sandbox-VM](../toolchains/README.md)
 
