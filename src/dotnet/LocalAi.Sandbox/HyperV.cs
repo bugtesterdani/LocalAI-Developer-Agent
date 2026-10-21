@@ -58,6 +58,24 @@ public sealed record HyperVSettings
     /// </summary>
     public QemuDirectBoot? QemuTestBoot { get; init; }
 
+    /// <summary>
+    /// Virtuelle Festplatten beim Aufbau auf dem Host einbinden (Standard). false für Rechner, auf denen das Einbinden
+    /// per Richtlinie gesperrt ist: Linux – Systemfestplatte direkt als VHDX geschrieben, Seed als ISO;
+    /// Windows – Installation durch Windows Setup von der ISO statt DISM (dauert länger). Nur Hyper-V.
+    /// </summary>
+    public bool HostMount { get; init; } = true;
+
+    /// <summary>
+    /// Weg der Jobs in die VM: "CopyVMFile" (Standard, Gastdienstschnittstelle) oder "Disk" – Eingangs-Laufwerk, das der
+    /// Broker selbst als VHDX schreibt und nur an die VM hängt (wenn Copy-VMFile gesperrt ist). Nur Hyper-V.
+    /// </summary>
+    public string Inbound { get; init; } = "CopyVMFile";
+
+    public bool InboundDisk => Inbound == "Disk";
+
+    /// <summary>Nur Windows-Gast mit hostMount=false: Sprache des Abbilds (ohne Einbinden nicht auslesbar), Standard de-DE.</summary>
+    public string ImageLanguage { get; init; } = "de-DE";
+
     /// <summary>Name der Edition im Abbild, z. B. „Windows 11 Pro“; alternativ <see cref="ImageIndex"/>.</summary>
     public string? ImageName { get; init; }
 
@@ -175,6 +193,22 @@ public sealed record HyperVSettings
             || OsDiskGB is < 8 or > 2048 || (!IsLinux && OsDiskGB < 40) || TransferDiskMB is < 32 or > 4096)
         {
             throw new InvalidDataException($"{Section}: memoryMB, processors, osDiskGB oder transferDiskMB außerhalb der Grenzen");
+        }
+        if (Inbound is not ("CopyVMFile" or "Disk"))
+        {
+            throw new InvalidDataException($"{Section}.inbound: \"CopyVMFile\" oder \"Disk\"");
+        }
+        if (IsQemu && (!HostMount || InboundDisk))
+        {
+            throw new InvalidDataException($"{Section}: hostMount und inbound gibt es nur unter Hyper-V");
+        }
+        if (!HostMount && !IsLinux && !ImagePath.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"{Section}.imagePath: mit hostMount false wird von der Windows-ISO installiert (install.wim geht nur mit DISM)");
+        }
+        if (!System.Text.RegularExpressions.Regex.IsMatch(ImageLanguage, "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"))
+        {
+            throw new InvalidDataException($"{Section}.imageLanguage: z. B. \"de-DE\"");
         }
         if (IdleMinutes is < 0 or > 24 * 60)
         {
@@ -387,6 +421,16 @@ public interface IHyperVHost
     Task<VmInfo> SetVmStateAsync(string action, CancellationToken cancellationToken);
 
     Task RemoveVmAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Eingangs-Laufwerk (inbound: Disk): <paramref name="path"/> an die VM hängen bzw. mit null das angehängte abhängen.
+    /// Ersetzt Copy-VMFile, wenn die Gastdienstschnittstelle gesperrt ist. Liefert die Zahl der Netzwerkkarten.
+    /// </summary>
+    Task<int> SetInboundDiskAsync(string? path, CancellationToken cancellationToken) =>
+        throw new HyperVException("Eingangs-Laufwerk wird von diesem Host nicht unterstützt");
+
+    /// <summary>Nach dem bestandenen Selbsttest: Aufbaumedien mit Sitzungsschlüssel (Seed-/Setup-ISO) abhängen und löschen.</summary>
+    Task AfterProvisionedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>Dateiendung der Transfer-Laufwerke (Hyper-V: VHDX, QEMU: Rohformat).</summary>
     string DiskExtension => ".vhdx";
@@ -1247,6 +1291,15 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 Lock(text);
                 return;
             }
+            try
+            {
+                await _host.AfterProvisionedAsync(ct).ConfigureAwait(false);
+            }
+            catch (HyperVException ex)
+            {
+                // Nicht sperren: der Gast hat den Schlüssel bereits übernommen; die Datei bleibt im VM-Ordner (nur Benutzer).
+                SetStatus(SandboxState.SelfTest, "Aufbaumedien nicht entfernt: " + GuestReport.Clip(ex.Message, 200));
+            }
             var minutes = (DateTime.UtcNow - started).TotalMinutes;
             _builtAt = DateTimeOffset.UtcNow;
             _guestUpdate = GuestUpdateVersion;
@@ -1289,6 +1342,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             ["guest"] = _settings.IsLinux ? "Linux" : "Windows",
             ["nestedVirtualization"] = _settings.NestedVirtualization,
             ["hypervisor"] = _settings.Hypervisor.ToString(),
+            ["hostMount"] = _settings.HostMount,
         };
         return request.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
@@ -1324,6 +1378,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         var outgoing = Path.Combine(WorkDirectory, "outgoing");
         var stem = $"{job.Sequence:D12}-{job.JobId}";
         var files = new List<string>();
+        string? inbound = null;
         try
         {
             if (Status.State == SandboxState.Stopped && !_updating && await StartOnDemandAsync(cancellationToken).ConfigureAwait(false) is { } problem)
@@ -1349,7 +1404,20 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             await File.WriteAllTextAsync(ready, stem, Encoding.ASCII, cancellationToken).ConfigureAwait(false);
             files.Add(ready);
 
-            var nics = await CopyWithRetryAsync(files, cancellationToken).ConfigureAwait(false);
+            int nics;
+            if (_settings.InboundDisk)
+            {
+                // Ohne Copy-VMFile: Dateien als Eingangs-Laufwerk (selbst geschriebene VHDX), nur an die VM gehängt.
+                inbound = Path.Combine(_settings.VmDirectory, $"inbound-{job.Sequence:D12}.vhdx");
+                await Task.Run(() => InboundDisk.Write(inbound, job.Sequence, files, _settings.TransferDiskBytes), cancellationToken)
+                    .ConfigureAwait(false);
+                nics = await _host.SetInboundDiskAsync(inbound, cancellationToken).ConfigureAwait(false);
+                _justStarted = false;
+            }
+            else
+            {
+                nics = await CopyWithRetryAsync(files, cancellationToken).ConfigureAwait(false);
+            }
             if (nics != 0)
             {
                 Lock($"VM hat {nics} Netzwerkkarte(n)");
@@ -1414,6 +1482,19 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             foreach (var f in files)
             {
                 File.Delete(f);
+            }
+            if (inbound is not null)
+            {
+                try
+                {
+                    using var detach = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                    await _host.SetInboundDiskAsync(null, detach.Token).ConfigureAwait(false);
+                    File.Delete(inbound);
+                }
+                catch (Exception ex) when (ex is HyperVException or IOException or OperationCanceledException)
+                {
+                    // Bleibt angehängt bzw. liegt im VM-Ordner; beim nächsten Job wird es ersetzt, beim Neuaufbau gelöscht.
+                }
             }
             Touch();
             _exchange.Release();

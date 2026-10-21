@@ -168,6 +168,20 @@ public sealed class HyperVTests : IAsyncLifetime
         return await adapter.ExecuteAsync(Proposal("File.Read", "p", id, [new ToolTarget("t1", "README.md")]), inv + "-r", ct);
     }
 
+    [Fact, Trait("Pruefung", "Ohne-Einbinden")]
+    public async Task Ohne_Copy_VMFile_kommen_Jobs_ueber_das_Eingangs_Laufwerk()
+    {
+        var (vm, host, session) = await StartAsync(tweak: s => s with { Inbound = "Disk" });
+        Assert.Equal(SandboxState.Ready, vm.Status.State);
+        var read = await ReadOnceAsync(vm, session, Project(), "inb");
+        Assert.True(read.Status == ResultStatus.Succeeded, $"{read.TargetResults[0].Message} (Sandbox: {vm.Status.Text})");
+        Assert.Equal("# Projekt in der VM\nZeile 2\n", read.TargetResults[0].Text);
+        Assert.Equal(0, host.JobsCopied); // kein Copy-VMFile
+        Assert.Equal(2, host.InboundAttached);
+        Assert.Empty(Directory.GetFiles(host.InboundDir)); // nach jedem Job wieder abgehängt
+        Assert.Empty(Directory.GetFiles(Path.Combine(_dir, "vm"), "inbound-*.vhdx")); // und gelöscht
+    }
+
     [Fact, Trait("Pruefung", "M3-Wiederverwendung")]
     public async Task Passende_VM_wird_fortgesetzt_statt_neu_aufgebaut()
     {
@@ -712,6 +726,12 @@ public sealed class HyperVTests : IAsyncLifetime
             Directory.CreateDirectory(GuestScriptsDir);
             _workerArgs = ["--inbox", Path.Combine(GuestRoot, "inbox"), "--work", Path.Combine(GuestRoot, "work"),
                 "--key-file", guestKey, "--require-ready", "--poll-ms", "20", "--guest-root", GuestScriptsDir, "--package-dir", PackageDir, .. common];
+            if (settings.InboundDisk)
+            {
+                // Wie im Gast mit inbound: Disk – angehängte Laufwerke liegen hier als Rohdateien in einem Ordner.
+                Directory.CreateDirectory(InboundDir);
+                _workerArgs = [.. _workerArgs, "--inbound-disk", InboundDir];
+            }
             StartSupervised(_workerArgs);
             State = "Running";
             // Provisionierung: Bericht über das Transfer-Laufwerk.
@@ -769,6 +789,29 @@ public sealed class HyperVTests : IAsyncLifetime
                 {
                     File.Copy(f, Path.Combine(GuestRoot, "inbox", Path.GetFileName(f)));
                 }
+            }
+            return Task.FromResult(Nics);
+        }
+
+        public string InboundDir => Path.Combine(GuestRoot, "disks");
+
+        public int InboundAttached { get; private set; }
+
+        /// <summary>Anhängen an die VM: Inhalt der VHDX als Rohlaufwerk sichtbar machen (ohne Einbinden auf dem Host).</summary>
+        public Task<int> SetInboundDiskAsync(string? path, CancellationToken cancellationToken)
+        {
+            foreach (var old in Directory.GetFiles(InboundDir))
+            {
+                File.Delete(old);
+            }
+            if (path is not null)
+            {
+                Assert.StartsWith("inbound-", Path.GetFileName(path), StringComparison.Ordinal);
+                using var disk = VhdxReader.Open(path, 1L << 40);
+                var raw = new byte[disk.VirtualSize];
+                disk.ReadAt(0, raw);
+                File.WriteAllBytes(Path.Combine(InboundDir, "sdz"), raw);
+                InboundAttached++;
             }
             return Task.FromResult(Nics);
         }

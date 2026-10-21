@@ -25,7 +25,10 @@
       "keepVmOnExit": false,
       "reuseVm": false,
       "idleMinutes": 30,
-      "stopAction": "ShutDown"
+      "stopAction": "ShutDown",
+      "hostMount": true,
+      "inbound": "CopyVMFile",
+      "imageLanguage": "de-DE"
     },
     "hypervLinux": {
       "imagePath": "D:\\Agent\\Linux\\debian-13-generic-amd64.raw",
@@ -40,7 +43,9 @@
       "keepVmOnExit": false,
       "reuseVm": false,
       "idleMinutes": 30,
-      "stopAction": "ShutDown"
+      "stopAction": "ShutDown",
+      "hostMount": true,
+      "inbound": "CopyVMFile"
     }
   },
   "orchestrator": {

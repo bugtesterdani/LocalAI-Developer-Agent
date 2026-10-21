@@ -7,7 +7,9 @@
 #   4. Teil 2 in Python: localai.guest.provision (Netzwerkprüfung, Toolchains, Worker-Dienst, Bericht)
 set -u
 umask 022
-SEED=/mnt/localai-seed/localai
+# Seed-Ordner: eingebundenes FAT-Laufwerk bzw. (hostMount: false) aus der Seed-ISO entpackt (LOCALAI_SEED).
+SEED_ROOT=${LOCALAI_SEED:-/mnt/localai-seed}
+SEED=$SEED_ROOT/localai
 ROOT=/var/lib/localai
 OPT=/opt/localai
 LOG=/var/log/localai-provision.log
@@ -61,5 +63,5 @@ fi
 
 # 4 – Rest in Python (schreibt den Bericht, auch bei Fehlern)
 echo "[$(date +%T)] Teil 2 (Python) startet"
-"$PY" -I -m localai.guest.provision --seed /mnt/localai-seed
+"$PY" -I -m localai.guest.provision --seed "$SEED_ROOT"
 echo "[$(date +%T)] Provisionierung beendet (Exitcode $?), Protokoll: $LOG"

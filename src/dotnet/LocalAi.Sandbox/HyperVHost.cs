@@ -190,6 +190,22 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
         return result.GetProperty("nics").GetInt32();
     }
 
+    public async Task<int> SetInboundDiskAsync(string? path, CancellationToken cancellationToken)
+    {
+        var result = await RunJsonAsync("Set-LocalAiInboundDisk.ps1",
+            path is null ? ["-VmName", settings.VmName] : ["-VmName", settings.VmName, "-Path", path], cancellationToken).ConfigureAwait(false);
+        return result.GetProperty("nics").GetInt32();
+    }
+
+    public async Task AfterProvisionedAsync(CancellationToken cancellationToken)
+    {
+        if (settings.HostMount)
+        {
+            return; // Seed liegt auf einer VHDX, die der Gast selbst leert (blkdiscard) bzw. im Windows-Abbild
+        }
+        await RunJsonAsync("Remove-LocalAiSetupMedia.ps1", ["-VmName", settings.VmName], cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken)
     {
         var result = await RunJsonAsync("Get-LocalAiVm.ps1", ["-VmName", settings.VmName], cancellationToken).ConfigureAwait(false);
@@ -455,6 +471,10 @@ public static class SandboxFingerprint
     public static string ComputeCode(HyperVSettings settings, GuestPayloadSources sources)
     {
         var lines = new List<string> { "v3-code", $"low={settings.LowIntegrityTools}", $"guest={settings.Guest}" };
+        if (settings.InboundDisk)
+        {
+            lines.Add("inbound=Disk"); // Worker im Gast braucht --inbound-disk (Gast-Update reicht)
+        }
         foreach (var (dir, include) in new (string, Func<string, bool>)[]
                  {
                      (sources.LocalAiPackage, rel => WorkerFiles.Contains(rel) || rel.StartsWith("worker/", StringComparison.Ordinal)
@@ -510,7 +530,19 @@ public static class GuestPayloadBuilder
         }
         else
         {
-            Build(guestDirectory, sources, sessionKey, settings.TransferDiskBytes, toolchains, settings.LowIntegrityTools);
+            Build(guestDirectory, sources, sessionKey, settings.TransferDiskBytes, toolchains, settings.LowIntegrityTools, settings.Inbound);
+        }
+        if (!settings.HostMount && !settings.IsQemu)
+        {
+            // Rechner ohne Einbinden auf dem Host: Aufbaumedien direkt als Dateien (VHDX/ISO).
+            if (settings.IsLinux)
+            {
+                SetupMedia.BuildLinux(guestDirectory, settings);
+            }
+            else
+            {
+                SetupMedia.BuildWindows(guestDirectory, settings);
+            }
         }
     }
 
@@ -540,7 +572,8 @@ public static class GuestPayloadBuilder
         }
         File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
         File.WriteAllText(Path.Combine(root, "guest-config.json"),
-            GuestConfigJson(settings.TransferDiskBytes, toolchains, lowIntegrityTools: true, GuestOs.Linux, prerequisites, settings.Hypervisor),
+            GuestConfigJson(settings.TransferDiskBytes, toolchains, lowIntegrityTools: true, GuestOs.Linux, prerequisites, settings.Hypervisor,
+                settings.Inbound),
             new UTF8Encoding(false));
         File.WriteAllText(Path.Combine(seed, "meta-data"),
             $"instance-id: localai-{Guid.NewGuid():N}\nlocal-hostname: localai-sbx\n", new UTF8Encoding(false));
@@ -552,11 +585,15 @@ public static class GuestPayloadBuilder
             Directory.CreateDirectory(settings.VmDirectory);
             File.WriteAllText(Path.Combine(settings.VmDirectory, "gast-kennwort.txt"), password, Encoding.ASCII);
         }
-        File.WriteAllText(Path.Combine(seed, "user-data"), CloudConfig(password, settings.IsQemu), new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(seed, "user-data"), CloudConfig(password, settings.IsQemu, seedArchive: !settings.HostMount), new UTF8Encoding(false));
     }
 
     /// <summary>cloud-config: keine Benutzer, keine Paketquellen, Root-Partition vergrößern, provision.sh vom Seed starten.</summary>
-    public static string CloudConfig(string? rootPassword, bool serialConsole = false)
+    /// <param name="seedArchive">
+    /// hostMount=false: Seed als ISO mit <c>localai.tar</c> (ggf. geteilt) – wird nach /var/lib/localai-seed entpackt,
+    /// die ISO danach ausgehängt (der Host entfernt sie nach dem Bericht).
+    /// </param>
+    public static string CloudConfig(string? rootPassword, bool serialConsole = false, bool seedArchive = false)
     {
         var sb = new StringBuilder();
         sb.Append("#cloud-config\n");
@@ -579,13 +616,21 @@ public static class GuestPayloadBuilder
         var output = serialConsole
             ? "2>&1 | tee -a /var/log/localai-provision.log > /dev/ttyS0"
             : ">> /var/log/localai-provision.log 2>&1";
+        if (seedArchive)
+        {
+            sb.Append("  - [/bin/bash, -c, \"mkdir -p /mnt/localai-cidata && mount -o ro LABEL=CIDATA /mnt/localai-cidata && " +
+                      "install -d -m 0700 /var/lib/localai-seed && cat /mnt/localai-cidata/localai.tar* | tar -x -C /var/lib/localai-seed && " +
+                      "umount /mnt/localai-cidata && " +
+                      $"LOCALAI_SEED=/var/lib/localai-seed /bin/bash /var/lib/localai-seed/localai/provision.sh {output}\"]\n");
+            return sb.ToString();
+        }
         sb.Append("  - [/bin/bash, -c, \"mkdir -p /mnt/localai-seed && mount -o ro LABEL=CIDATA /mnt/localai-seed && " +
                   $"/bin/bash /mnt/localai-seed/localai/provision.sh {output}\"]\n");
         return sb.ToString();
     }
 
     public static void Build(string guestDirectory, GuestPayloadSources sources, byte[] sessionKey, long transferDiskBytes,
-        IReadOnlyList<string>? toolchains = null, bool lowIntegrityTools = true)
+        IReadOnlyList<string>? toolchains = null, bool lowIntegrityTools = true, string inbound = "CopyVMFile")
     {
         if (!File.Exists(Path.Combine(sources.PythonHome, "python.exe")))
         {
@@ -627,7 +672,7 @@ public static class GuestPayloadBuilder
             rel => !rel.Split(Path.DirectorySeparatorChar).Contains("__pycache__") && !rel.EndsWith(".pyc", StringComparison.Ordinal));
 
         File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(sessionKey), Encoding.ASCII);
-        File.WriteAllText(Path.Combine(root, "guest-config.json"), GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools), new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(root, "guest-config.json"), GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, inbound), new UTF8Encoding(false));
         foreach (var file in GuestScriptFiles)
         {
             File.Copy(Path.Combine(sources.GuestScripts, file), Path.Combine(root, file));
@@ -637,19 +682,21 @@ public static class GuestPayloadBuilder
 
     public static readonly string[] GuestScriptFiles = ["provision.ps1", "LocalAiGuest.psm1", "update.ps1"];
 
-    public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools) =>
-        JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [], lowIntegrityTools });
+    /// <param name="inbound">Weg der Jobs in die VM: "CopyVMFile" oder "Disk" (Eingangs-Laufwerk, Worker mit --inbound-disk).</param>
+    public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools, string inbound = "CopyVMFile") =>
+        JsonSerializer.Serialize(new { schemaVersion = 1, transferDiskBytes, toolchains = toolchains ?? [], lowIntegrityTools, inbound });
 
     /// <summary>guest-config.json des Linux-Gasts: zusätzlich Gastsystem und die Dateien aus prerequisites.json.</summary>
     public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools, GuestOs guest,
-        LinuxPrerequisites? prerequisites, Hypervisor hypervisor = Hypervisor.HyperV) =>
+        LinuxPrerequisites? prerequisites, Hypervisor hypervisor = Hypervisor.HyperV, string inbound = "CopyVMFile") =>
         guest != GuestOs.Linux
-            ? GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools)
+            ? GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, inbound)
             : JsonSerializer.Serialize(new
             {
                 schemaVersion = 1,
                 guest = "Linux",
                 hypervisor = hypervisor.ToString(),
+                inbound,
                 transferDiskBytes,
                 toolchains = toolchains ?? [],
                 python = prerequisites?.Python,
@@ -662,11 +709,11 @@ public static class GuestPayloadBuilder
     /// (siehe localai/worker/update.py). Python-Laufzeit, Pakete und Toolchains sind nicht enthalten.
     /// </summary>
     public static void BuildUpdate(string zipPath, GuestPayloadSources sources, long transferDiskBytes, IReadOnlyList<string>? toolchains,
-        bool lowIntegrityTools, GuestOs guest, Hypervisor hypervisor = Hypervisor.HyperV)
+        bool lowIntegrityTools, GuestOs guest, Hypervisor hypervisor = Hypervisor.HyperV, string inbound = "CopyVMFile")
     {
         if (guest != GuestOs.Linux)
         {
-            BuildUpdate(zipPath, sources, transferDiskBytes, toolchains, lowIntegrityTools);
+            BuildUpdate(zipPath, sources, transferDiskBytes, toolchains, lowIntegrityTools, inbound);
             return;
         }
         using var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
@@ -680,7 +727,7 @@ public static class GuestPayloadBuilder
         var prerequisites = sources.LinuxPrerequisites is null ? null : LinuxPrerequisites.Load(sources.LinuxPrerequisites, hypervisor);
         var config = zip.CreateEntry("guest-config.json");
         using var writer = new StreamWriter(config.Open(), new UTF8Encoding(false));
-        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, GuestOs.Linux, prerequisites, hypervisor));
+        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, GuestOs.Linux, prerequisites, hypervisor, inbound));
     }
 
     private static void AddPackage(System.IO.Compression.ZipArchive zip, GuestPayloadSources sources)
@@ -697,7 +744,7 @@ public static class GuestPayloadBuilder
     }
 
     public static void BuildUpdate(string zipPath, GuestPayloadSources sources, long transferDiskBytes, IReadOnlyList<string>? toolchains,
-        bool lowIntegrityTools)
+        bool lowIntegrityTools, string inbound = "CopyVMFile")
     {
         using var zip = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create);
         foreach (var file in Directory.EnumerateFiles(sources.LocalAiPackage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
@@ -715,7 +762,7 @@ public static class GuestPayloadBuilder
         }
         var config = zip.CreateEntry("guest-config.json");
         using var writer = new StreamWriter(config.Open(), new UTF8Encoding(false));
-        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools));
+        writer.Write(GuestConfigJson(transferDiskBytes, toolchains, lowIntegrityTools, inbound));
     }
 
     /// <summary>„pydantic“, „pydantic-2.9.dist-info“, „typing_extensions.py“ → Paketname; sonst null (.pth, Editables …).</summary>
