@@ -120,8 +120,15 @@ public sealed record HostOptions
             }
         }
         string? installRoot = null;
-        if (configPath is null && FindUserConfig() is { } userConfig)
+        // Entwicklung im Repository (git-Checkout bzw. uv-Umgebung): dessen config/localai.json gilt, auch wenn auf dem
+        // Rechner zusätzlich eine installierte Fassung mit eigener Konfiguration liegt. LOCALAI_CONFIG gilt immer.
+        var explicitConfig = Environment.GetEnvironmentVariable("LOCALAI_CONFIG") is { Length: > 0 };
+        if (configPath is null && (explicitConfig || !IsDevelopmentCheckout(FindInstallRoot())) && FindUserConfig() is { } userConfig)
         {
+            if (!File.Exists(userConfig))
+            {
+                throw new ArgumentException($"LOCALAI_CONFIG zeigt auf eine fehlende Datei: {userConfig}");
+            }
             // Installierte Fassung: Konfiguration im Benutzerordner, Programmdateien im (schreibgeschützten) Installationsordner.
             configPath = userConfig;
             installRoot = FindInstallRoot();
@@ -167,7 +174,7 @@ public sealed record HostOptions
 
     private static string DefaultDataDirectory()
     {
-        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
         return Path.Combine(string.IsNullOrEmpty(root) ? AppContext.BaseDirectory : root, "LocalAi", "broker");
     }
 
@@ -184,7 +191,7 @@ public sealed record HostOptions
         }
         if (OperatingSystem.IsWindows())
         {
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LocalAi", "config");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify), "LocalAi", "config");
         }
         var xdg = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         var root = string.IsNullOrEmpty(xdg) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config") : xdg;
@@ -201,6 +208,11 @@ public sealed record HostOptions
         var candidate = Path.Combine(UserConfigDirectory(), "localai.json");
         return File.Exists(candidate) ? candidate : null;
     }
+
+    /// <summary>Repository statt Installation: git-Checkout (auch Worktree) oder uv-Umgebung src/python/.venv.</summary>
+    public static bool IsDevelopmentCheckout(string root) =>
+        Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"))
+        || Directory.Exists(Path.Combine(root, "src", "python", ".venv"));
 
     /// <summary>Installations- bzw. Repository-Wurzel: vom Programmverzeichnis aufwärts der Ordner mit src/python/localai.</summary>
     private static string FindInstallRoot()

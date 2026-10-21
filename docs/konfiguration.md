@@ -28,11 +28,15 @@ Mitgelieferte Vorlagen:
 
 ## `config/localai.json`
 
-Suchreihenfolge: `--config <pfad>`, dann `LOCALAI_CONFIG` (Datei), dann `localai.json` im Benutzerordner
-(`%LOCALAPPDATA%\LocalAi\config` bzw. `~/.config/localai`, abweichend mit `LOCALAI_CONFIG_DIR`), zuletzt
-`config/localai.json` vom Programmverzeichnis aufwärts. Bei einer Datei im Benutzerordner gelten relative Pfade
+Suchreihenfolge: `--config <pfad>`, dann `LOCALAI_CONFIG` (Datei, muss vorhanden sein), dann `localai.json` im
+Benutzerordner (`%LOCALAPPDATA%\LocalAi\config` bzw. `~/.config/localai`, abweichend mit `LOCALAI_CONFIG_DIR`),
+zuletzt `config/localai.json` vom Programmverzeichnis aufwärts. Bei einer Datei im Benutzerordner gelten relative Pfade
 relativ zum Installationsordner (siehe [Installation](installation.md#eigene-konfiguration)); `models.local.json` wird
 zusätzlich auch dort gelesen.
+
+Läuft das Programm aus einem Entwicklungs-Checkout (Ordner `.git` oder `src/python/.venv` in der Wurzel), wird der
+Benutzerordner übersprungen: dann gilt `config/localai.json` des Repositorys (und nur dessen `models.local.json`), auch
+wenn auf demselben Rechner eine installierte Fassung mit eigener Konfiguration liegt. `LOCALAI_CONFIG` gilt immer.
 Ungültige Werte führen zu einem Startfehler mit Meldung (Exitcode 2).
 
 ### Oberste Ebene

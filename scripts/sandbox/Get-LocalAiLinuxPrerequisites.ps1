@@ -84,7 +84,8 @@ if (Test-Path -LiteralPath $venv) {
 if (-not $site) { throw "src\python\.venv fehlt – zuerst 'uv sync --project src/python' ausführen" }
 $pydantic = Get-ChildItem -LiteralPath $site.FullName -Directory -Filter 'pydantic-*.dist-info' | Select-Object -First 1
 if (-not $pydantic) { throw "pydantic ist in $($site.FullName) nicht installiert" }
-$useUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
+# uv nur im Repository (mit .venv); die installierte Fassung ist schreibgeschützt und nutzt ihr mitgeliefertes Python.
+$useUv = (Test-Path -LiteralPath $venv) -and [bool](Get-Command uv -ErrorAction SilentlyContinue)
 $pydanticVersion = ($pydantic.Name -replace '^pydantic-', '' -replace '\.dist-info$', '')
 $wheelDir = Join-Path $prereq 'wheels'
 Get-ChildItem -LiteralPath $wheelDir -Filter '*.whl' | Remove-Item -Force

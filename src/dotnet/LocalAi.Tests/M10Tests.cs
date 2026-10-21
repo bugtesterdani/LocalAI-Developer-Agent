@@ -218,6 +218,20 @@ public sealed class M10Tests : IDisposable
         Assert.Equal(GuestOs.Linux, project.GuestOs);
     }
 
+    [Fact, Trait("Pruefung", "Installation")]
+    public void Entwicklungs_Checkout_wird_erkannt()
+    {
+        var install = Directory.CreateDirectory(Path.Combine(_dir, "opt", "localai")).FullName;
+        Directory.CreateDirectory(Path.Combine(install, "src", "python", "localai"));
+        Assert.False(HostOptions.IsDevelopmentCheckout(install), "installierte Fassung: Benutzerordner gilt");
+        Directory.CreateDirectory(Path.Combine(install, "src", "python", ".venv"));
+        Assert.True(HostOptions.IsDevelopmentCheckout(install));
+        var worktree = Directory.CreateDirectory(Path.Combine(_dir, "worktree")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: ../repo/.git/worktrees/x");
+        Assert.True(HostOptions.IsDevelopmentCheckout(worktree));
+        Assert.True(HostOptions.IsDevelopmentCheckout(ContractTests.RepoRoot()));
+    }
+
     [Fact, Trait("Pruefung", "M10-Konfiguration")]
     public void Linux_Host_lehnt_Windows_Gast_ab()
     {

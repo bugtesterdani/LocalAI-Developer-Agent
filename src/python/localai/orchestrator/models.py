@@ -42,6 +42,11 @@ def user_config_dir() -> pathlib.Path:
     return pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config") / "localai"
 
 
+def is_development_checkout(root: pathlib.Path) -> bool:
+    """Repository statt Installation – gleiche Regel wie HostOptions.IsDevelopmentCheckout (C#)."""
+    return (root / ".git").exists() or (root / "src" / "python" / ".venv").is_dir()
+
+
 def repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[4]
 
@@ -158,7 +163,11 @@ class ModelsConfig:
             raw = json.loads(base_path.read_text(encoding="utf-8-sig"))
             source = str(base_path)
             # Repository: config/models.local.json; installierte Fassung: Benutzerordner (siehe user_config_dir).
-            for local_path in dict.fromkeys([base_path.with_name("models.local.json"), user_config_dir() / "models.local.json"]):
+            # Wie im Broker: in einem Entwicklungs-Checkout gilt nur die Datei im Repository.
+            candidates = [base_path.with_name("models.local.json")]
+            if not is_development_checkout(repo_root()):
+                candidates.append(user_config_dir() / "models.local.json")
+            for local_path in dict.fromkeys(candidates):
                 if local_path.exists():
                     raw = merge(raw, json.loads(local_path.read_text(encoding="utf-8-sig")))
                     source += f" + {local_path}"
