@@ -196,6 +196,18 @@ public sealed class OhneEinbindenTests : IDisposable
     }
 
     [Fact, Trait("Pruefung", "Ohne-Einbinden")]
+    public void Kennwortdatei_des_Brokers_gilt_beim_ersten_Aufbau_nicht_als_fremd()
+    {
+        // BuildWindows legt gast-kennwort.txt (keepVmOnExit) vor der Besitzprüfung des Aufbauskripts in den VM-Ordner.
+        foreach (var script in new[] { "New-LocalAiSandbox.ps1", "New-LocalAiLinuxSandbox.ps1" })
+        {
+            var text = File.ReadAllText(Path.Combine(ContractTests.RepoRoot(), "scripts", "sandbox", script));
+            var filter = text.Split('\n').Single(l => l.Contains("$foreign = "));
+            Assert.Contains("'gast-kennwort.txt'", filter);
+        }
+    }
+
+    [Fact, Trait("Pruefung", "Ohne-Einbinden")]
     public void Linux_Seed_als_ISO_und_Systemfestplatte_als_VHDX()
     {
         var guest = Directory.CreateDirectory(Path.Combine(_dir, "lguest")).FullName;

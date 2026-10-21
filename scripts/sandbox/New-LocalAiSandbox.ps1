@@ -63,8 +63,9 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path ([string]$req.guestDirectory) 'unattend.iso'))) { throw 'Aufbaumedium fehlt: unattend.iso' }
     }
     $marker = Join-Path $vmDir $DirectoryMarker
-    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker) })
-    # (Ein neuer, leerer Ordner bekommt die Markierung; danach gehört er LocalAi.)
+    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt') })
+    # (Ein neuer, leerer Ordner bekommt die Markierung; danach gehört er LocalAi. gast-kennwort.txt: bei hostMount false
+    # und keepVmOnExit legt der Broker sie schon vor diesem Skript an.)
     if (-not (Test-Path -LiteralPath $marker) -and $foreign.Count -gt 0) {
         throw "Der VM-Ordner $vmDir enthält fremde Dateien und wird nicht verwendet. Leeren Ordner angeben."
     }
