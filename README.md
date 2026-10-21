@@ -76,6 +76,22 @@ tools/          Codegenerierung, Abnahmebericht, Offline-Bausteine für den Linu
 
 Ausführlich: [Entwicklung](docs/entwicklung.md#repository).
 
+## Info: Rechner, auf denen virtuelle Festplatten nicht eingebunden werden dürfen
+
+Manche Firmenrechner sperren per Richtlinie das Einbinden von VHDX- und ISO-Dateien **auf dem Host** (und teils
+Copy-VMFile), erlauben aber das **Anhängen an eine VM**. Dafür gibt es in `sandbox.hyperv` und `sandbox.hypervLinux`:
+
+- **`"hostMount": false`** – der Aufbau bindet nichts ein: Linux-Systemfestplatte und Seed schreibt der Broker selbst
+  als VHDX bzw. ISO; Windows installiert Windows Setup in der VM von der ISO (dauert länger als DISM, `imagePath` muss
+  eine ISO sein, Sprache in `imageLanguage`). Seed- und Setup-ISO werden nach dem Selbsttest abgehängt und gelöscht.
+- **`"inbound": "Disk"`** – wenn auch Copy-VMFile gesperrt ist: jeder Job kommt als selbst geschriebenes
+  Eingangs-Laufwerk in die VM. Der Rückweg (Transfer-Laufwerk) liest der Broker ohnehin direkt aus der Datei.
+
+Sicherheit wie gehabt: keine Netzwerkkarte, signierte Jobs, streng geprüfte Rückgabe. Einzelheiten, Grenzen und ein
+Kurztest, welche Einstellung ein Rechner braucht: [Betrieb → Rechner ohne Einbinden](docs/betrieb.md#rechner-ohne-einbinden-virtueller-festplatten).
+Standard bleibt `hostMount: true` und `inbound: "CopyVMFile"`. **Stand:** hier mit Gegenproben (qemu-img, isoinfo,
+Linux-Kern, echter Worker) geprüft; auf einem Rechner mit dieser Sperre noch nicht.
+
 ## Bekannte Einschränkungen
 
 - **dev-local-unsafe:** Der Worker prüft Signaturen und liest nur aus der Snapshot-Kopie, läuft aber ohne

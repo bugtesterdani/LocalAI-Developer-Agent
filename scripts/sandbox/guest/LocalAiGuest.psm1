@@ -296,6 +296,8 @@ function Set-WorkerCommand($Config) {
     # Toolchain-Aktionen nur mit installierten Toolchains; Werkzeugprozesse standardmäßig mit niedriger Integrität (SEC-21).
     $execArgs = "--toolchains $root\toolchains"
     if (-not (Test-LowIntegrityTools $Config)) { $execArgs += ' --no-low-integrity' }
+    # Ohne Copy-VMFile (inbound: Disk): Jobs kommen auf einem vom Host angehängten Eingangs-Laufwerk.
+    if ($Config.PSObject.Properties['inbound'] -and [string]$Config.inbound -eq 'Disk') { $execArgs += ' --inbound-disk auto' }
     $lines = @(
         '@echo off',
         ':start',

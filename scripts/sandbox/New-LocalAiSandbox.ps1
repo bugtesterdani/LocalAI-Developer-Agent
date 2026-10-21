@@ -9,6 +9,9 @@
       1. Prüfungen  2. alte VM entfernen  3. Abbild öffnen  4. Systemfestplatte anlegen
       5. Windows per DISM anwenden  6. Bootdateien, unattend.xml, Gastdateien  7. Festplatten aushängen,
       Transfer-Laufwerk  8. VM OHNE Netzwerkkarte erstellen  9. VM starten
+    Mit hostMount=false (Rechner, auf denen virtuelle Festplatten und ISOs nicht eingebunden werden dürfen) wird nichts
+    eingebunden: Windows Setup installiert von der Windows-ISO in die leere Systemfestplatte, Antwortdatei und Gastdateien
+    kommen auf einer vom Broker geschriebenen zweiten ISO (unattend.iso). Dauert länger als DISM.
     Fortschritt: Zeilen "STEP n/9 Text", Abschluss "DONE", Fehler "ERROR Text" in -StatusFile.
     Vollständiges Protokoll: <vmDirectory>\build.log
 #>
@@ -31,6 +34,8 @@ $req = Get-Content -LiteralPath $RequestFile -Raw -Encoding UTF8 | ConvertFrom-J
 $vmName = [string]$req.vmName
 $vmDir = [string]$req.vmDirectory
 $osDisk = Join-Path $vmDir "$vmName-os.vhdx"
+$unattendIso = Join-Path $vmDir "$vmName-unattend.iso"
+$hostMount = -not ($req.hostMount -eq $false)
 $isoMounted = $null
 $vhdMounted = $null
 $vhdMethod = 'Hyper-V'
@@ -53,9 +58,14 @@ try {
     Import-Module Hyper-V
     Import-Module Dism
     if (-not (Test-Path -LiteralPath $req.imagePath)) { throw "Windows-Abbild nicht gefunden: $($req.imagePath)" }
+    if (-not $hostMount) {
+        if ([string]$req.imagePath -notmatch '\.iso$') { throw 'hostMount false: Windows wird von der ISO installiert – imagePath muss eine .iso sein.' }
+        if (-not (Test-Path -LiteralPath (Join-Path ([string]$req.guestDirectory) 'unattend.iso'))) { throw 'Aufbaumedium fehlt: unattend.iso' }
+    }
     $marker = Join-Path $vmDir $DirectoryMarker
-    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker) })
-    # (Ein neuer, leerer Ordner bekommt die Markierung; danach gehört er LocalAi.)
+    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt') })
+    # (Ein neuer, leerer Ordner bekommt die Markierung; danach gehört er LocalAi. gast-kennwort.txt: bei hostMount false
+    # und keepVmOnExit legt der Broker sie schon vor diesem Skript an.)
     if (-not (Test-Path -LiteralPath $marker) -and $foreign.Count -gt 0) {
         throw "Der VM-Ordner $vmDir enthält fremde Dateien und wird nicht verwendet. Leeren Ordner angeben."
     }
@@ -73,8 +83,9 @@ try {
         Write-Host "Alte VM entfernt ($removedDisks Festplatten gelöscht)"
     }
     Get-ChildItem -LiteralPath $vmDir -Filter '*.vhdx' -File | Where-Object {
-        $_.Name -eq "$vmName-os.vhdx" -or $_.Name -like 'transfer-*.vhdx'
+        $_.Name -eq "$vmName-os.vhdx" -or $_.Name -like 'transfer-*.vhdx' -or $_.Name -like 'inbound-*.vhdx'
     } | ForEach-Object { $file = $_.FullName; Invoke-LocalAiRetry { Remove-Item -LiteralPath $file -Force } }
+    if (Test-Path -LiteralPath $unattendIso) { Clear-LocalAiFile -Path $unattendIso }
     $vmConfigDir = Join-Path $vmDir $vmName
     if (Test-Path -LiteralPath $vmConfigDir) { Remove-Item -LiteralPath $vmConfigDir -Recurse -Force }
 
@@ -84,12 +95,17 @@ try {
     Write-Host ("Freier Speicher auf {0}: {1:N0} GB" -f $drive.PSDrive.Name, ($free / 1GB))
     if ($free -lt 30GB) { throw ("Zu wenig freier Speicher auf {0}: {1:N0} GB frei, mindestens 30 GB nötig" -f $drive.PSDrive.Name, ($free / 1GB)) }
 
+    if ($hostMount) {
     # Keine Explorer-Fenster für neu eingebundene Laufwerke.
     $shellHw = Get-Service -Name ShellHWDetection -ErrorAction SilentlyContinue
     if ($shellHw -and $shellHw.Status -eq 'Running') { Stop-Service -Name ShellHWDetection -Force } else { $shellHw = $null }
+    }
 
     # ------------------------------------------------------------------ 3
     Step 3 'Windows-Abbild öffnen'
+    if (-not $hostMount) {
+        Write-Host "Ohne Einbinden: Windows Setup installiert $($req.imagePath) ($(if ($req.imageIndex) { "Index $($req.imageIndex)" } else { $req.imageName }))"
+    } else {
     $imagePath = [string]$req.imagePath
     if ($imagePath -match '\.(iso)$') {
         $isoMounted = $imagePath
@@ -114,12 +130,14 @@ try {
     $info = Get-WindowsImage -ImagePath $wim -Index $index
     $language = Get-LocalAiImageLanguage -ImageInfo $info
     Write-Host "Abbild: $wim, Index $index ($($info.ImageName)), Sprache $language"
+    }
 
     # ------------------------------------------------------------------ 4
     Step 4 'Systemfestplatte anlegen'
     New-VHD -Path $osDisk -SizeBytes ([int64]$req.osDiskGB * 1GB) -Dynamic | Out-Null
     Clear-LocalAiCompression -Path $osDisk
     Write-Host (Get-LocalAiFileFacts -Path $osDisk)
+    if ($hostMount) {
     $mounted = Mount-LocalAiVhd -Path $osDisk
     $vhdMounted = $osDisk
     $vhdMethod = $mounted.Method
@@ -163,12 +181,20 @@ try {
     $guest = [string]$req.guestDirectory
     Copy-Item -LiteralPath (Join-Path $guest 'SetupComplete.cmd') -Destination $setupScripts -Force
     Copy-Item -LiteralPath (Join-Path $guest 'LocalAi') -Destination (Join-Path $winRoot 'LocalAi') -Recurse -Force
+    } else {
+        Step 5 'Windows Setup vorbereiten (ohne Einbinden, Installation in der VM)'
+        Step 6 'Setup-Medium mit Antwortdatei und Gastdateien'
+        Move-Item -LiteralPath (Join-Path ([string]$req.guestDirectory) 'unattend.iso') -Destination $unattendIso -Force
+        Write-Host ("Setup-Medium {0:N0} MB" -f ((Get-Item -LiteralPath $unattendIso).Length / 1MB))
+    }
 
     # ------------------------------------------------------------------ 7
     Step 7 'Festplatten aushängen, Transfer-Laufwerk anlegen'
+    if ($hostMount) {
     Dismount-LocalAiVhd -Path $osDisk -Method $vhdMethod
     $vhdMounted = $null
     if ($isoMounted) { Dismount-DiskImage -ImagePath $isoMounted | Out-Null; $isoMounted = $null }
+    }
     $template = [string]$req.transferTemplate
     if (Test-Path -LiteralPath $template) { Remove-Item -LiteralPath $template -Force }
     New-VHD -Path $template -SizeBytes ([int64]$req.transferDiskMB * 1MB) -Fixed | Out-Null
@@ -186,7 +212,14 @@ try {
     Set-VMMemory -VM $vm -DynamicMemoryEnabled $false -StartupBytes ([int64]$req.memoryMB * 1MB)
     Set-VMProcessor -VM $vm -Count ([int]$req.processors)
     $osDrive = Get-VMHardDiskDrive -VM $vm | Select-Object -First 1
-    Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows -FirstBootDevice $osDrive
+    if ($hostMount) {
+        Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows -FirstBootDevice $osDrive
+    } else {
+        # Erst von der Windows-ISO starten (Setup), danach von der Systemfestplatte; Antwortdatei auf der zweiten DVD.
+        $setupDvd = Add-VMDvdDrive -VM $vm -Path ([string]$req.imagePath) -Passthru
+        Add-VMDvdDrive -VM $vm -Path $unattendIso
+        Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows -FirstBootDevice $setupDvd
+    }
     Set-LocalAiIntegrationServices -Vm $vm
     Add-VMHardDiskDrive -VM $vm -ControllerType SCSI -Path ([string]$req.transferDisk)
     if ((Get-LocalAiNicCount -VmName $vmName) -ne 0) { throw 'VM hat eine Netzwerkkarte – Abbruch (SEC-24).' }
@@ -197,6 +230,10 @@ try {
     if ((Get-LocalAiNicCount -VmName $vmName) -ne 0) {
         Stop-VM -VM $vm -TurnOff -Force
         throw 'VM hat eine Netzwerkkarte – sofort gestoppt (SEC-24).'
+    }
+    if (-not $hostMount) {
+        Write-Host 'Bestätige „Press any key to boot from CD“ (Tastatur der VM) …'
+        Send-LocalAiBootKeys -VmName $vmName -Seconds 40
     }
     Write-Host ("Aufbau auf dem Host fertig nach {0:N1} Minuten." -f ((Get-Date) - $started).TotalMinutes)
     Add-LocalAiStatus -StatusFile $StatusFile -Line 'DONE'

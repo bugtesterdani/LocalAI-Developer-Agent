@@ -360,6 +360,9 @@ public sealed record HostOptions
                     boot.TryGetProperty("append", out var append) ? append.GetString() ?? "" : "console=ttyS0")
                 : null,
             LinuxPrerequisites = linux ? prerequisites : null,
+            HostMount = !(e.TryGetProperty("hostMount", out var hostMount) && hostMount.ValueKind == JsonValueKind.False),
+            Inbound = Str("inbound") ?? defaults.Inbound,
+            ImageLanguage = Str("imageLanguage") ?? defaults.ImageLanguage,
             IdleMinutes = Int("idleMinutes") ?? defaults.IdleMinutes,
             StopAction = Str("stopAction") ?? defaults.StopAction,
             NestedVirtualization = linux && e.TryGetProperty("nestedVirtualization", out var nested) && nested.ValueKind == JsonValueKind.True,

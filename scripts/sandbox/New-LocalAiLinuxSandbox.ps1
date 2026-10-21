@@ -9,6 +9,8 @@
       1. Prüfungen  2. alte VM entfernen  3. Systemfestplatte aus dem Debian-Cloud-Abbild (.raw → VHDX)
       4. Seed-Laufwerk (FAT32, Bezeichnung CIDATA) für cloud-init mit allen Gastdateien  5. Transfer-Laufwerk
       6. VM OHNE Netzwerkkarte erstellen (Generation 2, Secure Boot mit Microsoft-UEFI-CA)  7. VM starten
+    Mit hostMount=false (Rechner, auf denen virtuelle Festplatten nicht eingebunden werden dürfen) hat der Broker
+    Systemfestplatte (os.vhdx) und Seed (seed.iso) bereits als Dateien geschrieben; hier wird nichts eingebunden.
     Fortschritt: Zeilen "STEP n/7 Text", Abschluss "DONE", Fehler "ERROR Text" in -StatusFile.
     Vollständiges Protokoll: <vmDirectory>\build.log
 #>
@@ -32,6 +34,8 @@ $vmName = [string]$req.vmName
 $vmDir = [string]$req.vmDirectory
 $osDisk = Join-Path $vmDir "$vmName-os.vhdx"
 $seedDisk = Join-Path $vmDir "$vmName-seed.vhdx"
+$seedIso = Join-Path $vmDir "$vmName-seed.iso"
+$hostMount = -not ($req.hostMount -eq $false)
 $mountedDisks = New-Object System.Collections.Generic.List[string]
 $shellHw = $null
 $transcript = $false
@@ -54,8 +58,14 @@ try {
     $image = [string]$req.imagePath
     if (-not (Test-Path -LiteralPath $image)) { throw "Debian-Abbild nicht gefunden: $image" }
     $seedSource = Join-Path ([string]$req.guestDirectory) 'seed'
-    foreach ($f in 'user-data', 'meta-data', 'localai\provision.sh') {
-        if (-not (Test-Path -LiteralPath (Join-Path $seedSource $f))) { throw "Gastdatei fehlt: $f" }
+    if ($hostMount) {
+        foreach ($f in 'user-data', 'meta-data', 'localai\provision.sh') {
+            if (-not (Test-Path -LiteralPath (Join-Path $seedSource $f))) { throw "Gastdatei fehlt: $f" }
+        }
+    } else {
+        foreach ($f in 'os.vhdx', 'seed.iso') {
+            if (-not (Test-Path -LiteralPath (Join-Path ([string]$req.guestDirectory) $f))) { throw "Aufbaumedium fehlt: $f" }
+        }
     }
     $marker = Join-Path $vmDir $DirectoryMarker
     $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt') })
@@ -76,19 +86,28 @@ try {
         Write-Host "Alte VM entfernt ($removedDisks Festplatten gelöscht)"
     }
     Get-ChildItem -LiteralPath $vmDir -Filter '*.vhdx' -File | Where-Object {
-        $_.Name -eq "$vmName-os.vhdx" -or $_.Name -eq "$vmName-seed.vhdx" -or $_.Name -like 'transfer-*.vhdx'
+        $_.Name -eq "$vmName-os.vhdx" -or $_.Name -eq "$vmName-seed.vhdx" -or $_.Name -like 'transfer-*.vhdx' -or $_.Name -like 'inbound-*.vhdx'
     } | ForEach-Object { $file = $_.FullName; Invoke-LocalAiRetry { Remove-Item -LiteralPath $file -Force } }
+    if (Test-Path -LiteralPath $seedIso) { Clear-LocalAiFile -Path $seedIso }
     $vmConfigDir = Join-Path $vmDir $vmName
     if (Test-Path -LiteralPath $vmConfigDir) { Remove-Item -LiteralPath $vmConfigDir -Recurse -Force }
     $drive = Get-Item -LiteralPath $vmDir
     $free = (Get-PSDrive -Name $drive.PSDrive.Name).Free
     Write-Host ("Freier Speicher auf {0}: {1:N0} GB" -f $drive.PSDrive.Name, ($free / 1GB))
     if ($free -lt 10GB) { throw ("Zu wenig freier Speicher auf {0}: {1:N0} GB frei, mindestens 10 GB nötig" -f $drive.PSDrive.Name, ($free / 1GB)) }
+    if ($hostMount) {
     $shellHw = Get-Service -Name ShellHWDetection -ErrorAction SilentlyContinue
     if ($shellHw -and $shellHw.Status -eq 'Running') { Stop-Service -Name ShellHWDetection -Force } else { $shellHw = $null }
+    }
 
     # ------------------------------------------------------------------ 3
     Step 3 'Systemfestplatte aus dem Debian-Abbild schreiben'
+    if (-not $hostMount) {
+        # Vom Broker ohne Einbinden geschrieben (dynamische VHDX aus dem Rohabbild).
+        Move-Item -LiteralPath (Join-Path ([string]$req.guestDirectory) 'os.vhdx') -Destination $osDisk -Force
+        Clear-LocalAiCompression -Path $osDisk
+        Write-Host (Get-LocalAiFileFacts -Path $osDisk)
+    } else {
     $rawSize = (Get-Item -LiteralPath $image).Length
     $osBytes = [int64]$req.osDiskGB * 1GB
     if ($rawSize -gt $osBytes) { throw "osDiskGB ist kleiner als das Abbild ($([math]::Ceiling($rawSize / 1GB)) GB)" }
@@ -102,9 +121,15 @@ try {
     Write-Host ("{0:N0} MB Daten geschrieben (Rest leer)" -f ($written / 1MB))
     Dismount-VHD -Path $osDisk
     $mountedDisks.Remove($osDisk) | Out-Null
+    }
 
     # ------------------------------------------------------------------ 4
     Step 4 'Seed-Laufwerk für cloud-init (CIDATA) mit den Gastdateien'
+    if (-not $hostMount) {
+        # Seed als ISO (CIDATA, Joliet) – wird als DVD angehängt und nach dem Bericht vom Host gelöscht.
+        Move-Item -LiteralPath (Join-Path ([string]$req.guestDirectory) 'seed.iso') -Destination $seedIso -Force
+        Write-Host ("Seed-ISO {0:N0} MB" -f ((Get-Item -LiteralPath $seedIso).Length / 1MB))
+    } else {
     $payload = (Get-ChildItem -LiteralPath $seedSource -Recurse -File | Measure-Object -Property Length -Sum).Sum
     # FAT32: mindestens 512 MB; nie genau so groß wie das Transfer-Laufwerk (der Gast erkennt dieses an seiner Größe).
     $seedMB = [int64][math]::Max(512, [math]::Ceiling($payload * 1.3 / 1MB) + 256)
@@ -123,6 +148,7 @@ try {
     Write-Host ("Seed-Laufwerk {0} MB, Gastdateien {1:N0} MB" -f $seedMB, ($payload / 1MB))
     Dismount-VHD -Path $seedDisk
     $mountedDisks.Remove($seedDisk) | Out-Null
+    }
 
     # ------------------------------------------------------------------ 5
     Step 5 'Transfer-Laufwerk anlegen'
@@ -149,7 +175,8 @@ try {
     # Debian startet über shim, signiert mit der Microsoft-UEFI-CA (nicht mit der Windows-Vorlage).
     Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftUEFICertificateAuthority -FirstBootDevice $osDrive
     Set-LocalAiIntegrationServices -Vm $vm
-    Add-VMHardDiskDrive -VM $vm -ControllerType SCSI -Path $seedDisk
+    if ($hostMount) { Add-VMHardDiskDrive -VM $vm -ControllerType SCSI -Path $seedDisk }
+    else { Add-VMDvdDrive -VM $vm -Path $seedIso }
     Add-VMHardDiskDrive -VM $vm -ControllerType SCSI -Path ([string]$req.transferDisk)
     if ((Get-LocalAiNicCount -VmName $vmName) -ne 0) { throw 'VM hat eine Netzwerkkarte – Abbruch (SEC-24).' }
 

@@ -248,7 +248,7 @@ function Remove-LocalAiVmWithDisks {
     # (z. B. Oberfläche und Abnahmetest). Gelöscht werden nur Dateien mit LocalAi-Namen in Ordnern mit Markierung.
     param([Parameter(Mandatory)]$Vm)
     if (-not (Test-LocalAiOwnedVm -Vm $Vm)) { throw "VM '$($Vm.Name)' stammt nicht von LocalAi – wird nicht gelöscht." }
-    $disks = @(Get-VMHardDiskDrive -VM $Vm | Select-Object -ExpandProperty Path)
+    $disks = @(Get-VMHardDiskDrive -VM $Vm | Select-Object -ExpandProperty Path) + @(Get-VMDvdDrive -VM $Vm | Where-Object { $_.Path } | Select-Object -ExpandProperty Path)
     Stop-VM -VM $Vm -TurnOff -Force -ErrorAction SilentlyContinue
     Remove-VM -VM $Vm -Force
     $removed = 0
@@ -256,7 +256,9 @@ function Remove-LocalAiVmWithDisks {
         if (-not $disk -or -not (Test-Path -LiteralPath $disk)) { continue }
         $name = Split-Path -Leaf $disk
         $folder = Split-Path -Parent $disk
-        if (($name -like '*-os.vhdx' -or $name -like '*-seed.vhdx' -or $name -like 'transfer-*.vhdx') -and (Test-Path -LiteralPath (Join-Path $folder $script:DirectoryMarker))) {
+        # Nur eigene Dateien: Systemplatte, Seed (VHDX/ISO), Setup-ISO, Transfer- und Eingangs-Laufwerke – nie die Windows-ISO.
+        if (($name -like '*-os.vhdx' -or $name -like '*-seed.vhdx' -or $name -like '*-seed.iso' -or $name -like '*-unattend.iso' -or
+             $name -like 'transfer-*.vhdx' -or $name -like 'inbound-*.vhdx') -and (Test-Path -LiteralPath (Join-Path $folder $script:DirectoryMarker))) {
             Invoke-LocalAiRetry { Remove-Item -LiteralPath $disk -Force } | Out-Null
             $removed++
         }
@@ -317,6 +319,35 @@ function Invoke-LocalAiRetry {
             if ($i -ge $Attempts) { throw }
             Start-Sleep -Milliseconds $DelayMs
         }
+    }
+}
+
+function Clear-LocalAiFile {
+    # Überschreibt eine Datei mit Nullen und löscht sie (Aufbaumedien mit Sitzungsschlüssel bzw. Kennwort).
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    Invoke-LocalAiRetry {
+        $stream = [System.IO.File]::Open($Path, 'Open', 'Write', 'None')
+        try {
+            $zero = New-Object byte[] (1MB)
+            $left = $stream.Length
+            while ($left -gt 0) { $n = [int][Math]::Min($left, $zero.Length); $stream.Write($zero, 0, $n); $left -= $n }
+            $stream.Flush($true)
+        } finally { $stream.Dispose() }
+        Remove-Item -LiteralPath $Path -Force
+    } | Out-Null
+}
+
+function Send-LocalAiBootKeys {
+    # Windows-ISO startet nur nach Tastendruck („Press any key to boot from CD“): eine Weile Enter an die VM senden.
+    # Ohne Einbinden des Abbilds (hostMount: false) lässt sich die Abfrage nicht aus der ISO entfernen.
+    param([Parameter(Mandatory)][string]$VmName, [int]$Seconds = 40)
+    $vm = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$VmName'"
+    $keyboard = Get-CimAssociatedInstance -InputObject $vm -ResultClassName Msvm_Keyboard
+    $until = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $until) {
+        try { Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{ keyCode = [uint32]13 } | Out-Null } catch { }
+        Start-Sleep -Milliseconds 700
     }
 }
 

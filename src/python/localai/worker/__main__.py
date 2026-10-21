@@ -134,7 +134,7 @@ def pending_jobs(inbox: pathlib.Path, require_ready: bool) -> list[pathlib.Path]
 
 def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, poll: float,
         require_ready: bool = False, executor: Executor | None = None, update: UpdateTarget | None = None,
-        osdebug=None) -> int:  # noqa: ANN001
+        osdebug=None, inbound=None) -> int:
     """Verarbeitet Jobs; Rückgabe 75 = nach Gast-Update neu starten, sonst 0."""
     for d in (inbox, work):
         d.mkdir(parents=True, exist_ok=True)
@@ -142,6 +142,8 @@ def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, p
     runner = ToolRunner(SnapshotStore(work), executor, RepoIndexer(work), osdebug)
     print(f"[Worker] bereit, Eingang {inbox}", flush=True)
     while True:
+        if inbound is not None:
+            inbound.poll(inbox)
         for job_file in pending_jobs(inbox, require_ready):
             try:
                 if process_one(job_file, sink, key, state, runner, update):
@@ -184,6 +186,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--emu-user", help="Linux-Gast: QEMU als dieser Benutzer, ohne Netz (z. B. localai-emu)")
     parser.add_argument("--qemu", help="nur Tests: Pfad zu qemu-system-x86_64")
     parser.add_argument("--kvp-pool", type=pathlib.Path, help="nur Tests: KVP-Pool-Datei statt /var/lib/hyperv/.kvp_pool_1")
+    parser.add_argument("--inbound-disk",
+                        help="Jobs vom Eingangs-Laufwerk übernehmen (inbound: Disk): 'auto' = Laufwerke der VM, "
+                             "sonst Ordner mit Rohdateien (Tests)")
     parser.add_argument("--no-low-integrity", action="store_true",
                         help="Werkzeugprozesse ohne niedrige Integritätsstufe starten (schwächer, nur zur Fehlersuche)")
     args = parser.parse_args(argv)
@@ -233,7 +238,17 @@ def main(argv: list[str] | None = None) -> int:
             emu_user = ToolUser.lookup(args.emu_user)
         osdebug = OsDebugManager((args.jobs_root or args.work / "jobs"), emu_user, args.qemu, executor)
     try:
-        return run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor, update, osdebug)
+        inbound = None
+        if args.inbound_disk:
+            from localai.worker.inbound import InboundDisks
+            args.work.mkdir(parents=True, exist_ok=True)
+            if args.inbound_disk == "auto":
+                inbound = InboundDisks(args.work / "inbound.json")
+            else:
+                folder = pathlib.Path(args.inbound_disk)
+                inbound = InboundDisks(args.work / "inbound.json", lambda: [str(p) for p in sorted(folder.iterdir())])
+        return run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor, update, osdebug,
+                   inbound)
     finally:
         if osdebug is not None and not args.once:
             osdebug.stop_all()

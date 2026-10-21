@@ -105,6 +105,61 @@ jeder Nachweis vorhanden und erfolgreich ist; fehlt etwas, heißt es „unvollst
    Neuaufbau. Geänderte Toolchains oder VM-Einstellungen führen zu einem Neuaufbau.
 4. Nach Wechsel von Modell, Ollama-Version oder GPU-Treiber: neu kalibrieren.
 
+## Rechner ohne Einbinden virtueller Festplatten
+
+Auf manchen Firmenrechnern ist per Richtlinie gesperrt, virtuelle Festplatten (VHDX, ISO) **auf dem Host** einzubinden;
+das **Anhängen an eine VM** ist aber erlaubt. LocalAi braucht dann zwei Einstellungen in `sandbox.hyperv` bzw.
+`sandbox.hypervLinux`:
+
+```json
+"hyperv": { "imagePath": "D:\\Agent\\Windows11.iso", "imageName": "Windows 11 Pro", "imageLanguage": "de-DE",
+            "productKey": "…", "hostMount": false, "inbound": "Disk" },
+"hypervLinux": { "imagePath": "D:\\Agent\\Linux\\debian-13-generic-amd64.raw", "hostMount": false, "inbound": "Disk" }
+```
+
+**`hostMount: false` – Aufbau ohne Einbinden**
+
+| Gast | statt bisher | jetzt |
+|---|---|---|
+| Linux | Debian-Abbild in eingebundene VHDX schreiben, Seed als FAT32-VHDX | der Broker schreibt die Systemfestplatte selbst als VHDX-Datei; der Seed (cloud-init `CIDATA`) wird eine ISO, die als DVD an die VM kommt |
+| Windows | ISO einbinden, DISM in eingebundene VHDX | Windows Setup installiert in der VM von der Windows-ISO (DVD 1); Antwortdatei, Gastdateien und Einrichtungsskript liegen auf einer zweiten, vom Broker geschriebenen ISO (DVD 2). Die Abfrage „Press any key to boot from CD“ bestätigt der Aufbau über die Tastatur der VM |
+
+- Nach dem bestandenen Selbsttest hängt der Broker beide DVDs ab und überschreibt und löscht die eigene Seed- bzw.
+  Setup-ISO (sie enthalten Sitzungsschlüssel bzw. Kennwort). Die Windows-ISO wird nur ausgeworfen.
+- Windows: `imagePath` muss eine **ISO** sein (`install.wim` geht nur mit DISM). Die Sprache des Abbilds steht in
+  `imageLanguage`, weil sie sich ohne Einbinden nicht auslesen lässt. Windows Setup prüft TPM, Secure Boot und
+  Arbeitsspeicher nicht (LabConfig in der Antwortdatei; die VM bleibt ohne Netzwerkkarte). Ohne `productKey` kann
+  Setup bei manchen ISOs nach einem Schlüssel fragen – dann bleibt der Aufbau stehen; der allgemeine
+  Installationsschlüssel der Edition (ohne Aktivierung) reicht.
+- Der Aufbau dauert für Windows deutlich länger als mit DISM (Installation in der VM), für Linux etwa gleich lang.
+- `scripts\sandbox\Get-LocalAiGuestLogs.ps1` bindet die Systemfestplatte ein und funktioniert dort nicht. Die
+  Gastprotokolle liegen in der VM (`C:\LocalAi\logs` bzw. `/var/log/localai-provision.log`); mit
+  `keepVmOnExit: true` kann man sich an der VM-Konsole anmelden (Kennwort in `gast-kennwort.txt` im VM-Ordner).
+
+**`inbound: Disk` – Jobs ohne Copy-VMFile**
+
+Ist zusätzlich die Gastdienstschnittstelle (Copy-VMFile) gesperrt, schreibt der Broker die Dateien jedes Jobs als
+**Eingangs-Laufwerk** – eine eigene VHDX-Datei, ohne sie auf dem Host einzubinden – und hängt sie nur an die VM. Der
+Worker im Gast erkennt das Laufwerk an seinem Kopf (`LAIINBX1`), prüft Sequenz und SHA-256 und legt die Dateien in
+seinen Eingang. Nach der Antwort hängt der Broker es wieder ab und löscht es.
+
+Der Rückweg ist unverändert das **Transfer-Laufwerk**: der Broker liest die abgehängte VHDX mit seinem eigenen Leser
+direkt als Datei – auch das braucht kein Einbinden auf dem Host. Die Sicherheit bleibt gleich: signierte Jobs mit
+Sequenz, streng geprüfte Rückgabe (Containerformat, Prüfsumme, Größengrenze), keine Netzwerkkarte in der VM.
+
+Wechsel von `inbound` bei bestehender VM mit `reuseVm`: der Worker im Gast wird per Gast-Update umgestellt.
+`hostMount` wirkt nur beim nächsten Aufbau („VM neu aufbauen“).
+
+**Prüfen, was auf dem Rechner geht** (PowerShell als Administrator, beliebige VM):
+
+```powershell
+$v = "$env:TEMP\t.vhdx"; New-VHD -Path $v -SizeBytes 64MB -Dynamic | Out-Null
+Mount-VHD -Path $v -NoDriveLetter; Dismount-VHD -Path $v                 # gesperrt → hostMount: false
+Add-VMHardDiskDrive -VMName <VM> -Path $v; Remove-VMHardDiskDrive -VMName <VM> -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 1
+"x" | Set-Content $env:TEMP\t.txt
+Copy-VMFile -Name <VM> -SourcePath $env:TEMP\t.txt -DestinationPath C:\t.txt -CreateFullPath -FileSource Host   # gesperrt → inbound: Disk
+```
+
 ## Häufige Störungen
 
 | Meldung / Symptom | Ursache und Abhilfe |

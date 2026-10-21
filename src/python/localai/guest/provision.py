@@ -405,7 +405,7 @@ def worker_command(config: dict[str, Any], paths: Paths = Paths()) -> list[str]:
             "--key-file", str(paths.root / "session.key"),
             "--transfer-disk", "auto", "--transfer-size", str(int(config["transferDiskBytes"])), "--require-ready",
             "--toolchains", str(paths.published), "--tools-user", TOOLS_USER, "--jobs-root", str(paths.jobs),
-            "--osdebug", "--emu-user", EMU_USER]
+            "--osdebug", "--emu-user", EMU_USER] + (["--inbound-disk", "auto"] if config.get("inbound") == "Disk" else [])
 
 
 def worker_unit(config: dict[str, Any], paths: Paths = Paths()) -> str:  # noqa: B008
@@ -523,13 +523,23 @@ def quiet_services() -> None:
 
 # ------------------------------------------------------------------ 5 Seed-Laufwerk
 
-def retire_seed(seed: pathlib.Path) -> str | None:
+def retire_seed(seed: pathlib.Path, cloud: pathlib.Path = pathlib.Path("/etc/cloud")) -> str | None:
     """Sitzungsschlüssel auf dem Seed-Laufwerk überschreiben, aushängen, Blöcke freigeben; cloud-init abschalten."""
     problem = None
     key = seed / "localai" / "session.key"
     source = next((line.split()[0] for line in pathlib.Path("/proc/mounts").read_text().splitlines()
                    if len(line.split()) > 1 and line.split()[1] == str(seed)), None)
     try:
+        if source is None and seed.is_dir():
+            # hostMount: false – aus der Seed-ISO entpackt: Schlüssel überschreiben, Ordner löschen. Die ISO selbst hängt
+            # der Host nach dem Bericht ab und löscht sie.
+            if key.exists():
+                size = key.stat().st_size
+                with open(key, "r+b") as f:
+                    f.write(b"\0" * size)
+                    f.flush()
+                    os.fsync(f.fileno())
+            shutil.rmtree(seed)
         if source is not None:
             run(["mount", "-o", "remount,rw", str(seed)])
             if key.exists():
@@ -547,8 +557,8 @@ def retire_seed(seed: pathlib.Path) -> str | None:
             run(["blkdiscard", "-f", disk])
     except OSError as err:
         problem = f"Seed-Laufwerk nicht bereinigt: {err}"
-    pathlib.Path("/etc/cloud").mkdir(parents=True, exist_ok=True)
-    pathlib.Path("/etc/cloud/cloud-init.disabled").write_text("LocalAi: Provisionierung abgeschlossen\n", encoding="utf-8")
+    cloud.mkdir(parents=True, exist_ok=True)
+    (cloud / "cloud-init.disabled").write_text("LocalAi: Provisionierung abgeschlossen\n", encoding="utf-8")
     return problem
 
 
