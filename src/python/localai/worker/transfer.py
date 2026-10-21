@@ -117,10 +117,10 @@ class TransferDisk:
     path: str
     expected_size: int
 
-    def resolve(self, attempts: int = 40, delay: float = 0.5) -> str:
+    def resolve(self, attempts: int = 120, delay: float = 0.5) -> str:
         if self.path != "auto":
             return self.path
-        # Nach dem Austausch durch den Host taucht das neue Laufwerk erst nach kurzer Zeit im Gast auf.
+        # Der Host hängt das Laufwerk erst unmittelbar vor dem Job an; im Gast taucht es nach kurzer Zeit auf (bis 60 s).
         for attempt in range(attempts):
             try:
                 return find_transfer_disk(self.expected_size)

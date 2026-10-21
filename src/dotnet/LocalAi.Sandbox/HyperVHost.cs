@@ -182,11 +182,17 @@ public sealed class PowerShellHyperVHost(HyperVSettings settings, string scripts
         return result.GetProperty("nics").GetInt32();
     }
 
-    public async Task<int> SwapTransferDiskAsync(string currentDisk, string templateDisk, string newDisk, string detachedPath, CancellationToken cancellationToken)
+    public async Task<int> DetachTransferDiskAsync(string currentDisk, string detachedPath, CancellationToken cancellationToken)
     {
         var result = await RunJsonAsync("Switch-LocalAiTransferDisk.ps1",
-            ["-VmName", settings.VmName, "-Current", currentDisk, "-Template", templateDisk, "-New", newDisk, "-Detached", detachedPath],
-            cancellationToken).ConfigureAwait(false);
+            ["-VmName", settings.VmName, "-Current", currentDisk, "-Detached", detachedPath], cancellationToken).ConfigureAwait(false);
+        return result.GetProperty("nics").GetInt32();
+    }
+
+    public async Task<int> AttachTransferDiskAsync(string templateDisk, string newDisk, CancellationToken cancellationToken)
+    {
+        var result = await RunJsonAsync("Switch-LocalAiTransferDisk.ps1",
+            ["-VmName", settings.VmName, "-Template", templateDisk, "-New", newDisk], cancellationToken).ConfigureAwait(false);
         return result.GetProperty("nics").GetInt32();
     }
 

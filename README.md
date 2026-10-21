@@ -85,7 +85,8 @@ Copy-VMFile), erlauben aber das **Anhängen an eine VM**. Dafür gibt es in `san
   als VHDX bzw. ISO; Windows installiert Windows Setup in der VM von der ISO (dauert länger als DISM, `imagePath` muss
   eine ISO sein, Sprache in `imageLanguage`). Seed- und Setup-ISO werden nach dem Selbsttest abgehängt und gelöscht.
 - **`"inbound": "Disk"`** – wenn auch Copy-VMFile gesperrt ist: jeder Job kommt als selbst geschriebenes
-  Eingangs-Laufwerk in die VM. Der Rückweg (Transfer-Laufwerk) liest der Broker ohnehin direkt aus der Datei.
+  Eingangs-Laufwerk in die VM. Der Rückweg (Transfer-Laufwerk) liest der Broker ohnehin direkt aus der Datei – erst
+  nachdem er es von der VM abgehängt hat; angehängt ist es nur während eines Jobs.
 
 Sicherheit wie gehabt: keine Netzwerkkarte, signierte Jobs, streng geprüfte Rückgabe. Einzelheiten, Grenzen und ein
 Kurztest, welche Einstellung ein Rechner braucht: [Betrieb → Rechner ohne Einbinden](docs/betrieb.md#rechner-ohne-einbinden-virtueller-festplatten).

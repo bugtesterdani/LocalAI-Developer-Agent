@@ -681,25 +681,31 @@ public sealed class QemuVmHost : IHyperVHost, IAsyncDisposable
         stream.SetLength(_settings.TransferDiskBytes);
     }
 
-    private async Task SaveConfigAsync(string transferDisk, CancellationToken ct)
+    /// <summary><paramref name="transferDisk"/> null: zwischen den Jobs hängt kein Transfer-Laufwerk an der VM.</summary>
+    private async Task SaveConfigAsync(string? transferDisk, CancellationToken ct)
     {
         var config = new JsonObject
         {
             ["schemaVersion"] = 1,
             ["vmName"] = _settings.VmName,
-            ["transferDisk"] = Path.GetFullPath(transferDisk),
+            ["transferDisk"] = transferDisk is null ? null : Path.GetFullPath(transferDisk),
         };
         var tmp = ConfigFile + ".tmp";
         await File.WriteAllTextAsync(tmp, config.ToJsonString(), ct).ConfigureAwait(false);
         File.Move(tmp, ConfigFile, overwrite: true);
     }
 
-    private string CurrentTransferDisk()
+    private string? CurrentTransferDisk()
     {
         try
         {
-            var path = JsonNode.Parse(File.ReadAllText(ConfigFile))?["transferDisk"]?.GetValue<string>();
-            if (path is null || !File.Exists(path))
+            var config = JsonNode.Parse(File.ReadAllText(ConfigFile)) ?? throw new InvalidOperationException("leer");
+            var path = config["transferDisk"]?.GetValue<string>();
+            if (path is null)
+            {
+                return null; // zwischen den Jobs abgehängt
+            }
+            if (!File.Exists(path))
             {
                 throw new HyperVException("Transfer-Laufwerk der VM fehlt – „VM neu aufbauen“");
             }
@@ -775,7 +781,7 @@ public sealed class QemuVmHost : IHyperVHost, IAsyncDisposable
     // ------------------------------------------------------------------ QEMU-Prozess
 
     /// <summary>Feste Befehlszeile: kein Netzwerkgerät, keine Anzeige, Steuerung nur über Unix-Sockets, seccomp.</summary>
-    internal IReadOnlyList<string> BuildArguments(bool attachSeed, string transferDisk, string transferNode, bool kvm)
+    internal IReadOnlyList<string> BuildArguments(bool attachSeed, string? transferDisk, string transferNode, bool kvm)
     {
         static string Esc(string path) => path.Replace(",", ",,", StringComparison.Ordinal);
         var sockets = SocketDirectory;
@@ -812,7 +818,9 @@ public sealed class QemuVmHost : IHyperVHost, IAsyncDisposable
             ]);
         }
         args.AddRange([
-            "-blockdev", $"driver=file,filename={Esc(transferDisk)},node-name={transferNode}",
+            "-blockdev", transferDisk is null
+                ? $"driver=null-co,size={_settings.TransferDiskBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)},read-zeroes=on,node-name={transferNode}"
+                : $"driver=file,filename={Esc(transferDisk)},node-name={transferNode}",
             "-blockdev", $"driver=raw,file={transferNode},node-name={RawNode}",
             "-device", "virtio-blk-pci,drive=xfer,id=xferdev,serial=localai-transfer",
             "-device", "virtio-serial-pci,id=vser",
@@ -1241,7 +1249,33 @@ public sealed class QemuVmHost : IHyperVHost, IAsyncDisposable
         return await CountNicsAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<int> SwapTransferDiskAsync(string currentDisk, string templateDisk, string newDisk, string detachedPath, CancellationToken cancellationToken)
+    /// <summary>
+    /// Abhängen: das Gerät bleibt (virtio-blk ist nicht zuverlässig im Betrieb entfernbar), sein Inhalt wird aber auf einen
+    /// leeren null-co-Knoten umgestellt – Schreibzugriffe des Gasts gehen ins Leere, die Datei ist von QEMU gelöst, bevor
+    /// der Broker sie liest.
+    /// </summary>
+    public async Task<int> DetachTransferDiskAsync(string currentDisk, string detachedPath, CancellationToken cancellationToken)
+    {
+        await _state.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var nics = 0;
+            if (Running && _qmp is not null)
+            {
+                await SwitchTransferNodeAsync(NullNodeOptions("xf" + Interlocked.Increment(ref _nodeCounter)), cancellationToken).ConfigureAwait(false);
+                nics = await CountNicsAsync(cancellationToken).ConfigureAwait(false);
+            }
+            await SaveConfigAsync(null, cancellationToken).ConfigureAwait(false);
+            File.Move(currentDisk, detachedPath, overwrite: true);
+            return nics;
+        }
+        finally
+        {
+            _state.Release();
+        }
+    }
+
+    public async Task<int> AttachTransferDiskAsync(string templateDisk, string newDisk, CancellationToken cancellationToken)
     {
         await _state.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -1250,31 +1284,40 @@ public sealed class QemuVmHost : IHyperVHost, IAsyncDisposable
             var nics = 0;
             if (Running && _qmp is not null)
             {
-                // Dateiknoten tauschen, Gerät bleibt: der Gast sieht dasselbe Laufwerk mit leerem Inhalt.
-                var node = "xf" + Interlocked.Increment(ref _nodeCounter);
-                await _qmp.ExecuteAsync("blockdev-add", new JsonObject
+                await SwitchTransferNodeAsync(new JsonObject
                 {
-                    ["driver"] = "file", ["filename"] = Path.GetFullPath(newDisk), ["node-name"] = node,
+                    ["driver"] = "file", ["filename"] = Path.GetFullPath(newDisk), ["node-name"] = "xf" + Interlocked.Increment(ref _nodeCounter),
                 }, cancellationToken).ConfigureAwait(false);
-                await _qmp.ExecuteAsync("blockdev-reopen", new JsonObject
-                {
-                    ["options"] = new JsonArray(new JsonObject { ["driver"] = "raw", ["node-name"] = RawNode, ["file"] = node }),
-                }, cancellationToken).ConfigureAwait(false);
-                if (_transferNode is not null)
-                {
-                    await _qmp.ExecuteAsync("blockdev-del", new JsonObject { ["node-name"] = _transferNode }, cancellationToken).ConfigureAwait(false);
-                }
-                _transferNode = node;
                 nics = await CountNicsAsync(cancellationToken).ConfigureAwait(false);
             }
             await SaveConfigAsync(newDisk, cancellationToken).ConfigureAwait(false);
-            File.Move(currentDisk, detachedPath, overwrite: true);
             return nics;
         }
         finally
         {
             _state.Release();
         }
+    }
+
+    private JsonObject NullNodeOptions(string node) => new()
+    {
+        ["driver"] = "null-co", ["size"] = _settings.TransferDiskBytes, ["read-zeroes"] = true, ["node-name"] = node,
+    };
+
+    /// <summary>Knoten unter dem Transfer-Gerät tauschen; der alte Knoten (und damit die Datei) wird freigegeben.</summary>
+    private async Task SwitchTransferNodeAsync(JsonObject options, CancellationToken ct)
+    {
+        var node = options["node-name"]!.GetValue<string>();
+        await _qmp!.ExecuteAsync("blockdev-add", options, ct).ConfigureAwait(false);
+        await _qmp.ExecuteAsync("blockdev-reopen", new JsonObject
+        {
+            ["options"] = new JsonArray(new JsonObject { ["driver"] = "raw", ["node-name"] = RawNode, ["file"] = node }),
+        }, ct).ConfigureAwait(false);
+        if (_transferNode is not null)
+        {
+            await _qmp.ExecuteAsync("blockdev-del", new JsonObject { ["node-name"] = _transferNode }, ct).ConfigureAwait(false);
+        }
+        _transferNode = node;
     }
 
     public async Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken)
