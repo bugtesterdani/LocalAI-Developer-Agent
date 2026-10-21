@@ -23,11 +23,12 @@ try {
         $drive = Get-VMHardDiskDrive -VMName $VmName -ControllerType SCSI | Where-Object { $_.Path -ieq $Current }
         if ($drive) {
             Remove-VMHardDiskDrive -VMHardDiskDrive $drive
-        } elseif (-not (Test-Path -LiteralPath $Current)) {
-            throw "Transfer-Laufwerk ist weder angehängt noch vorhanden: $Current"
         }
-        # (Nicht angehängt, aber vorhanden: Abbruch zwischen Abhängen und Verschieben – nur noch verschieben.)
-        Invoke-LocalAiRetry { Move-Item -LiteralPath $Current -Destination $Detached -Force } | Out-Null
+        # Nicht angehängt, aber vorhanden: Abbruch zwischen Kopieren und Anhängen bzw. Abhängen und Verschieben – nur
+        # noch verschieben. Weder noch: Anhängen kam nie so weit, nichts zu tun (kein -Detached, der Broker liest nichts).
+        if (Test-Path -LiteralPath $Current) {
+            Invoke-LocalAiRetry { Move-Item -LiteralPath $Current -Destination $Detached -Force } | Out-Null
+        }
     } else {
         Copy-Item -LiteralPath $Template -Destination $New -Force
         Add-VMHardDiskDrive -VMName $VmName -ControllerType SCSI -Path $New

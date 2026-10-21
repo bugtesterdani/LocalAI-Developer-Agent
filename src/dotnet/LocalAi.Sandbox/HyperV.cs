@@ -1325,11 +1325,13 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
 
     private async Task<int> AttachTransferDiskAsync(CancellationToken ct)
     {
+        // Vor dem Anhängen merken: scheitert oder endet der Aufruf mittendrin (Abbruch nach Add-VMHardDiskDrive), hängt
+        // das Laufwerk womöglich schon – das Aufräumen (CollectAsync) hängt es dann trotzdem ab bzw. verträgt, dass es fehlt.
+        // Sonst bliebe ein verwaistes leeres Laufwerk, und der Gast fände beim nächsten Job zwei Kandidaten.
         var next = NextDiskPath();
-        var nics = await _host.AttachTransferDiskAsync(TemplateDisk, next, ct).ConfigureAwait(false);
         _currentDisk = next;
         SaveReuseState(clean: false);
-        return nics;
+        return await _host.AttachTransferDiskAsync(TemplateDisk, next, ct).ConfigureAwait(false);
     }
 
     private string NextDiskPath() =>
@@ -1373,9 +1375,17 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             return (null, (await _host.GetVmInfoAsync(ct).ConfigureAwait(false)).NetworkAdapters);
         }
         var detached = Path.Combine(WorkDirectory, "detached-" + Path.GetFileName(current));
+        if (File.Exists(detached))
+        {
+            File.Delete(detached);
+        }
         var nics = await _host.DetachTransferDiskAsync(current, detached, ct).ConfigureAwait(false);
         _currentDisk = null;
         SaveReuseState(clean: false);
+        if (!File.Exists(detached))
+        {
+            return (null, nics); // Anhängen war nie fertig geworden: nichts abzuholen
+        }
         try
         {
             return (TransferContainer.Read(detached, _settings.TransferDiskBytes), nics);

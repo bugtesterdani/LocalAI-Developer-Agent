@@ -1266,7 +1266,10 @@ public sealed class QemuVmHost : IHyperVHost, IAsyncDisposable
                 nics = await CountNicsAsync(cancellationToken).ConfigureAwait(false);
             }
             await SaveConfigAsync(null, cancellationToken).ConfigureAwait(false);
-            File.Move(currentDisk, detachedPath, overwrite: true);
+            if (File.Exists(currentDisk))
+            {
+                File.Move(currentDisk, detachedPath, overwrite: true); // fehlt nur, wenn das Anhängen nie so weit kam
+            }
             return nics;
         }
         finally

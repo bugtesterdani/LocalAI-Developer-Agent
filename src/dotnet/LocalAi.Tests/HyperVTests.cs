@@ -439,6 +439,23 @@ public sealed class HyperVTests : IAsyncLifetime
     }
 
     [Fact, Trait("Pruefung", "SEC-18")]
+    public async Task Abbruch_nach_dem_Anhaengen_hinterlaesst_kein_verwaistes_Transfer_Laufwerk()
+    {
+        var (vm, host, session) = await StartAsync();
+        host.CancelAfterAttach = true;
+        var job = DummyJob(session.NextSequence()) with { SessionId = session.SessionId };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            vm.ExchangeAsync(JobSigner.Sign(job, session.Key), null, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        Assert.False(host.TransferAttached, "das schon angehängte Laufwerk wurde beim Aufräumen abgehängt");
+        Assert.Equal(0, host.JobsCopied);
+        // Der nächste Job hängt genau ein frisches Laufwerk an und bekommt seine Antwort.
+        var next = await vm.ExchangeAsync(JobSigner.Sign(job with { Sequence = session.NextSequence() }, session.Key), null,
+            TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        Assert.Null(next.Rejection);
+        Assert.False(host.TransferAttached);
+    }
+
+    [Fact, Trait("Pruefung", "SEC-18")]
     public async Task Fehlende_Antwort_sperrt_ohne_Wiederholung()
     {
         var (vm, host, session) = await StartAsync(tweak: s => s with { PauseOnNoAnswer = false });
@@ -822,7 +839,10 @@ public sealed class HyperVTests : IAsyncLifetime
         /// <summary>Abhängen: das Rohlaufwerk verschwindet aus dem Gast – Schreibversuche des Workers scheitern bis zum nächsten Job.</summary>
         public Task<int> DetachTransferDiskAsync(string currentDisk, string detachedPath, CancellationToken cancellationToken)
         {
-            Assert.True(File.Exists(Raw), "Transfer-Laufwerk ist nicht angehängt");
+            if (!File.Exists(Raw))
+            {
+                return Task.FromResult(Nics); // wie das Skript: nie fertig angehängt – nichts zu tun
+            }
             Swaps++;
             var content = File.ReadAllBytes(Raw);
             File.Delete(Raw);
@@ -832,11 +852,19 @@ public sealed class HyperVTests : IAsyncLifetime
 
         public Task<int> AttachTransferDiskAsync(string templateDisk, string newDisk, CancellationToken cancellationToken)
         {
-            Assert.False(File.Exists(Raw), "Transfer-Laufwerk hängt noch");
+            Assert.False(File.Exists(Raw), "Transfer-Laufwerk hängt noch (verwaist)");
             Attaches++;
             File.WriteAllBytes(Raw, new byte[settings.TransferDiskBytes]);
+            if (CancelAfterAttach)
+            {
+                // Wie ein Abbruch nach Add-VMHardDiskDrive, bevor das Skript sein Ergebnis meldet.
+                CancelAfterAttach = false;
+                throw new OperationCanceledException("abgebrochen nach dem Anhängen");
+            }
             return Task.FromResult(Nics);
         }
+
+        public bool CancelAfterAttach { get; set; }
 
         public bool TransferAttached => File.Exists(Raw);
 
