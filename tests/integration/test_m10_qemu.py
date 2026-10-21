@@ -1,5 +1,5 @@
 """M10 mit echtem Broker und echtem QEMU auf einem Linux-Host: Aufbau ohne root, Verbindungskanal, Snapshot und Lesen
-im Gast, Tausch des Transfer-Laufwerks, Leerlauf-Abschaltung mit Start bei Bedarf, Not-Aus.
+im Gast, Transfer-Laufwerk nur während der Jobs, Leerlauf-Abschaltung mit Start bei Bedarf, Not-Aus.
 
 Statt des Debian-Abbilds startet ein Test-Gast (tests/qemu: Linux-Kern + initramfs mit Python, Worker und
 ``localai.guest.qemulink``) über ``sandbox.qemu.directBoot``. Alles andere ist der echte Weg: QemuVmHost baut
@@ -124,9 +124,10 @@ def test_qemu_sandbox_ende_zu_ende(tmp_path, initrd):
         outcome = approve_and_wait(ui, orch, view, timeout=120)
         assert outcome.state == ProposalState.Succeeded, outcome
         assert outcome.result.target_results[0].text == "int main(void) { return 0; }\n"
-        # Jede Rückgabe kam über ein frisch getauschtes Transfer-Laufwerk (Rohformat).
-        disks = sorted(p.name for p in vm.glob("transfer-0*.raw"))
-        assert len(disks) == 1 and int(disks[0][9:15]) >= 4, disks
+        # Jede Rückgabe kam über ein frisch angehängtes Transfer-Laufwerk (Rohformat); zwischen den Jobs hängt keins an
+        # der VM (Gerät auf einen leeren null-co-Knoten umgestellt, Datei abgeholt und gelöscht).
+        assert not list(vm.glob("transfer-0*.raw"))
+        assert json.loads((vm / "vm.json").read_text())["transferDisk"] is None
         assert (vm / "console.log").exists() and "LocalAi-Testgast" in (vm / "console.log").read_text(errors="replace")
         assert ui.status().get("sandbox", "").startswith("Offline-VM bereit")
     finally:

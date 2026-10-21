@@ -165,10 +165,14 @@ Es gibt kein Netzwerk, keine Freigaben, keinen Socket zum Host. Stattdessen:
 | Richtung | Hyper-V | QEMU (M10) |
 |---|---|---|
 | Host → VM | `Copy-VMFile` legt signierte Jobpakete in den Eingang des Workers | Verbindungskanal (virtio-serial `org.localai.link`): nur Dateien in den Eingang, mit SHA-256 geprüft |
-| VM → Host | Worker schreibt einen Container **ab Sektor 0 auf das Rohgerät** der Transfer-VHDX und meldet `result:<Sequenz>` über einen KVP-Wert. Der Host hängt die VHDX ab und liest die Datei mit eigenem, strengem Parser – ohne sie einzubinden | gleicher Container auf einem Transfer-Laufwerk im Rohformat, Tausch per `blockdev-reopen`; Rückmeldung als feste Zeile über den Verbindungskanal |
+| VM → Host | Worker schreibt einen Container **ab Sektor 0 auf das Rohgerät** der Transfer-VHDX und meldet `result:<Sequenz>` über einen KVP-Wert. Der Host hängt die VHDX ab und liest die Datei erst danach mit eigenem, strengem Parser – ohne sie einzubinden | gleicher Container auf einem Transfer-Laufwerk im Rohformat; Abhängen per `blockdev-reopen` auf einen leeren `null-co`-Knoten (Gerät bleibt, Schreiben geht ins Leere); Rückmeldung als feste Zeile über den Verbindungskanal |
 | Fertigmeldung | nur `result:<Zahl>` bzw. `report:0` werden akzeptiert | nur feste Zeilen (Lebenszeichen, Fortschritt, Signal, Bestätigung) |
 
-Jedes Transfer-Laufwerk wird nur einmal benutzt und danach durch eine leere Kopie ersetzt.
+Ein Transfer-Laufwerk hängt **nur während eines Jobs** an der VM: vor dem Job wird eine frische, leere Kopie der
+Vorlage angehängt, nach der Fertigmeldung wird es abgehängt, in den Arbeitsordner des Brokers verschoben und erst dann
+gelesen – vollständig in den Speicher, Prüfsumme und Weiterverarbeitung an denselben Bytes. Die VM kann eine geprüfte
+Rückgabe also nicht mehr verändern. Zwischen den Jobs (auch bei gespeicherter oder ausgeschalteter VM) hängt keins an.
+Jedes Laufwerk wird nur einmal benutzt.
 
 ### Isolation im Gast
 

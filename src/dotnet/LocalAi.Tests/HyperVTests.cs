@@ -129,7 +129,9 @@ public sealed class HyperVTests : IAsyncLifetime
             Assert.True(read.Untrusted);
             Assert.Equal(i % 2 == 0 ? "# Projekt in der VM\nZeile 2\n" : "class Main {}\n", read.TargetResults[0].Text);
         }
-        Assert.Equal(Roundtrips + 2, host.Swaps); // Bericht + Snapshot + Lesezugriffe
+        Assert.Equal(Roundtrips + 2, host.Swaps); // Abhängen: Bericht + Snapshot + Lesezugriffe
+        Assert.Equal(Roundtrips + 1, host.Attaches); // Anhängen nur für Jobs (Snapshot + Lesezugriffe)
+        Assert.False(host.TransferAttached, "zwischen den Jobs hängt kein Transfer-Laufwerk an der VM");
         Assert.Empty(Directory.GetFiles(Path.Combine(host.GuestRoot, "inbox")));
     }
 
@@ -437,6 +439,23 @@ public sealed class HyperVTests : IAsyncLifetime
     }
 
     [Fact, Trait("Pruefung", "SEC-18")]
+    public async Task Abbruch_nach_dem_Anhaengen_hinterlaesst_kein_verwaistes_Transfer_Laufwerk()
+    {
+        var (vm, host, session) = await StartAsync();
+        host.CancelAfterAttach = true;
+        var job = DummyJob(session.NextSequence()) with { SessionId = session.SessionId };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            vm.ExchangeAsync(JobSigner.Sign(job, session.Key), null, TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        Assert.False(host.TransferAttached, "das schon angehängte Laufwerk wurde beim Aufräumen abgehängt");
+        Assert.Equal(0, host.JobsCopied);
+        // Der nächste Job hängt genau ein frisches Laufwerk an und bekommt seine Antwort.
+        var next = await vm.ExchangeAsync(JobSigner.Sign(job with { Sequence = session.NextSequence() }, session.Key), null,
+            TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        Assert.Null(next.Rejection);
+        Assert.False(host.TransferAttached);
+    }
+
+    [Fact, Trait("Pruefung", "SEC-18")]
     public async Task Fehlende_Antwort_sperrt_ohne_Wiederholung()
     {
         var (vm, host, session) = await StartAsync(tweak: s => s with { PauseOnNoAnswer = false });
@@ -680,6 +699,7 @@ public sealed class HyperVTests : IAsyncLifetime
         public int Nics { get; set; }
         public bool DropJobs { get; set; }
         public int Swaps { get; private set; }
+        public int Attaches { get; private set; }
         public int JobsCopied { get; private set; }
         public int Builds { get; private set; }
         public List<string> StateActions { get; } = [];
@@ -816,14 +836,37 @@ public sealed class HyperVTests : IAsyncLifetime
             return Task.FromResult(Nics);
         }
 
-        public Task<int> SwapTransferDiskAsync(string currentDisk, string templateDisk, string newDisk, string detachedPath, CancellationToken cancellationToken)
+        /// <summary>Abhängen: das Rohlaufwerk verschwindet aus dem Gast – Schreibversuche des Workers scheitern bis zum nächsten Job.</summary>
+        public Task<int> DetachTransferDiskAsync(string currentDisk, string detachedPath, CancellationToken cancellationToken)
         {
+            if (!File.Exists(Raw))
+            {
+                return Task.FromResult(Nics); // wie das Skript: nie fertig angehängt – nichts zu tun
+            }
             Swaps++;
             var content = File.ReadAllBytes(Raw);
+            File.Delete(Raw);
             VhdxTestWriter.Create(detachedPath, new VhdxTestWriter.Options(content.Length, Fixed: false), content);
-            File.WriteAllBytes(Raw, new byte[content.Length]);
             return Task.FromResult(Nics);
         }
+
+        public Task<int> AttachTransferDiskAsync(string templateDisk, string newDisk, CancellationToken cancellationToken)
+        {
+            Assert.False(File.Exists(Raw), "Transfer-Laufwerk hängt noch (verwaist)");
+            Attaches++;
+            File.WriteAllBytes(Raw, new byte[settings.TransferDiskBytes]);
+            if (CancelAfterAttach)
+            {
+                // Wie ein Abbruch nach Add-VMHardDiskDrive, bevor das Skript sein Ergebnis meldet.
+                CancelAfterAttach = false;
+                throw new OperationCanceledException("abgebrochen nach dem Anhängen");
+            }
+            return Task.FromResult(Nics);
+        }
+
+        public bool CancelAfterAttach { get; set; }
+
+        public bool TransferAttached => File.Exists(Raw);
 
         public Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken) => Task.FromResult(new VmInfo(_workerArgs is not null, State, Nics));
 

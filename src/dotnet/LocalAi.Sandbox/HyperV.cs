@@ -409,8 +409,14 @@ public interface IHyperVHost
     /// <summary>Copy-VMFile: Dateien in dieser Reihenfolge in den Gastordner kopieren. Liefert die Zahl der Netzwerkkarten.</summary>
     Task<int> CopyToGuestAsync(IReadOnlyList<string> files, string guestDirectory, CancellationToken cancellationToken);
 
-    /// <summary>Transfer-Laufwerk abhängen, nach <paramref name="detachedPath"/> verschieben, Ersatz aus der Vorlage anhängen.</summary>
-    Task<int> SwapTransferDiskAsync(string currentDisk, string templateDisk, string newDisk, string detachedPath, CancellationToken cancellationToken);
+    /// <summary>
+    /// VM → Host: Transfer-Laufwerk von der VM abhängen und nach <paramref name="detachedPath"/> verschieben; erst danach
+    /// liest der Broker es. Bis zum nächsten Job hängt kein Transfer-Laufwerk an der VM. Liefert die Zahl der Netzwerkkarten.
+    /// </summary>
+    Task<int> DetachTransferDiskAsync(string currentDisk, string detachedPath, CancellationToken cancellationToken);
+
+    /// <summary>Vor einem Job: frische Kopie der leeren Vorlage als Transfer-Laufwerk anhängen. Liefert die Zahl der Netzwerkkarten.</summary>
+    Task<int> AttachTransferDiskAsync(string templateDisk, string newDisk, CancellationToken cancellationToken);
 
     Task<VmInfo> GetVmInfoAsync(CancellationToken cancellationToken);
 
@@ -758,8 +764,8 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     }
 
     /// <summary>
-    /// Startet eine ausgeschaltete VM (Start bei Bedarf): Netzwerkkarten prüfen, Heartbeat abwarten, frisches
-    /// Transfer-Laufwerk. Aufrufer hält _exchange. Rückgabe: null = bereit, sonst der Grund.
+    /// Startet eine ausgeschaltete VM (Start bei Bedarf): Netzwerkkarten prüfen, Heartbeat abwarten, ein noch
+    /// angehängtes Transfer-Laufwerk verwerfen. Aufrufer hält _exchange. Rückgabe: null = bereit, sonst der Grund.
     /// </summary>
     private async Task<string?> StartOnDemandAsync(CancellationToken ct)
     {
@@ -903,7 +909,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     /// <summary>Hält Sitzung, Laufwerk und Fingerabdruck für die nächste Sitzung fest (nur mit reuseVm).</summary>
     private void SaveReuseState(bool clean)
     {
-        if (!ReuseEnabled || _currentFingerprint is null || _currentDisk is null)
+        if (!ReuseEnabled || _currentFingerprint is null)
         {
             return;
         }
@@ -985,7 +991,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             }
             await Task.Delay(1000, ct).ConfigureAwait(false);
         }
-        // Frisches, leeres Transfer-Laufwerk; dabei Netzwerkkarten erneut prüfen.
+        // Noch angehängtes Transfer-Laufwerk (ältere Version) abhängen und verwerfen; dabei Netzwerkkarten erneut prüfen.
         var (leftover, nics) = await CollectAsync(ct).ConfigureAwait(false);
         if (nics != 0)
         {
@@ -1113,8 +1119,8 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     }
 
     /// <summary>
-    /// „VM weiter verwenden“ nach ausgebliebener Antwort: verwirft eine verspätete Rückgabe (neues, leeres
-    /// Transfer-Laufwerk), prüft erneut auf Netzwerkkarten und gibt die VM wieder frei. Der unbeantwortete Job wird
+    /// „VM weiter verwenden“ nach ausgebliebener Antwort: hängt das Transfer-Laufwerk ab und verwirft eine verspätete
+    /// Rückgabe, prüft erneut auf Netzwerkkarten und gibt die VM wieder frei. Der unbeantwortete Job wird
     /// nicht wiederholt.
     /// </summary>
     public async Task<string> ContinueAsync()
@@ -1317,6 +1323,17 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         }
     }
 
+    private async Task<int> AttachTransferDiskAsync(CancellationToken ct)
+    {
+        // Vor dem Anhängen merken: scheitert oder endet der Aufruf mittendrin (Abbruch nach Add-VMHardDiskDrive), hängt
+        // das Laufwerk womöglich schon – das Aufräumen (CollectAsync) hängt es dann trotzdem ab bzw. verträgt, dass es fehlt.
+        // Sonst bliebe ein verwaistes leeres Laufwerk, und der Gast fände beim nächsten Job zwei Kandidaten.
+        var next = NextDiskPath();
+        _currentDisk = next;
+        SaveReuseState(clean: false);
+        return await _host.AttachTransferDiskAsync(TemplateDisk, next, ct).ConfigureAwait(false);
+    }
+
     private string NextDiskPath() =>
         Path.Combine(_settings.VmDirectory, $"transfer-{Interlocked.Increment(ref _diskCounter):D6}{_host.DiskExtension}");
 
@@ -1347,14 +1364,28 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         return request.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
-    /// <summary>Holt den Container vom aktuellen Transfer-Laufwerk und hängt ein leeres an.</summary>
+    /// <summary>
+    /// Hängt das Transfer-Laufwerk von der VM ab und liest erst danach den Container – die VM kann ihn nach der Prüfung
+    /// nicht mehr verändern. Ohne angehängtes Laufwerk werden nur die Netzwerkkarten geprüft.
+    /// </summary>
     private async Task<(TransferMessage? Message, int Nics)> CollectAsync(CancellationToken ct)
     {
-        var current = _currentDisk ?? throw new InvalidOperationException("Kein Transfer-Laufwerk");
-        var next = NextDiskPath();
+        if (_currentDisk is not { } current)
+        {
+            return (null, (await _host.GetVmInfoAsync(ct).ConfigureAwait(false)).NetworkAdapters);
+        }
         var detached = Path.Combine(WorkDirectory, "detached-" + Path.GetFileName(current));
-        var nics = await _host.SwapTransferDiskAsync(current, TemplateDisk, next, detached, ct).ConfigureAwait(false);
-        _currentDisk = next;
+        if (File.Exists(detached))
+        {
+            File.Delete(detached);
+        }
+        var nics = await _host.DetachTransferDiskAsync(current, detached, ct).ConfigureAwait(false);
+        _currentDisk = null;
+        SaveReuseState(clean: false);
+        if (!File.Exists(detached))
+        {
+            return (null, nics); // Anhängen war nie fertig geworden: nichts abzuholen
+        }
         try
         {
             return (TransferContainer.Read(detached, _settings.TransferDiskBytes), nics);
@@ -1388,6 +1419,18 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             if (!Status.IsReady && !_updating)
             {
                 return new SandboxReply(null, $"Sandbox nicht bereit ({Status.Text})");
+            }
+            // Transfer-Laufwerk nur während des Jobs an der VM: ein noch angehängtes (Absturz, ältere Version) verwerfen,
+            // dann ein frisches, leeres anhängen.
+            if (_currentDisk is not null)
+            {
+                await CollectAsync(cancellationToken).ConfigureAwait(false);
+            }
+            var attachNics = await AttachTransferDiskAsync(cancellationToken).ConfigureAwait(false);
+            if (attachNics != 0)
+            {
+                Lock($"VM hat {attachNics} Netzwerkkarte(n)");
+                return new SandboxReply(null, "VM hat eine Netzwerkkarte – Ausführung gesperrt");
             }
             Directory.CreateDirectory(outgoing);
             if (payloadPath is not null)
@@ -1482,6 +1525,20 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             foreach (var f in files)
             {
                 File.Delete(f);
+            }
+            if (_currentDisk is not null && Status.State != SandboxState.Paused)
+            {
+                // Job ohne Abholung beendet (Fehler, Abbruch): Transfer-Laufwerk trotzdem abhängen, Inhalt verwerfen.
+                // Angehalten (keine Antwort): bleibt bis „VM weiter verwenden“ bzw. Neuaufbau – der Job läuft evtl. noch.
+                try
+                {
+                    using var detach = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                    await CollectAsync(detach.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is HyperVException or IOException or VhdxFormatException or OperationCanceledException)
+                {
+                    // Beim nächsten Job bzw. beim Neuaufbau erneut versucht.
+                }
             }
             if (inbound is not null)
             {

@@ -20,7 +20,7 @@ public sealed record SandboxReuseState(
     [property: JsonPropertyName("key")] string Key,
     [property: JsonPropertyName("protection")] string Protection,
     [property: JsonPropertyName("lastSequence")] long LastSequence,
-    [property: JsonPropertyName("currentDisk")] string CurrentDisk,
+    [property: JsonPropertyName("currentDisk")] string? CurrentDisk,
     [property: JsonPropertyName("diskCounter")] int DiskCounter,
     [property: JsonPropertyName("builtAt")] DateTimeOffset BuiltAt,
     [property: JsonPropertyName("clean")] bool Clean,

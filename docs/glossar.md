@@ -38,7 +38,7 @@
 | **Snapshot** | unveränderliche, inhaltsadressierte Kopie eines Grants in der Sandbox. Patches erzeugen abgeleitete Snapshots |
 | **Staging** | Ablage des Brokers für Änderungen, die in den Projektordner übernommen werden sollen |
 | **Toolchain** | vom Nutzer bereitgestelltes Werkzeugpaket (SDK, Compiler, Testframework) mit `toolchain.json`; wird registriert und beim VM-Aufbau installiert |
-| **Transfer-VHDX / Transfer-Laufwerk** | zweite virtuelle Festplatte, auf die der Gast Ergebnisse als Container schreibt (Weg VM → Host); einmal benutzt, dann ersetzt |
+| **Transfer-VHDX / Transfer-Laufwerk** | zweite virtuelle Festplatte, auf die der Gast Ergebnisse als Container schreibt (Weg VM → Host); hängt nur während eines Jobs an der VM, wird vor dem Lesen abgehängt und nur einmal benutzt |
 | **untrusted** | Kennzeichnung aller Inhalte aus Dateien, Web, Tests und Modellantworten: Daten, nie Anweisungen |
 | **Verbindungskanal** | virtio-serial-Kanal unter QEMU (`org.localai.link`), ersetzt Copy-VMFile und KVP |
 | **Vorschlag (Proposal)** | unveränderliche Beschreibung eines Werkzeugaufrufs mit kanonischen Parametern und Hash |

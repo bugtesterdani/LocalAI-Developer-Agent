@@ -12,7 +12,7 @@ Toolchains (.NET, Python für Agentenprojekte) folgen in M2c. In M2b läuft in d
 | Erster Start im Gast: Windows richtet sich ein, `SetupComplete.cmd` → `provision.ps1`: Netzwerkprüfungen, Worker als geplante Aufgabe (SYSTEM), Bericht | Gast | – |
 | Job hin: signierter Job + Nutzlast + `.ready` per `Copy-VMFile` nach `C:\LocalAi\inbox` | `Send-LocalAiJob.ps1` | Hyper-V-Administratoren |
 | Fertig-Signal: Gast setzt KVP-Wert `LocalAiSignal = result:<Sequenz>` | `Watch-LocalAiSignal.ps1` | Hyper-V-Administratoren |
-| Ergebnis zurück: Transfer-VHDX abhängen, Broker liest sie **ohne Einbinden** (eigener VHDX-Leser, kein Dateisystem), frische leere VHDX anhängen | `Switch-LocalAiTransferDisk.ps1` + Broker | Hyper-V-Administratoren |
+| Ergebnis zurück: vor jedem Job frische leere Transfer-VHDX anhängen, danach abhängen; Broker liest sie erst dann **ohne Einbinden** (eigener VHDX-Leser, kein Dateisystem). Zwischen den Jobs hängt keine an | `Switch-LocalAiTransferDisk.ps1` + Broker | Hyper-V-Administratoren |
 | Sitzungsende: VM und Festplatten löschen | `Remove-LocalAiSandbox.ps1` | Hyper-V-Administratoren |
 
 ## 0. Einmalige Einrichtung (PC 123)

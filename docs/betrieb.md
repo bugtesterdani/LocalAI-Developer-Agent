@@ -143,8 +143,9 @@ Ist zusätzlich die Gastdienstschnittstelle (Copy-VMFile) gesperrt, schreibt der
 Worker im Gast erkennt das Laufwerk an seinem Kopf (`LAIINBX1`), prüft Sequenz und SHA-256 und legt die Dateien in
 seinen Eingang. Nach der Antwort hängt der Broker es wieder ab und löscht es.
 
-Der Rückweg ist unverändert das **Transfer-Laufwerk**: der Broker liest die abgehängte VHDX mit seinem eigenen Leser
-direkt als Datei – auch das braucht kein Einbinden auf dem Host. Die Sicherheit bleibt gleich: signierte Jobs mit
+Der Rückweg ist unverändert das **Transfer-Laufwerk**: es hängt nur während eines Jobs an der VM; danach hängt der
+Broker es ab und liest die VHDX erst dann mit seinem eigenen Leser direkt als Datei – auch das braucht kein Einbinden
+auf dem Host. Die Sicherheit bleibt gleich: signierte Jobs mit
 Sequenz, streng geprüfte Rückgabe (Containerformat, Prüfsumme, Größengrenze), keine Netzwerkkarte in der VM.
 
 Wechsel von `inbound` bei bestehender VM mit `reuseVm`: der Worker im Gast wird per Gast-Update umgestellt.
