@@ -78,7 +78,9 @@
         <!-- Kopfzeile -->
         <Border DockPanel.Dock="Top" Background="#1F2937" Padding="12,8">
             <Grid ColumnDefinitions="*,Auto">
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                <!-- Ohne Verbindung (kein ViewModel) keine Knöpfe: fehlgeschlagene Bindungen wären sonst sichtbar. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0"
+                            IsVisible="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
                     <Button Classes="top" Content="{loc:T StartFakeRun}" Command="{Binding StartFakeRunCommand}" />
                     <Button Classes="top" Content="{loc:T ContinueSandbox}" Command="{Binding ContinueSandboxCommand}"
                             IsVisible="{Binding IsSandboxPaused}" />
@@ -107,6 +109,7 @@
             </Grid>
         </Border>
 
+        <DockPanel IsVisible="{Binding Converter={x:Static ObjectConverters.IsNotNull}}">
         <!-- Not-Aus-Hinweis: Text, nicht nur Farbe -->
         <Border DockPanel.Dock="Top" Background="#FEE2E2" BorderBrush="#B91C1C" BorderThickness="0,0,0,2" Padding="12,6"
                 IsVisible="{Binding IsStopped}">
@@ -474,5 +477,6 @@
                 </ContentControl>
             </DockPanel>
         </Grid>
+        </DockPanel>
     </DockPanel>
 </Window>

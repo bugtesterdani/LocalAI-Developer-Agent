@@ -108,6 +108,10 @@ jobs:
           uv pip install --python "$py/bin/python3" --target "$site" -r build/requirements.txt
           echo "PY_RUNTIME=$py" >> "$GITHUB_ENV"
           "$py/bin/python3" -c "import sys; print('PY_RUNTIME_VERSION=' + sys.version.split()[0])" >> "$GITHUB_ENV"
+          # Releases nie mit einer Vorabversion von Python (a/b/rc) ausliefern.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]] && "$py/bin/python3" -c "import sys; sys.exit(sys.version_info.releaselevel == 'final')"; then
+            echo "Python $("$py/bin/python3" -V) ist keine endgültige Version"; exit 1
+          fi
       - name: Installationsordner
         run: |
           python3 packaging/package.py stage --platform linux --app build/app --runtime "$PY_RUNTIME" \
@@ -165,6 +169,11 @@ jobs:
           "PY_RUNTIME=$py" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           & "$py\python.exe" -c "import sys; print('PY_RUNTIME_VERSION=' + sys.version.split()[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           if ($LASTEXITCODE) { throw "Python-Version konnte nicht ermittelt werden" }
+          # Releases nie mit einer Vorabversion von Python (a/b/rc) ausliefern.
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            & "$py\python.exe" -c "import sys; sys.exit(0 if sys.version_info.releaselevel == 'final' else 1)"
+            if ($LASTEXITCODE) { throw "Mitgeliefertes Python ist keine endgültige Version" }
+          }
       - name: Installationsordner
         run: |
           python packaging/package.py stage --platform windows --app build/app --runtime $env:PY_RUNTIME --version $env:VERSION --out build/stage

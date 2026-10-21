@@ -71,6 +71,20 @@ public sealed class OberflaecheTests
     }
 
     [AvaloniaFact, Trait("Pruefung", "M10-Oberfläche")]
+    public async Task Ohne_Verbindung_nur_Statuszeile()
+    {
+        var window = new MainWindow();
+        window.Show();
+        window.ShowStatus("Verbindung zum Broker fehlgeschlagen");
+        await Settle();
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<Button>(), b => b.IsEffectivelyVisible);
+        Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Verbindung zum Broker fehlgeschlagen" && t.IsEffectivelyVisible);
+        Assert.DoesNotContain(window.GetVisualDescendants().OfType<TextBlock>(),
+            t => t.Text == UiText.Get("StoppedBanner") && t.IsEffectivelyVisible);
+        window.Close();
+    }
+
+    [AvaloniaFact, Trait("Pruefung", "M10-Oberfläche")]
     public async Task Ohne_VM_kein_Neuaufbau_Knopf()
     {
         var (window, _, _) = await OpenAsync("dev-local-unsafe");
