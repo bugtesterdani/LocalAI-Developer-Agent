@@ -204,6 +204,7 @@ public sealed class OhneEinbindenTests : IDisposable
             var text = File.ReadAllText(Path.Combine(ContractTests.RepoRoot(), "scripts", "sandbox", script));
             var filter = text.Split('\n').Single(l => l.Contains("$foreign = "));
             Assert.Contains("'gast-kennwort.txt'", filter);
+            Assert.Contains("'sandbox.lock'", filter); // Sperre der Broker-Instanz, liegt vor dem ersten Aufbau im Ordner
         }
     }
 

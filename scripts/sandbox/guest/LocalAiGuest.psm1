@@ -22,6 +22,8 @@ function Send-ReportWithoutPython([byte[]]$Payload, [int64]$Size) {
     try {
         $first = New-Object byte[] 4096
         $null = $stream.Read($first, 0, 4096)
+        # Wie is_blank im Worker: die Datenträgersignatur von Windows (Bytes 440–443) zählt nicht als Inhalt.
+        for ($i = 440; $i -lt 444; $i++) { $first[$i] = 0 }
         if (@($first | Where-Object { $_ -ne 0 }).Count -gt 0) { throw 'Transfer-Laufwerk ist nicht leer' }
         $stream.Position = 4096
         $stream.Write($body, 0, $body.Length)

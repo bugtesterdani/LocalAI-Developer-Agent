@@ -63,9 +63,9 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path ([string]$req.guestDirectory) 'unattend.iso'))) { throw 'Aufbaumedium fehlt: unattend.iso' }
     }
     $marker = Join-Path $vmDir $DirectoryMarker
-    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt') })
-    # (Ein neuer, leerer Ordner bekommt die Markierung; danach gehört er LocalAi. gast-kennwort.txt: bei hostMount false
-    # und keepVmOnExit legt der Broker sie schon vor diesem Skript an.)
+    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt', 'sandbox.lock') })
+    # (Ein neuer, leerer Ordner bekommt die Markierung; danach gehört er LocalAi. Vom Broker schon vor diesem Skript
+    # angelegt: sandbox.lock (Sperre der Instanz) und gast-kennwort.txt (hostMount false mit keepVmOnExit).)
     if (-not (Test-Path -LiteralPath $marker) -and $foreign.Count -gt 0) {
         throw "Der VM-Ordner $vmDir enthält fremde Dateien und wird nicht verwendet. Leeren Ordner angeben."
     }
@@ -96,9 +96,9 @@ try {
     if ($free -lt 30GB) { throw ("Zu wenig freier Speicher auf {0}: {1:N0} GB frei, mindestens 30 GB nötig" -f $drive.PSDrive.Name, ($free / 1GB)) }
 
     if ($hostMount) {
-    # Keine Explorer-Fenster für neu eingebundene Laufwerke.
-    $shellHw = Get-Service -Name ShellHWDetection -ErrorAction SilentlyContinue
-    if ($shellHw -and $shellHw.Status -eq 'Running') { Stop-Service -Name ShellHWDetection -Force } else { $shellHw = $null }
+        # Keine Explorer-Fenster für neu eingebundene Laufwerke.
+        $shellHw = Get-Service -Name ShellHWDetection -ErrorAction SilentlyContinue
+        if ($shellHw -and $shellHw.Status -eq 'Running') { Stop-Service -Name ShellHWDetection -Force } else { $shellHw = $null }
     }
 
     # ------------------------------------------------------------------ 3
@@ -113,23 +113,23 @@ try {
         $isoLetter = Invoke-LocalAiRetry { $l = (Get-DiskImage -ImagePath $imagePath | Get-Volume).DriveLetter; if (-not $l) { throw 'ISO ohne Laufwerksbuchstaben' }; $l }
         $wim = @("$($isoLetter):\sources\install.wim", "$($isoLetter):\sources\install.esd") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
         if (-not $wim) { throw 'Im ISO gibt es weder sources\install.wim noch sources\install.esd.' }
-    } else {
-        $wim = $imagePath
-    }
-    $images = @(Get-WindowsImage -ImagePath $wim)
-    if ($req.imageIndex) {
-        $selected = $images | Where-Object { $_.ImageIndex -eq [int]$req.imageIndex }
-    } else {
-        $selected = $images | Where-Object { $_.ImageName -eq [string]$req.imageName }
-    }
-    if (-not $selected) {
-        $names = ($images | ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" }) -join '; '
-        throw "Edition nicht im Abbild gefunden. Vorhanden: $names"
-    }
-    $index = [int]@($selected)[0].ImageIndex
-    $info = Get-WindowsImage -ImagePath $wim -Index $index
-    $language = Get-LocalAiImageLanguage -ImageInfo $info
-    Write-Host "Abbild: $wim, Index $index ($($info.ImageName)), Sprache $language"
+        } else {
+            $wim = $imagePath
+        }
+        $images = @(Get-WindowsImage -ImagePath $wim)
+        if ($req.imageIndex) {
+            $selected = $images | Where-Object { $_.ImageIndex -eq [int]$req.imageIndex }
+        } else {
+            $selected = $images | Where-Object { $_.ImageName -eq [string]$req.imageName }
+        }
+        if (-not $selected) {
+            $names = ($images | ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" }) -join '; '
+            throw "Edition nicht im Abbild gefunden. Vorhanden: $names"
+        }
+        $index = [int]@($selected)[0].ImageIndex
+        $info = Get-WindowsImage -ImagePath $wim -Index $index
+        $language = Get-LocalAiImageLanguage -ImageInfo $info
+        Write-Host "Abbild: $wim, Index $index ($($info.ImageName)), Sprache $language"
     }
 
     # ------------------------------------------------------------------ 4
@@ -233,7 +233,7 @@ try {
     }
     if (-not $hostMount) {
         Write-Host 'Bestätige „Press any key to boot from CD“ (Tastatur der VM) …'
-        Send-LocalAiBootKeys -VmName $vmName -Seconds 40
+        Send-LocalAiBootKeys -VmName $vmName -Seconds 5
     }
     Write-Host ("Aufbau auf dem Host fertig nach {0:N1} Minuten." -f ((Get-Date) - $started).TotalMinutes)
     Add-LocalAiStatus -StatusFile $StatusFile -Line 'DONE'

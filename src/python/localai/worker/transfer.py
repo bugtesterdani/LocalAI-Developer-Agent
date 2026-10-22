@@ -28,6 +28,9 @@ MAGIC = b"LAIXFER1"
 # "Auto" ist dagegen für automatisch erzeugte Systemwerte (GuestIntrinsicExchangeItems).
 KVP_KEY = r"SOFTWARE\Microsoft\Virtual Machine\Guest"
 KVP_VALUE = "LocalAiSignal"
+# Windows schreibt auf ein leeres (RAW) Laufwerk selbst eine MBR-Datenträgersignatur (Bytes 440–443, Kennung des
+# Laufwerks) – auch ohne Partitionstabelle. Diese 4 Bytes zählen nicht als Inhalt; alles andere im Kopf muss 0 sein.
+DISK_SIGNATURE = slice(440, 444)
 
 
 class TransferKind(IntEnum):
@@ -38,6 +41,15 @@ class TransferKind(IntEnum):
 
 class TransferError(Exception):
     """Transfer-Laufwerk nicht nutzbar."""
+
+
+def is_blank(header: bytes) -> bool:
+    """Leerer Kopf eines Transfer-Laufwerks: nur Nullen, abgesehen von der Datenträgersignatur von Windows."""
+    if len(header) < HEADER_SIZE:
+        return False
+    rest = bytearray(header[:HEADER_SIZE])
+    rest[DISK_SIGNATURE] = bytes(4)
+    return not any(rest)
 
 
 def build_container(kind: TransferKind, sequence: int, payload: bytes) -> bytes:
@@ -143,7 +155,7 @@ class TransferDisk:
                 _drop_cache(f)
             f.seek(0)
             first = f.read(HEADER_SIZE)
-            if any(first):
+            if not is_blank(first):
                 raise TransferError("Transfer-Laufwerk ist nicht leer – wartet auf Austausch durch den Host")
             # Nutzlast zuerst, Kopf zuletzt: ein halb geschriebener Container hat keinen gültigen Kopf.
             f.seek(HEADER_SIZE)
@@ -185,7 +197,7 @@ def find_transfer_disk_linux(expected_size: int, sys_block: pathlib.Path = pathl
             continue
         path = str(dev / entry.name)
         try:
-            if not any(_read_header_uncached(path)):
+            if is_blank(_read_header_uncached(path)):
                 candidates.append(path)
         except OSError:
             continue
@@ -202,7 +214,7 @@ def _find_transfer_disk_windows(expected_size: int, max_disks: int = 32) -> str:
             with open(path, "rb", buffering=0) as f:
                 if _device_size(f) != expected_size:
                     continue
-                if not any(f.read(HEADER_SIZE)):
+                if is_blank(f.read(HEADER_SIZE)):
                     candidates.append(path)
         except OSError:
             continue

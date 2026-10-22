@@ -68,7 +68,7 @@ try {
         }
     }
     $marker = Join-Path $vmDir $DirectoryMarker
-    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt') })
+    $foreign = @(Get-ChildItem -LiteralPath $vmDir -Force | Where-Object { $_.Name -notin @('host', 'build.log', $DirectoryMarker, 'gast-kennwort.txt', 'sandbox.lock') })
     if (-not (Test-Path -LiteralPath $marker) -and $foreign.Count -gt 0) {
         throw "Der VM-Ordner $vmDir enthält fremde Dateien und wird nicht verwendet. Leeren Ordner angeben."
     }
