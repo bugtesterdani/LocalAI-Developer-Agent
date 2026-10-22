@@ -180,6 +180,9 @@ Fehlercodes: 400 ungültige Anfrage, 403 Policy oder Rolle, 404 unbekannt, 409 H
 - **Prompts** liegen in `src/python/localai/orchestrator/prompts/<rolle>.md` mit Kopfzeile
   `<!-- prompt: <name> · version: N -->`. Bei jeder inhaltlichen Änderung die Version erhöhen; das Versionsmanifest
   führt sie mit Hash.
+  `prompts/testumgebung.md` ist keine Rolle, sondern die Kurzfassung für Prüfprogramme der Testumgebung; ihre
+  Bausteinlisten stammen aus `testumgebung-cli katalog` und werden bei einer neuen Testumgebung-Version neu erzeugt
+  (`docs/testumgebung.md`).
 - **Zeilenenden:** LF, außer `.ps1`, `.psm1`, `.bat`, `.cmd` (CRLF, siehe `.gitattributes`). PowerShell-Skripte als
   UTF-8 mit BOM (Windows PowerShell 5.1); ein Test prüft Syntax und Kodierung.
 - **Commits:** Präfix des Meilensteins bzw. Bereichs, z. B. `M10: …`, `M4-Fix 3: …`, `Doku: …`.

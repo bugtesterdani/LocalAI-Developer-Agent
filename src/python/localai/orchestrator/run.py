@@ -35,7 +35,7 @@ from localai.contracts import (
     OrchestratorCommand,
     OrchestratorCommandKind,
 )
-from localai.orchestrator import dag, hardware
+from localai.orchestrator import dag, hardware, prompts
 from localai.orchestrator.activity import ActivityReporter
 from localai.orchestrator.agents import Agent, AgentFailed, Assignment
 from localai.orchestrator.context import Evidence
@@ -231,8 +231,9 @@ def is_testumgebung_file(path: str) -> bool:
 
 @functools.cache
 def testumgebung_notes() -> str:
-    """Format- und Katalogkurzfassung für Prüfprogramme der Testumgebung (prompts/testumgebung.md, ohne Kopfkommentar)."""
-    text = (pathlib.Path(__file__).parent / "prompts" / "testumgebung.md").read_text(encoding="utf-8")
+    """Format- und Katalogkurzfassung für Prüfprogramme der Testumgebung (versionierter Prompt prompts/testumgebung.md,
+    ohne den Kommentar zur Herkunft der Bausteinlisten)."""
+    text = prompts.load("testumgebung").text
     return re.sub(r"\A<!--.*?-->\s*", "", text, flags=re.DOTALL).strip()
 
 

@@ -204,6 +204,7 @@ Wichtig bei der dotnet-Toolchain: deine angepasste `toolchain.json` (ohne `--no-
 | `dotnet` | Vorlage `toolchains\dotnet` + SDK-ZIP, dann `scripts\toolchains\Get-NuGetOfflinePackages.ps1 -ToolchainDirectory <Ordner>\dotnet` (`toolchains\README.md`) |
 | `python` | Vorlage `toolchains\python` + Installer + pytest-Wheels in `wheels\` |
 | `cpp`, `powershell`, `batch`, `hdevelop` | `powershell -ExecutionPolicy Bypass -File scripts\toolchains\New-M5Toolchains.ps1 -Target <Toolchain-Ordner>` (`docs/pruefung-M5.md`, Abschnitt 0) |
+| `testumgebung` | Vorlage `toolchains\testumgebung` + ZIP aus `build\publish-cli.ps1` im Testumgebung-Repository (`docs/testumgebung.md`) |
 
 HALCON: Ist die Lizenz an den alten PC gebunden (MAC/Dongle), gilt sie weder auf dem neuen PC noch in der VM. Dann
 `hdevelop` aus den Projekten nehmen oder eine passende Lizenz besorgen.

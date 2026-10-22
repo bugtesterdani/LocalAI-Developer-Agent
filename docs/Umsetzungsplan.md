@@ -181,6 +181,20 @@ KVM. Oberfläche: eigenes Projekt `LocalAi.Desktop.Linux` (Avalonia 12) nur mit 
 `tools/prereq/linux_prerequisites.py`. Echter QEMU-Test mit Test-Gast (`tests/qemu`, `test_m10_qemu.py`).
 Prüfanleitung `docs/pruefung-M10.md`.
 
+## Erweiterungen nach M10
+
+**Hyper-V ohne Einbinden auf dem Host (Stand 22.10.2026):** Für Rechner, die das Einbinden von VHDX/ISO auf dem Host
+und teils Copy-VMFile sperren: `hostMount: false` (Broker schreibt Systemfestplatte bzw. Setup-/Seed-Medien selbst als
+VHDX/ISO, Windows Setup in der VM) und `inbound: "Disk"` (Jobs als eigenes Eingangs-Laufwerk). Das Transfer-Laufwerk
+hängt nur während eines Jobs an der VM und wird vor dem Lesen abgehängt. Die Datenträgersignatur, die Windows auf leere
+Laufwerke schreibt, gilt als leer. Einzelheiten: `docs/betrieb.md` (Rechner ohne Einbinden virtueller Festplatten).
+
+**Prüfprogramme der Testumgebung (Stand 22.10.2026):** Toolchain `testumgebung` mit der Kommandozeile
+`testumgebung-cli` aus dem Testumgebung-Repository. Die Agenten schreiben Prüfprogramme (`*.tproj.json`) und
+Szenarien (`*.tsim.json`) und simulieren sie in der VM. Der Planer schlägt `testumgebung test` als Prüflauf vor, Coder
+und Tester bekommen eine Kurzfassung von Format und Bausteinkatalog. Anleitung: `docs/testumgebung.md`. Offen: Prüfung
+mit dem veröffentlichten ZIP in der echten Windows-VM.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

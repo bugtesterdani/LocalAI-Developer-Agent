@@ -69,6 +69,7 @@ Ergebnisse erwartet werden. Für die Einrichtung eines Teilbereichs sind sie wei
 | M8 | Linux-Gast (Debian 13), mehrere VMs, Start bei Bedarf | [pruefung-M8.md](pruefung-M8.md) |
 | M9 | Eigenes Betriebssystem in QEMU booten und debuggen | [pruefung-M9.md](pruefung-M9.md) |
 | M10 | Linux-Host mit QEMU und Avalonia-Oberfläche | [pruefung-M10.md](pruefung-M10.md) |
+| Erweiterung | Prüfprogramme der Testumgebung erstellen und simulieren (Toolchain `testumgebung`) | [testumgebung.md](testumgebung.md) |
 
 ## Sprache und Konventionen der Dokumentation
 
