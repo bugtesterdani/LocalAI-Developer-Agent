@@ -356,6 +356,7 @@ Die **Registrierung** einer Toolchain ist eine sichtbare administrative Aktion m
 | HDevelop | MVTec HALCON (Runtime + HDevelop) | HDevEngine bzw. Kommandozeilenwerkzeug der installierten Version | eigener HDevEngine-Test-Runner mit Testbildern und Toleranzen (JUnit-XML); XML-Validierung und Lade-Test nach jedem Patch | – |
 | PowerShell | Windows PowerShell 5.1 (Gast), PowerShell 7; Pester, PSScriptAnalyzer offline | Parserprüfung | Pester (NUnit/JUnit-XML) | PSScriptAnalyzer |
 | Batch | `cmd.exe` (Gast) | Ausführung über `Toolchain.Run` | Harness (Pester oder pytest) prüft Exit-Code, Ausgabe, erzeugte Dateien | Regeln im Harness |
+| Prüfprogramme der Testumgebung (`*.tproj.json`) | `testumgebung-cli` (eigenständiges ZIP aus dem Testumgebung-Repository) | `build`: Projekt prüfen, CodeBlocks übersetzen | Szenarien `*.tsim.json` in der Projektsimulation (JUnit-XML) | `check`: Struktur und Bausteinparameter |
 
 PowerShell und Batch sind selbst Shells. Sie werden nur über `Toolchain.Run` mit festem Interpreter und einem Skriptpfad aus dem Snapshot gestartet; freie `-Command`- bzw. `/c`-Argumente sind ausgeschlossen. Der Skriptinhalt ist über den freigegebenen Diff bekannt.
 

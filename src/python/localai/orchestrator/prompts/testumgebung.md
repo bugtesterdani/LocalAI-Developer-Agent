@@ -1,3 +1,4 @@
+<!-- prompt: testumgebung · version: 1 -->
 <!-- Hinweise für die Agenten, wenn Prüfprogramme der Testumgebung (*.tproj.json, *.tsim.json) bearbeitet werden.
      Bausteinlisten erzeugt mit: testumgebung-cli katalog (Übersicht) bzw. katalog <typ> (Details).
      Bei neuer Testumgebung-Version neu erzeugen; lint zeigt bei Fehlern ohnehin den aktuellen Katalogauszug. -->
