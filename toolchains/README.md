@@ -17,6 +17,7 @@ Vorlagen in diesem Ordner:
 | `powershell5` | Windows PowerShell 5.1 | nichts (Teil von Windows) + Pester/PSScriptAnalyzer | JUnit (Pester) |
 | `batch` | Batch | nichts (cmd.exe) + Test-Harness | JUnit (Harness) |
 | `hdevelop` | HDevelop | ZIP deiner HALCON-Installation + Lizenz + VC++-Laufzeit | JUnit (HDevEngine-Runner) |
+| `testumgebung` | Prüfprogramme der Testumgebung (`*.tproj.json`) | ZIP der Testumgebung-Kommandozeile (eigenständig, mit Python für CodeBlocks) | JUnit (Szenarien `*.tsim.json`) |
 | `python-linux` | Python (Linux-VM) | tar.gz von python-build-standalone + pytest-Wheels | JUnit (pytest) |
 | `dotnet-linux` | C# (Linux-VM) | tar.gz des .NET SDK für Linux x64 | Trx (`dotnet test`) |
 
@@ -109,6 +110,26 @@ Klammern. Neue Batch-Dateien aus Patches bekommen CRLF-Zeilenenden.
   die Tests aus: Programme `*_test.hdev`/`test_*.hdev`, jede lokale Prozedur `test_*` ohne Parameter ist ein Testfall,
   ein Fehler (z. B. `throw ('…')`) lässt ihn scheitern. `lint` = nur Lade-Test, `run` führt ein Programm aus.
 - Unabhängig von HALCON prüft die Sandbox nach **jedem** Patch, ob `.hdev/.hdvp/.hdpl` gültiges HDevelop-XML bleiben.
+
+## Testumgebung (`testumgebung`)
+
+Damit erstellen die Agenten Prüfprogramme für die Testumgebung (Repository `bugtesterdani/Testumgebung`) und testen
+sie in der VM per Simulation – ohne Geräte und ohne die WPF-Oberfläche.
+
+- Datei: `Testumgebung-Cli-<Version>-win-x64.zip`, im Testumgebung-Repository auf dem Host erzeugt mit
+  `powershell -ExecutionPolicy Bypass -File build\publish-cli.ps1 -Version 1.0.0`. Das ZIP ist eigenständig
+  (.NET-Laufzeit, C#-Worker, portable Python-Laufzeit für Python-CodeBlocks); in der VM ist nichts weiter nötig.
+  Andere Version: `version`, `displayName`, `install.file` in `toolchain.json` anpassen.
+- Im Projekt: `"toolchains": ["testumgebung"]`. Die Agenten schreiben `*.tproj.json` (Ablauf) und `*.tsim.json`
+  (Szenario: Werkereingaben, Simulationswerte, erwartetes Ergebnis) und bekommen dazu eine Kurzfassung des
+  Projektformats und des Bausteinkatalogs (`src/python/localai/orchestrator/prompts/testumgebung.md`).
+- Aktionen: `lint {path}` = Projekt prüfen (Struktur, Bausteinparameter; bei Fehlern mit Katalogauszug),
+  `build {path}` = zusätzlich CodeBlocks übersetzen, `test {path}` = zusätzlich alle Szenarien simulieren (JUnit),
+  `run {script}` = ein Szenario mit Ablaufprotokoll. Liegt im Projekt eine `*.tproj.json`, schlägt der Planer
+  `testumgebung test` auf dem Projektordner als Prüflauf vor.
+- Selbsttest beim VM-Aufbau: Beispielprojekt `selftest\netzteil.tproj.json` mit Szenario `normal.tsim.json`.
+- Grenzen: Simulation ersetzt keine Abnahme an echter Hardware. Geräte, Busse und Kommunikation laufen nur über die
+  Simulationsdaten des Projekts. Szenario-Format und alle Befehle: `docs/kommandozeile.md` im Testumgebung-Repository.
 
 ## Format von `toolchain.json`
 

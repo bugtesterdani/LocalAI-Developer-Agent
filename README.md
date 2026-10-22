@@ -37,6 +37,7 @@ Werkzeugen, Betrieb, Entwicklung und Glossar.
 | Linux-Gast (Debian 13), mehrere VMs, Start bei Bedarf, Leerlauf-Abschaltung | C# / Python / PowerShell | M8 | auf dem PC zu prüfen |
 | Eigenes Betriebssystem in QEMU (Linux-VM) booten und debuggen | Python / C# | M9 | auf dem PC zu prüfen |
 | Linux-Host: QEMU statt Hyper-V, Avalonia-Oberfläche | C# / Python | M10 | mit Test-Gast geprüft, echter Debian-Gast offen |
+| Prüfprogramme der Testumgebung erstellen und simulieren (Toolchain `testumgebung`, Szenarien `*.tsim.json`) | C# / Python | – | mit der Kommandozeile geprüft, in der VM offen |
 
 Einzelheiten je Meilenstein: [Umsetzungsplan](docs/Umsetzungsplan.md) und die Prüfanleitungen in
 [docs/README.md](docs/README.md#prüfanleitungen-je-meilenstein).
