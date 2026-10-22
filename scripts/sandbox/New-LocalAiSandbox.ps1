@@ -197,9 +197,7 @@ try {
     }
     $template = [string]$req.transferTemplate
     if (Test-Path -LiteralPath $template) { Remove-Item -LiteralPath $template -Force }
-    # Dynamisch: nicht belegte Blöcke liest der Gast garantiert als Nullen. Eine feste VHDX ist nicht auf jedem Datenträger
-    # genullt (z. B. schnelle Anlage auf ReFS/Dev Drive oder Speichertreiber) – dann gilt sie im Gast als „nicht leer“.
-    New-VHD -Path $template -SizeBytes ([int64]$req.transferDiskMB * 1MB) -Dynamic | Out-Null
+    New-VHD -Path $template -SizeBytes ([int64]$req.transferDiskMB * 1MB) -Fixed | Out-Null
     Clear-LocalAiCompression -Path $template
     Copy-Item -LiteralPath $template -Destination ([string]$req.transferDisk) -Force
 

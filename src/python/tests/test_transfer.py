@@ -17,6 +17,7 @@ from localai.worker.transfer import (
     TransferError,
     TransferKind,
     build_container,
+    is_blank,
     parse_container,
 )
 from test_worker import KEY, envelope, env, job, proposal  # noqa: F401  (Fixture)
@@ -56,6 +57,23 @@ def test_laufwerk_wird_genau_einmal_beschrieben(tmp_path):
     assert parse_container(pathlib.Path(d.path).read_bytes()) == (TransferKind.RESULT, 7, b"hallo")
     with pytest.raises(TransferError, match="nicht leer"):
         d.write(TransferKind.RESULT, 8, b"zweites")
+
+
+def test_datentraegersignatur_von_windows_gilt_als_leer(tmp_path):
+    """Windows schreibt auf RAW-Laufwerke eine MBR-Signatur (Bytes 440–443) – das Laufwerk bleibt nutzbar."""
+    d = disk(tmp_path)
+    raw = bytearray(pathlib.Path(d.path).read_bytes())
+    raw[440:444] = bytes.fromhex("0c150b15")
+    pathlib.Path(d.path).write_bytes(bytes(raw))
+    assert is_blank(bytes(raw[:HEADER_SIZE]))
+    d.write(TransferKind.REPORT, 0, b"bericht")
+    assert parse_container(pathlib.Path(d.path).read_bytes()) == (TransferKind.REPORT, 0, b"bericht")
+    # Alles andere bleibt Inhalt: z. B. eine echte Partitionstabelle (Kennung 55 AA) oder ein alter Container.
+    for offset in (0, 439, 444, 510, HEADER_SIZE - 1):
+        header = bytearray(HEADER_SIZE)
+        header[offset] = 1
+        assert not is_blank(bytes(header)), offset
+    assert not is_blank(bytes(100))
 
 
 def test_falsche_groesse_wird_nicht_beschrieben(tmp_path):
