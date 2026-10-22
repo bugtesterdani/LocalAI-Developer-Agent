@@ -122,7 +122,7 @@ das **Anhängen an eine VM** ist aber erlaubt. LocalAi braucht dann zwei Einstel
 | Gast | statt bisher | jetzt |
 |---|---|---|
 | Linux | Debian-Abbild in eingebundene VHDX schreiben, Seed als FAT32-VHDX | der Broker schreibt die Systemfestplatte selbst als VHDX-Datei; der Seed (cloud-init `CIDATA`) wird eine ISO, die als DVD an die VM kommt |
-| Windows | ISO einbinden, DISM in eingebundene VHDX | Windows Setup installiert in der VM von der Windows-ISO (DVD 1); Antwortdatei, Gastdateien und Einrichtungsskript liegen auf einer zweiten, vom Broker geschriebenen ISO (DVD 2). Die Abfrage „Press any key to boot from CD“ bestätigt der Aufbau über die Tastatur der VM |
+| Windows | ISO einbinden, DISM in eingebundene VHDX | Windows Setup installiert in der VM von der Windows-ISO (DVD 1); Antwortdatei, Gastdateien und Einrichtungsskript liegen auf einer zweiten, vom Broker geschriebenen ISO (DVD 2). Die Abfrage „Press any key to boot from CD“ bestätigt der Aufbau: er öffnet kurz die VM-Konsole (vmconnect), bestätigt deren Verbindungsdialog und sendet Enter – dafür muss ein Desktop angemeldet sein; ohne nutzbare Konsole Rückfall auf die Tastatur der VM (WMI) |
 
 - Nach dem bestandenen Selbsttest hängt der Broker beide DVDs ab und überschreibt und löscht die eigene Seed- bzw.
   Setup-ISO (sie enthalten Sitzungsschlüssel bzw. Kennwort). Die Windows-ISO wird nur ausgeworfen.

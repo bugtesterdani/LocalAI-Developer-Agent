@@ -339,15 +339,59 @@ function Clear-LocalAiFile {
 }
 
 function Send-LocalAiBootKeys {
-    # Windows-ISO startet nur nach Tastendruck („Press any key to boot from CD“): eine Weile Enter an die VM senden.
-    # Ohne Einbinden des Abbilds (hostMount: false) lässt sich die Abfrage nicht aus der ISO entfernen.
-    param([Parameter(Mandatory)][string]$VmName, [int]$Seconds = 40)
-    $vm = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$VmName'"
-    $keyboard = Get-CimAssociatedInstance -InputObject $vm -ResultClassName Msvm_Keyboard
-    $until = (Get-Date).AddSeconds($Seconds)
-    while ((Get-Date) -lt $until) {
-        try { Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{ keyCode = [uint32]13 } | Out-Null } catch { }
-        Start-Sleep -Milliseconds 700
+    # Windows-ISO startet nur nach Tastendruck („Press any key to boot from CD“). Ohne Einbinden des Abbilds
+    # (hostMount: false) lässt sich die Abfrage nicht aus der ISO entfernen.
+    # Weg 1 (auf einem Firmenrechner erprobt): VM-Konsole (vmconnect) öffnen, ihren Verbindungsdialog mit Tab+Enter
+    # bestätigen und dann $Seconds lang Enter an das Fenster senden. Braucht einen angemeldeten Desktop; das Fenster
+    # bekommt kurz den Fokus. Weg 2 (Rückfall, ohne Fenster): Tastatur der VM über WMI (Msvm_Keyboard).
+    param([Parameter(Mandatory)][string]$VmName, [ValidateRange(5, 120)][int]$Seconds = 5)
+    $vm = Get-VM -Name $VmName -ErrorAction Stop
+    if ($vm.State -ne 'Running') { throw "Die VM '$VmName' läuft nicht." }
+    $vmConnectPath = Join-Path $env:WINDIR 'System32\vmconnect.exe'
+    $activated = $false
+    if (Test-Path -LiteralPath $vmConnectPath) {
+        Write-Host "Öffne VM-Konsole für '$VmName' …"
+        $vmConnect = Start-Process -FilePath $vmConnectPath -ArgumentList @('localhost', "`"$VmName`"") -PassThru
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            Start-Sleep -Seconds 10 # Konsole und Verbindungsdialog aufbauen lassen
+            if (-not $vmConnect.HasExited) {
+                try {
+                    $vmConnect.Refresh()
+                    if ($vmConnect.MainWindowHandle -ne 0 -and $shell.AppActivate($vmConnect.Id)) {
+                        $activated = $true
+                        $shell.SendKeys('{TAB}'); Start-Sleep -Milliseconds 750
+                        $shell.SendKeys('{ENTER}'); Start-Sleep -Milliseconds 250
+                        Write-Host 'Verbindungsdialog bestätigt (Tab, Enter).'
+                    }
+                } catch { Write-Verbose "Tastatureingabe noch nicht möglich: $($_.Exception.Message)" }
+            }
+            $deadline = (Get-Date).AddSeconds($Seconds)
+            while ($activated -and (Get-Date) -lt $deadline -and -not $vmConnect.HasExited) {
+                try {
+                    $vmConnect.Refresh()
+                    if ($vmConnect.MainWindowHandle -ne 0 -and $shell.AppActivate($vmConnect.Id)) {
+                        $shell.SendKeys('{ENTER}')
+                        Write-Host 'Enter an die VM-Konsole gesendet.'
+                        Start-Sleep -Milliseconds 750
+                    }
+                } catch { Write-Verbose "Tastatureingabe nicht möglich: $($_.Exception.Message)" }
+                Start-Sleep -Milliseconds 500
+            }
+        } finally {
+            try { if (-not $vmConnect.HasExited) { $vmConnect.CloseMainWindow() | Out-Null } } catch { }
+            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null } catch { }
+        }
+    }
+    if (-not $activated) {
+        Write-Host 'VM-Konsole nicht nutzbar – Enter über die Tastatur der VM (WMI).'
+        $cim = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$VmName'"
+        $keyboard = Get-CimAssociatedInstance -InputObject $cim -ResultClassName Msvm_Keyboard
+        $until = (Get-Date).AddSeconds([Math]::Max($Seconds, 40))
+        while ((Get-Date) -lt $until) {
+            try { Invoke-CimMethod -InputObject $keyboard -MethodName TypeKey -Arguments @{ keyCode = [uint32]13 } | Out-Null } catch { }
+            Start-Sleep -Milliseconds 700
+        }
     }
 }
 

@@ -640,6 +640,7 @@ public static class WindowsUnattend
     /// <summary>Im specialize-Durchlauf von der Setup-DVD aufgerufen: Gastdateien nach C:\LocalAi, SetupComplete.cmd.</summary>
     public const string SetupCmd = "@echo off\r\n"
         + "rem LocalAi: Gastdateien aus dem Setup-Abbild uebernehmen (specialize).\r\n"
+        + "if not exist \"%SystemDrive%\\LocalAi\" mkdir \"%SystemDrive%\\LocalAi\"\r\n"
         + "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~d0\\localai-setup.ps1\" -Media %~d0\r\n";
 
     public const string SetupPs1 = """
