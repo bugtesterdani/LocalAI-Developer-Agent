@@ -18,6 +18,7 @@ Runjournal mit neuen Freigaben fortsetzen).
 from __future__ import annotations
 
 import concurrent.futures as cf
+import functools
 import pathlib
 import queue
 import re
@@ -158,7 +159,8 @@ def default_verify(toolchains: list[dict[str, Any]], projects: list[str], langua
             guess = "."
         elif name == "batch" and languages.get("Batch"):
             guess = "."
-        elif name == "hdevelop" and languages.get("HDevelop"):
+        elif (name == "hdevelop" and languages.get("HDevelop")) or \
+                (name == "testumgebung" and any(is_testumgebung_file(p) for p in projects)):
             guess = "."
         if guess is None:
             continue
@@ -219,6 +221,28 @@ _LANGUAGE_HINTS = (
 
 
 _LANGUAGE_SAMPLE = {"HDevelop": "x.hdev", "Batch": "x.cmd", "PowerShell": "x.ps1", "C/C++": "x.cpp"}
+
+_TESTUMGEBUNG_GOAL = re.compile(r"\b(testumgebung|pr[uü]fprogramm\w*|testprogramm\w*|pr[uü]fablauf\w*|tproj|tsim)\b", re.IGNORECASE)
+
+
+def is_testumgebung_file(path: str) -> bool:
+    return path.lower().endswith((".tproj.json", ".tsim.json"))
+
+
+@functools.cache
+def testumgebung_notes() -> str:
+    """Format- und Katalogkurzfassung für Prüfprogramme der Testumgebung (prompts/testumgebung.md, ohne Kopfkommentar)."""
+    text = (pathlib.Path(__file__).parent / "prompts" / "testumgebung.md").read_text(encoding="utf-8")
+    return re.sub(r"\A<!--.*?-->\s*", "", text, flags=re.DOTALL).strip()
+
+
+def wants_testumgebung(paths: list[str], projects: list[str], goal: str, toolchains: list[str]) -> bool:
+    """Prüfprogramme der Testumgebung betroffen: Dateien der Aufgabe, vorhandene Projekte oder Ziel mit Toolchain."""
+    if any(is_testumgebung_file(p) for p in paths):
+        return True
+    if "testumgebung" not in toolchains:
+        return False
+    return (not paths and any(is_testumgebung_file(p) for p in projects)) or bool(_TESTUMGEBUNG_GOAL.search(goal))
 
 
 def language_hints(paths: list[str]) -> list[str]:
@@ -570,6 +594,10 @@ class Orchestrator:
             text += f"\n\n## Summary of the previous run\n{self.previous_summary}"
         if self.bridge is not None:
             text += f"\n\n## Available toolchains (for verify)\n{self._toolchain_text(self.bridge)}"
+            if any(tc.get("name") == "testumgebung" for tc in self.bridge.toolchains()):
+                text += ("\n\n## Test programs (Testumgebung)\nTest programs are *.tproj.json files, simulated runs are *.tsim.json "
+                         "scenarios next to them. For such goals let a Coder write the program and a Tester write scenarios "
+                         "(normal case, limits, FAIL, invalid input, operator abort); verify with testumgebung test on the folder.")
             if self.bridge.os_debug():
                 text += ("\n\n## OS debugging available\nThe OS image can be booted in QEMU and debugged. For goals about boot "
                          "problems, crashes or behaviour on screen, add a task with role \"Debugger\" (boots, inspects, may fix).")
@@ -635,6 +663,9 @@ class Orchestrator:
         hints = language_hints(paths)
         if hints:
             lines.append("## Language notes\n" + "\n".join(f"- {h}" for h in hints))
+        toolchain_names = [tc.get("name", "") for tc in self.bridge.toolchains()] if self.bridge is not None else []
+        if wants_testumgebung([*task.reads, *task.writes], self.projects, state.goal, toolchain_names):
+            lines.append(testumgebung_notes())
         others = [f"- {t.task_id} ({t.role}): {t.title}" for t in tasks if t is not task]
         if others:
             lines.append("## Other tasks in this plan (done by other agents)\n" + "\n".join(others))

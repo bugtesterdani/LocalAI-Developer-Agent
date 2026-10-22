@@ -1,0 +1,144 @@
+{
+  "format": "testumgebung.projekt",
+  "formatVersion": 1,
+  "name": "Netzteil-Prüfung – Beispiel Kommandozeile",
+  "version": "0.1",
+  "description": "Beispiel für testumgebung-cli: Seriennummer, Spannung und Strom messen, Leistung im Python-CodeBlock bewerten. Grenzwerte nur zur Demonstration; Simulation statt Hardware.",
+  "variables": [],
+  "init": {
+    "id": "init",
+    "name": "Test Start / Init",
+    "variables": [],
+    "repeat": {
+      "mode": "Once"
+    },
+    "resultBeforeRepeat": "Keep",
+    "children": []
+  },
+  "loop": {
+    "id": "loop",
+    "name": "Test Loop / Testing",
+    "variables": [],
+    "repeat": {
+      "mode": "Endless"
+    },
+    "resultBeforeRepeat": "Keep",
+    "children": [
+      {
+        "art": "gruppe",
+        "id": "dut",
+        "name": "Prüfling",
+        "dutRun": true,
+        "dutIdVariable": "Kennung",
+        "variables": [
+          {
+            "name": "Kennung",
+            "type": "String"
+          },
+          {
+            "name": "Spannung",
+            "type": "Double"
+          },
+          {
+            "name": "Strom",
+            "type": "Double"
+          },
+          {
+            "name": "Leistung",
+            "type": "Double"
+          }
+        ],
+        "repeat": {
+          "mode": "Once"
+        },
+        "resultBeforeRepeat": "Keep",
+        "children": [
+          {
+            "art": "schritt",
+            "id": "sn",
+            "name": "Seriennummer erfassen",
+            "block": "werker",
+            "parameters": {
+              "Art": "Eingabe",
+              "Text": "Seriennummer scannen",
+              "Datentyp": "Text",
+              "Pflicht": "true",
+              "Ziel": "Kennung"
+            }
+          },
+          {
+            "art": "schritt",
+            "id": "u",
+            "name": "Ausgangsspannung",
+            "block": "analog.messen",
+            "parameters": {
+              "Ressource": "Spannung_Pruefling",
+              "Ziel": "Spannung",
+              "Untergrenze": "220",
+              "Obergrenze": "240",
+              "Einheit": "V"
+            }
+          },
+          {
+            "art": "schritt",
+            "id": "i",
+            "name": "Laststrom",
+            "block": "analog.messen",
+            "parameters": {
+              "Ressource": "Strom_Pruefling",
+              "Ziel": "Strom",
+              "Untergrenze": "0.5",
+              "Obergrenze": "5",
+              "Einheit": "A"
+            }
+          },
+          {
+            "art": "schritt",
+            "id": "p",
+            "name": "Leistung berechnen",
+            "block": "code",
+            "parameters": {
+              "Sprache": "Python",
+              "Quelltext": "Leistung = round(Spannung * Strom, 3)\nreturn Measured(Leistung, 100, 1000, \"W\")",
+              "Timeout": "30"
+            }
+          },
+          {
+            "art": "schritt",
+            "id": "entnehmen",
+            "name": "Prüfling entnehmen",
+            "block": "werker",
+            "parameters": {
+              "Art": "Anweisung",
+              "Text": "Prüfling entnehmen und bestätigen"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "finalization": {
+    "id": "fin",
+    "name": "Test End / Finalization",
+    "variables": [],
+    "repeat": {
+      "mode": "Once"
+    },
+    "resultBeforeRepeat": "Keep",
+    "children": []
+  },
+  "simulation": [
+    {
+      "name": "Spannung_Pruefling",
+      "channel": "ai0",
+      "unit": "V",
+      "value": 230
+    },
+    {
+      "name": "Strom_Pruefling",
+      "channel": "ai1",
+      "unit": "A",
+      "value": 2
+    }
+  ]
+}

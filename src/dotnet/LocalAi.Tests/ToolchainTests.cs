@@ -59,6 +59,7 @@ public sealed class ToolchainTests : IDisposable
     [InlineData("powershell5")]
     [InlineData("batch")]
     [InlineData("hdevelop")]
+    [InlineData("testumgebung")]
     public void Referenz_Manifeste_sind_gueltig(string name)
     {
         var problems = ToolchainValidator.Validate(Reference(name), _ => true, _ => true);

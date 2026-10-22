@@ -37,7 +37,7 @@ LANGUAGES = {
     ".bat": "Batch", ".cmd": "Batch",
     ".hdev": "HDevelop", ".hdvp": "HDevelop", ".hdpl": "HDevelop",
 }
-PROJECT_FILES = re.compile(r"(\.(sln|slnx|csproj|vcxproj|props|targets)|(^|/)(pyproject\.toml|setup\.py|setup\.cfg|"
+PROJECT_FILES = re.compile(r"(\.(sln|slnx|csproj|vcxproj|props|targets|tproj\.json|tsim\.json)|(^|/)(pyproject\.toml|setup\.py|setup\.cfg|"
                            r"requirements[^/]*\.txt|CMakeLists\.txt|global\.json|Directory\.Build\.props|pytest\.ini|"
                            r"tox\.ini|conftest\.py))$", re.I)
 ENTRY_POINTS = re.compile(r"(^|/)(Program\.cs|Main\.cs|__main__\.py|main\.(py|c|cpp)|app\.py|cli\.py)$", re.I)

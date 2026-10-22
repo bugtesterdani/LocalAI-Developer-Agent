@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "name": "testumgebung",
+  "version": "1.0.0",
+  "displayName": "Testumgebung-Kommandozeile 1.0.0 (Prüfprogramme prüfen, bauen, simulieren)",
+  "guestPath": "C:\\Toolchains\\testumgebung",
+  "license": {
+    "proprietary": false,
+    "note": "Testumgebung: MIT (eigene Software); .NET-Laufzeit: MIT; Python: PSF License; Weitere siehe THIRD-PARTY-NOTICES.md im ZIP"
+  },
+  "binaries": [
+    { "name": "testumgebung", "path": "testumgebung-cli.exe" }
+  ],
+  "install": {
+    "kind": "Archive",
+    "file": "Testumgebung-Cli-1.0.0-win-x64.zip",
+    "expectedMinutes": 2,
+    "check": { "binary": "testumgebung", "arguments": ["--version"], "expectOutput": "testumgebung-cli" }
+  },
+  "selfTest": {
+    "directory": "selftest",
+    "steps": [
+      { "binary": "testumgebung", "arguments": ["test", "{selftest}"] }
+    ],
+    "expectOutput": "alles bestanden"
+  },
+  "actions": {
+    "lint": {
+      "binary": "testumgebung",
+      "arguments": ["check", "{path}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 120
+    },
+    "build": {
+      "binary": "testumgebung",
+      "arguments": ["build", "{path}", "--junit", "{results}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 600
+    },
+    "test": {
+      "binary": "testumgebung",
+      "arguments": ["test", "{path}", "--junit", "{results}"],
+      "parameters": { "path": { "type": "Path" } },
+      "timeoutSeconds": 900
+    },
+    "run": {
+      "binary": "testumgebung",
+      "arguments": ["simulate", "{script}"],
+      "parameters": { "script": { "type": "Path" } },
+      "timeoutSeconds": 300
+    }
+  },
+  "testResultFormat": "JUnit"
+}

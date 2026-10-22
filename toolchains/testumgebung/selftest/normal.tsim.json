@@ -1,0 +1,55 @@
+{
+  "format": "testumgebung.szenario",
+  "formatVersion": 1,
+  "project": "netzteil.tproj.json",
+  "name": "Zwei gute Prüflinge",
+  "duts": 2,
+  "simulation": {
+    "Spannung_Pruefling": 230.0,
+    "Strom_Pruefling": [
+      2.0,
+      2.5
+    ]
+  },
+  "answers": [
+    {
+      "step": "sn",
+      "values": [
+        "SN-001",
+        "SN-002"
+      ]
+    }
+  ],
+  "expect": {
+    "status": "PASS",
+    "duts": [
+      {
+        "dutId": "SN-001",
+        "rating": "PASS"
+      },
+      {
+        "dutId": "SN-002",
+        "rating": "PASS"
+      }
+    ],
+    "steps": [
+      {
+        "step": "p",
+        "occurrence": 1,
+        "rating": "PASS",
+        "value": 460.0,
+        "tolerance": 0.001
+      },
+      {
+        "step": "p",
+        "occurrence": 2,
+        "value": 575.0,
+        "tolerance": 0.001
+      },
+      {
+        "step": "u",
+        "count": 2
+      }
+    ]
+  }
+}
