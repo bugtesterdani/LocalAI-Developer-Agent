@@ -144,10 +144,20 @@ $json = $report | ConvertTo-Json -Depth 6
 $reportFile = Join-Path $root 'report.json'
 [System.IO.File]::WriteAllText($reportFile, $json, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host $json
-& (Join-Path $root 'python\python.exe') -I -m localai.worker --report $reportFile --transfer-disk auto --transfer-size $size
-Write-Host "Bericht übergeben (Exitcode $LASTEXITCODE)"
-if ($LASTEXITCODE -eq 0) { Set-Progress 'report-sent' }
-if ($LASTEXITCODE -ne 0) {
+# Ausgabe des Workers (auch Fehlermeldungen) ins Protokoll – die Aufzeichnung erfasst sie bei Programmen sonst nicht.
+$reportOut = Join-Path $root 'logs\report-stdout.log'
+$reportErr = Join-Path $root 'logs\report-stderr.log'
+$exitCode = 1
+try {
+    $proc = Start-Process -FilePath (Join-Path $root 'python\python.exe') -NoNewWindow -Wait -PassThru `
+        -ArgumentList @('-I', '-m', 'localai.worker', '--report', "`"$reportFile`"", '--transfer-disk', 'auto', '--transfer-size', "$size") `
+        -RedirectStandardOutput $reportOut -RedirectStandardError $reportErr
+    $exitCode = $proc.ExitCode
+} catch { Write-Host "Worker für den Bericht nicht startbar: $($_.Exception.Message)" }
+foreach ($f in $reportOut, $reportErr) { if (Test-Path -LiteralPath $f) { Get-Content -LiteralPath $f | ForEach-Object { Write-Host $_ } } }
+Write-Host "Bericht übergeben (Exitcode $exitCode)"
+if ($exitCode -eq 0) { Set-Progress 'report-sent' }
+if ($exitCode -ne 0) {
     # Ohne lauffähiges Python trotzdem melden, damit der Host nicht bis zur Zeitgrenze wartet.
     try { Send-ReportWithoutPython -Payload ([System.Text.Encoding]::UTF8.GetBytes($json)) -Size $size; Write-Host 'Bericht ohne Python übergeben'; Set-Progress 'report-sent-ps' }
     catch { Write-Host "Bericht konnte nicht übergeben werden: $($_.Exception.Message)"; Set-Progress 'report-failed' }
