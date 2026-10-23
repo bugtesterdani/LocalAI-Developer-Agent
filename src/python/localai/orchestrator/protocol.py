@@ -90,38 +90,61 @@ def fences(text: str) -> list[Fence]:
     return result
 
 
+# Beginn eines Objekts: Schlüssel in doppelten/einfachen Anführungszeichen oder ohne (kleine Modelle), auch nach
+# //-Kommentaren direkt hinter der Klammer (loads_lenient entfernt sie) – nie ${x} / {x}.
+_JSON_START = re.compile(r'\{\s*(?://[^\n]*\n\s*)*(?:"|\'|[A-Za-z_]\w*\s*:)')
+
+
+def _balanced_end(text: str, start: int) -> int | None:
+    """Position der schließenden Klammer zum Objekt ab ``start`` (Klammern in Zeichenketten und //-Kommentaren zählen
+    nicht)."""
+    depth = 0
+    in_string = escaped = False
+    i = start - 1
+    while i + 1 < len(text):
+        i += 1
+        ch = text[i]
+        if not in_string and ch == "/" and text.startswith("//", i):
+            newline = text.find("\n", i)
+            if newline < 0:
+                return None
+            i = newline
+            continue
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return None
+
+
 def _last_json_object(text: str) -> tuple[str, str]:
     """Liefert (JSON-Text, Begründung davor). Bevorzugt den letzten ```json-Block."""
     candidates = [f for f in fences(text) if f.lang == "json" or (not f.lang and f.body.lstrip().startswith("{"))]
     if candidates:
         last = candidates[-1]
         return last.body.strip(), text[:last.start]
-    # Ohne Codeblock: letztes ausgeglichenes {...} (Klammern in Zeichenketten werden übersprungen).
-    end = text.rfind("}")
-    depth = 0
-    in_string = False
-    i = end
-    while i >= 0:
-        ch = text[i]
-        if in_string:
-            if ch == '"':
-                backslashes = 0
-                j = i - 1
-                while j >= 0 and text[j] == "\\":
-                    backslashes += 1
-                    j -= 1
-                if backslashes % 2 == 0:
-                    in_string = False
-        elif ch == '"':
-            in_string = True
-        elif ch == "}":
-            depth += 1
-        elif ch == "{":
-            depth -= 1
-            if depth == 0:
-                return text[i:end + 1], text[:i]
-        i -= 1
-    raise ProtocolError("No JSON object found. End your answer with exactly one ```json block.")
+    # Ohne Codeblock: letztes ausgeglichenes Objekt, das wie JSON beginnt ({"…, {'…, {key: …). So zählen Platzhalter aus Code und
+    # Testskripten nicht – etwa ${retcode} in Robot Framework oder {name} in Formatstrings – die sonst als „ungültiges
+    # JSON“ gemeldet wurden und das Modell auf eine falsche Fährte setzten.
+    # Das äußerste Objekt, das am weitesten hinten endet (nicht ein inneres wie {"path": …} aus "files").
+    spans = [(m.start(), close) for m in _JSON_START.finditer(text) if (close := _balanced_end(text, m.start())) is not None]
+    if spans:
+        start, close = min(spans, key=lambda span: (-span[1], span[0]))
+        return text[start:close + 1], text[:start]
+    raise ProtocolError("No JSON object found. Your answer must end with exactly one ```json block containing the action "
+                        "(see Actions). Keep the reasoning to a few sentences – no analyses, reports or code outside edit "
+                        "blocks.")
 
 
 def _clean_path(value: Any) -> str:

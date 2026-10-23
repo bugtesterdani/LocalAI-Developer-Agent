@@ -849,6 +849,23 @@ def test_diff_block_vor_json_wird_nicht_als_json_gelesen():
     assert protocol.validate_result("Coder", action.result)["patch"].startswith("--- a/src/a.cs")
 
 
+def test_platzhalter_aus_testskripten_gelten_nicht_als_json():
+    # Echter Lauf (qwen3:14b, Robot-Framework-Skript): Analyse mit ```robot-Block ohne JSON am Ende; ${retcode} wurde als
+    # JSON gelesen („Expecting property name … at position 1“), das Modell besserte die Anführungszeichen statt die Aktion.
+    analysis = ("Analyse des Skripts …\n```robot\n${attempts}=    0\nWHILE    ${attempts} < 20\n"
+                "    Should Be True    ${retcode} == 0\n```\nFazit: {Verbesserungen} möglich.")
+    with pytest.raises(protocol.ProtocolError, match="must end with exactly one ```json block") as err:
+        protocol.parse(analysis)
+    assert "double quotes" not in str(err.value)
+    action = protocol.parse(analysis + '\n{"action": "read", "files": [{"path": "Old_Project/testcases/a.robot"}]}')
+    assert action.kind == "read" and action.files[0].path == "Old_Project/testcases/a.robot"
+    assert protocol.parse("Text mit ${x} und dann {action: \"list\", path: \"src\"}").path == "src"
+    # Review: Kommentar direkt nach der Klammer (loads_lenient erlaubt ihn) – auch mit Anführungszeichen darin.
+    commented = protocol.parse('{ // read "source"\n "action": "read", "files": [{"path": "src/a.py"}]}')
+    assert commented.kind == "read" and commented.files[0].path == "src/a.py"
+    assert protocol.parse('${x}\n{ // auflisten\n  // zweite Zeile\n action: "list", path: "src"}').path == "src"
+
+
 @pytest.mark.parametrize("raw", [
     "{\n    'action': 'read', 'files': [{'path': 'src/a.py'}]\n}",
     '{\n    action: "read", files: [{path: "src/a.py"}],\n}',
