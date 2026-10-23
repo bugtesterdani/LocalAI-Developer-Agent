@@ -48,6 +48,7 @@ from localai.orchestrator.models import (
     ModelsConfig,
     ProfileChoice,
     choose_profiles,
+    choose_summary_profile,
 )
 from localai.orchestrator.protocol import Action
 from localai.orchestrator.runtime import (
@@ -282,6 +283,7 @@ class Preparation:
     problems: list[str]
     hardware: hardware.Hardware | None = None
     ollama_version: str = ""
+    summary: ProfileChoice | None = None  # eigenes Modell für die Zusammenfassung der Agentennotizen
 
 
 @dataclass
@@ -383,7 +385,8 @@ class Orchestrator:
         for role, choice in choices.items():
             if choice.profile is None:
                 problems.append(f"{role}: kein nutzbares Profil – " + "; ".join(choice.problems))
-        return Preparation(choices, problems, hw, version)
+        summary = choose_summary_profile(self.config, store, installed, hw.fingerprint())
+        return Preparation(choices, problems, hw, version, summary)
 
     # ------------------------------------------------------------------ Hauptschleife
     def serve(self) -> None:
@@ -460,8 +463,24 @@ class Orchestrator:
             choice = prep.choices[role]
             assert choice.profile is not None
             agents[role] = Agent(role, choice.profile, choice.measurement, self.gateway, self.gpu, bridge, self.reporter,
-                                 state.clock, self.config.limits, lambda: list(state.notes))
+                                 state.clock, self.config.limits, lambda: list(state.notes), self.config.history,
+                                 prep.summary.profile if prep.summary else None)
         return agents
+
+    def _history_note(self, prep: Preparation) -> str:
+        settings = self.config.history
+        if settings.mode == "off":
+            return "Verlauf: nur Rückmeldungen des Orchestrators (history.mode = off)"
+        head = (f"Verlauf: Rückmeldungen des Orchestrators vollständig, die letzten {settings.keep_recent} eigenen Notizen "
+                f"wörtlich, ältere ab ~{settings.max_note_tokens} Token ")
+        if settings.mode == "trim":
+            return head + "mechanisch gekürzt (history.mode = trim)"
+        if prep.summary is None:
+            return head + "vom Modell der jeweiligen Rolle zusammengefasst"
+        if prep.summary.profile is None:
+            return (head + "vom Modell der jeweiligen Rolle zusammengefasst – kein Profil aus history.summaryProfiles "
+                    "nutzbar: " + "; ".join(prep.summary.problems))
+        return head + f"zusammengefasst mit {prep.summary.describe()}"
 
     def _run(self, state: GoalState) -> None:
         agents = self._prepare_run(state)
@@ -499,6 +518,7 @@ class Orchestrator:
         agents = self._agents(prep, state, bridge)
         for role, agent in agents.items():
             reporter.state(role, AgentState.Ready, f"bereit · {prep.choices[role].describe()} · Prompts {agent.prompt_tags}")
+        reporter.event("Orchestrator", ActivityKind.Metric, self._history_note(prep))
         if bridge.grant is None and bridge.find_grant() is None:
             reporter.chat("Orchestrator", "Kein freigegebener Projektordner mit List- und Read-Recht. Bitte in "
                           "config/demo-project.json (bzw. deiner Projektdatei) einen Ordner freigeben.")

@@ -131,6 +131,8 @@ Chat: „Ergänze im CSV-Importer eine Prüfung auf leere Zeilen und schreibe Te
 
 Antwortet das Modell nicht im vorgegebenen Format, erscheint „Antwort nicht verwertbar“ im Verlauf und der Agent versucht es erneut (zählt als Schritt). Bitte Häufigkeit notieren.
 
+- [ ] Verlauf über die Schritte: Ab dem zweiten Schritt einer Aufgabe zeigt die Ausgabe, dass der Agent an seine vorige Überlegung anknüpft (statt dieselbe Datei erneut anzufragen). Bei längeren Aufgaben steht im Verlauf des Agenten „Eigene Notizen Schritte 1–n zusammengefasst, ~N Token“ mit dem Text; die Agentenliste nennt zusätzlich „summarizer v1“. Schrittzahl je Aufgabe mit `history.mode` `summary` und `off` vergleichen und notieren.
+
 ## 5. Live-Ansicht unter 32K bzw. Offload
 
 1. Profil `gross` (32K) kalibrieren; für Offload `qwen3-coder:30b` ziehen und `--profile offload` kalibrieren (CPU-Offload ist zulässig, Latenz zweitrangig).

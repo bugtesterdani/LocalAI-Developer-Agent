@@ -15,22 +15,38 @@ from typing import Any
 from localai.contracts import ActivityKind, AgentState
 from localai.orchestrator import prompts, protocol
 from localai.orchestrator.activity import ActivityReporter
-from localai.orchestrator.context import DEFAULT_CHARS_PER_TOKEN, Budget, Evidence, assemble
+from localai.orchestrator.context import (
+    DEFAULT_CHARS_PER_TOKEN,
+    Budget,
+    Evidence,
+    assemble,
+    estimate_tokens,
+    task_budget,
+    task_text,
+)
 from localai.orchestrator.gateway import (
+    CancelToken,
     ChatRequest,
     GatewayError,
     OllamaGateway,
     OutOfMemory,
     RepetitionLoop,
     StreamCallbacks,
-    CancelToken,
 )
+from localai.orchestrator.history import HistorySettings, StepHistory
 from localai.orchestrator.models import Limits, Measurement, ModelProfile
-from localai.orchestrator.runtime import PRIORITY_NORMAL, FairGate, LimitReached, RunClock
+from localai.orchestrator.runtime import (
+    PRIORITY_NORMAL,
+    FairGate,
+    LimitReached,
+    RunClock,
+)
 from localai.orchestrator.tools import ToolBridge
 
 # Quelle einer Auflistung (tools.ToolBridge._evidence): "File.List <Ordner> depth=<n>"
 _LISTING = re.compile(r"File\.List (.+) depth=(\d+)")
+# Denkphase, die manche Modelle trotz think=false in den Text schreiben
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 class AgentFailed(Exception):
@@ -63,7 +79,8 @@ class AgentResult:
 class Agent:
     def __init__(self, role: str, profile: ModelProfile, measurement: Measurement | None, gateway: OllamaGateway,
                  gpu: FairGate, bridge: ToolBridge, reporter: ActivityReporter, clock: RunClock, limits: Limits,
-                 user_notes: Callable[[], list[str]]) -> None:
+                 user_notes: Callable[[], list[str]], history: HistorySettings | None = None,
+                 summary_profile: ModelProfile | None = None) -> None:
         self.role = role
         self.profile = profile
         self.chars_per_token = (measurement.chars_per_token * 0.9) if measurement and measurement.chars_per_token > 0 \
@@ -77,10 +94,15 @@ class Agent:
         self.user_notes = user_notes
         self.system, self.prompts = prompts.system_prompt(role)
         self.budget = Budget.split(profile.context_tokens, profile.max_output_tokens)
+        self.history_settings = history or HistorySettings()
+        # Eigenes Modell zum Zusammenfassen; None = Modell der Rolle (bleibt geladen, kein Wechsel im Grafikspeicher).
+        self.summary_profile = summary_profile
+        self.summary_prompt = prompts.load("summarizer")
 
     @property
     def prompt_tags(self) -> str:
-        return ", ".join(p.tag for p in self.prompts)
+        used = self.prompts + ([self.summary_prompt] if self.history_settings.mode == "summary" else [])
+        return ", ".join(p.tag for p in used)
 
     def _task_text(self, assignment: Assignment) -> str:
         text = assignment.text
@@ -103,7 +125,11 @@ class Agent:
 
     def _run(self, assignment: Assignment, cancel: CancelToken, evidence: list[Evidence], max_steps: int) -> AgentResult:
         role, task_id = self.role, assignment.task_id
-        history: list[str] = []
+        history = StepHistory(self.history_settings)
+
+        def summarize(previous: str, notes: list[str]) -> str:
+            return self._summarize(assignment, previous, notes, cancel)
+
         gateway_errors = 0
         denials = 0
         invalid = 0
@@ -117,7 +143,9 @@ class Agent:
                                    "erreicht. Schreib eine Nachricht (z. B. „weiter“), um fortzusetzen, oder brich den Agenten ab.")
                 self.clock.wait_for_user(cancel)
                 self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
-            parts = assemble(self.system, self._task_text(assignment), history, evidence, self.budget, self.chars_per_token)
+            task = self._task_text(assignment)
+            self._compact(history, summarize, task, task_id)
+            parts = assemble(self.system, task, history.lines(), evidence, self.budget, self.chars_per_token)
             # Nicht (vollständig) sichtbare Evidenz: weggelassen oder gekürzt – darauf nie verweisen statt erneut anzufragen.
             dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence} | set(parts.truncated_evidence)
             request = ChatRequest(
@@ -138,15 +166,15 @@ class Agent:
                                   "Profil wählen.") from err
             except RepetitionLoop as err:
                 self.reporter.event(role, ActivityKind.Warning, str(err), task_id=task_id)
-                history.append(f"Step {step}: your answer degenerated into endless repetition and was cut off. "
-                               "Answer again, short and concrete.")
+                history.orchestrator(step, "your answer degenerated into endless repetition and was cut off. "
+                                     "Answer again, short and concrete.")
                 continue
             except GatewayError as err:
                 gateway_errors += 1
                 self.reporter.event(role, ActivityKind.Error, f"Modellfehler: {err}", task_id=task_id)
                 if gateway_errors >= 2:
                     raise AgentFailed(f"Ollama-Fehler: {err}") from err
-                history.append(f"Step {step}: model request failed ({err}); answer again.")
+                history.orchestrator(step, f"model request failed ({err}); answer again.")
                 continue
             gateway_errors = 0
             self.reporter.event(role, ActivityKind.Metric,
@@ -157,15 +185,16 @@ class Agent:
                                 elapsed_ms=int(result.total_seconds * 1000),
                                 context_tokens=result.prompt_tokens or parts.prompt_tokens)
             if result.done_reason == "length":
-                history.append(f"Step {step}: your answer was cut off at the output limit. Be much shorter.")
+                history.orchestrator(step, "your answer was cut off at the output limit. Be much shorter.")
             try:
                 action = protocol.parse(result.content)
+                history.model(step, action, thinking=result.thinking)
                 if action.kind == "finish":
                     protocol.resolve_patch(role, action, assignment.files, lambda p: self._file_lines(evidence, p))
                     final = protocol.validate_result(role, action.result)
                     feedback = assignment.finisher(final) if assignment.finisher else None
                     if feedback is not None:
-                        history.append(f"Step {step}: {feedback}")
+                        history.orchestrator(step, feedback)
                         self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: Rückmeldung nach Schritt {step}", task_id)
                         continue
                     self.reporter.state(role, AgentState.Done, f"Aufgabe {task_id} abgeschlossen ({step} Schritte)", task_id)
@@ -175,7 +204,7 @@ class Agent:
                 # Für die Fehlersuche im Orchestrator-Log (bleibt lokal): was das Modell tatsächlich geschrieben hat.
                 print(f"[{role}] {task_id} Schritt {step} – unbrauchbare Antwort ({len(result.content)} Zeichen):\n"
                       f"{result.content[:2500]}\n[Ende der Antwort]", file=sys.stderr, flush=True)
-                history.append(f"Step {step}: invalid answer – {err}")
+                history.orchestrator(step, f"invalid answer – {err}")
                 invalid += 1
                 if self.limits.max_invalid_answers and invalid >= self.limits.max_invalid_answers:
                     raise LimitReached(f"{invalid} unbrauchbare Antworten für Aufgabe {task_id} (limits.maxInvalidAnswersPerTask)")
@@ -189,14 +218,14 @@ class Agent:
                     if not action.files:
                         self.reporter.state(role, AgentState.Generating, f"{', '.join(sorted(known))} liegt schon vor – "
                                             "nicht erneut gelesen", task_id)
-                        history.append(f"Step {step}: {note} Continue with your task now.")
+                        history.orchestrator(step, f"{note} Continue with your task now.")
                         continue
-                    history.append(f"Step {step}: {note}")
+                    history.orchestrator(step, note)
             if action.kind == "list" and (known_list := self._known_listing(action, evidence, dropped)):
                 self.reporter.state(role, AgentState.Generating, f"Auflistung {action.path} liegt schon vor – nicht erneut "
                                     "angefragt", task_id)
-                history.append(f"Step {step}: list {action.path} depth {action.depth}: not requested again – the same listing "
-                               f"(same snapshot) is already in the evidence ({known_list}). Use it and continue with your task.")
+                history.orchestrator(step, f"list {action.path} depth {action.depth}: not requested again – the same listing "
+                                     f"(same snapshot) is already in the evidence ({known_list}). Use it and continue with your task.")
                 continue
             outcome = self.bridge.execute(role, task_id, action, cancel)
             if outcome.expired:
@@ -207,17 +236,61 @@ class Agent:
                                    "warte, bis du wieder da bist – schreib eine Nachricht (z. B. „weiter“), dann geht es weiter.")
                 self.clock.wait_for_user(cancel)
                 self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
-                history.append(f"Step {step}: {outcome.summary}. The user was away and is back now; propose it again only if "
-                               "you still need it.")
+                history.orchestrator(step, f"{outcome.summary}. The user was away and is back now; propose it again only if "
+                                     "you still need it.")
                 continue
             if outcome.denied:
                 denials += 1
                 if self.limits.max_denials_per_task and denials >= self.limits.max_denials_per_task:
                     raise LimitReached(f"{denials} Vorschläge für Aufgabe {task_id} von dir abgelehnt (limits.maxDenialsPerTask)")
             evidence.extend(outcome.evidence)
-            history.append(f"Step {step}: {outcome.summary}")
+            history.orchestrator(step, outcome.summary)
             self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: weiter nach Schritt {step}", task_id)
         raise LimitReached(f"{max_steps} Modellschritte für Aufgabe {task_id} erreicht")
+
+    def _compact(self, history: StepHistory, summarize: Callable[[str, list[str]], str], task: str, task_id: str) -> None:
+        # Platz für eigene Notizen: was vom Anteil für Aufgabe und Verlauf nach Aufgabentext, Rückmeldungen des
+        # Orchestrators und bisheriger Zusammenfassung bleibt.
+        cpt = self.chars_per_token
+        room = task_budget(self.system, self.budget, cpt)
+        used = estimate_tokens(task_text(task, room, cpt), cpt)
+        used += sum(estimate_tokens(h.text, cpt) for h in history.lines() if h.keep or h.rank)
+        done = history.compact(summarize if self.history_settings.mode == "summary" else None, cpt,
+                               max(0, room - used))
+        if done is None:
+            return
+        first, last, error = done
+        span = f"Schritte {first}–{last}" if first != last else f"Schritt {first}"
+        size = estimate_tokens(history.summary, self.chars_per_token)
+        if error:
+            self.reporter.event(self.role, ActivityKind.Warning, f"Verlauf ({span}) nicht zusammengefasst ({error}) – "
+                                f"gekürzt übernommen, ~{size} Token", task_id=task_id)
+        else:
+            how = "gekürzt" if history.shortened else "zusammengefasst"
+            self.reporter.event(self.role, ActivityKind.Metric, f"Eigene Notizen {span} {how}, ~{size} Token:\n"
+                                f"{history.summary}", task_id=task_id)
+
+    def _summarize(self, assignment: Assignment, previous: str, notes: list[str], cancel: CancelToken) -> str:
+        """Fasst ältere Notizen des Modells zusammen (Rückmeldungen des Orchestrators bleiben ohnehin wörtlich)."""
+        profile = self.summary_profile or self.profile
+        settings = self.history_settings
+        user = f"## Task of the agent\n{assignment.title}\n\n"
+        if previous:
+            user += f"## Previous summary\n{previous}\n\n"
+        user += "## New notes (oldest first)\n" + "\n\n".join(notes)
+        # Gleiches num_ctx wie das Profil: Ollama lädt das Modell sonst neu.
+        request = ChatRequest(
+            model=profile.model,
+            messages=[{"role": "system", "content": self.summary_prompt.text.replace("{words}", str(settings.summary_tokens // 2))},
+                      {"role": "user", "content": user}],
+            num_ctx=profile.context_tokens, num_predict=min(settings.summary_tokens + 200, profile.max_output_tokens),
+            temperature=0.1, think=False if profile.think else profile.think, extra_options=dict(profile.options))
+        role, task_id = self.role, assignment.task_id
+        with self.gpu.slot(role, profile.key, assignment.priority, cancel,
+                           on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
+            self.reporter.state(role, AgentState.Generating, f"Eigene Notizen zusammenfassen ({profile.model})", task_id)
+            result = self.gateway.chat(request, cancel)
+        return _THINK.sub("", result.content).strip()
 
     def _current_snapshot(self) -> str:
         return getattr(self.bridge, "snapshot_id", None) or ""

@@ -14,6 +14,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
+from localai.orchestrator.history import HistorySettings
+
 ROLES = ("Planner", "Coder", "Tester", "Debugger", "Reviewer")
 
 
@@ -134,6 +136,7 @@ class ModelsConfig:
     require_calibration: bool = True
     source: str = ""
     allow_lan: bool = False
+    history: HistorySettings = field(default_factory=HistorySettings)
 
     def gateway(self, url: str | None = None, **overrides):
         """Gateway mit den Einstellungen dieser Konfiguration (eine Stelle für Adresse und LAN-Freigabe)."""
@@ -217,6 +220,7 @@ class ModelsConfig:
             runs=int(cal.get("runs", 10)), min_vram_reserve_gib=float(cal.get("minVramReserveGiB", 2.0)),
             max_cpu_offload=float(cal.get("maxCpuOffload", 0.05)),
             output_tokens=int(cal.get("outputTokens", 256)))
+        history = _history(raw.get("history") or {}, profiles)
         url = str(ollama.get("url", "http://127.0.0.1:11434"))
         from localai.orchestrator.gateway import GatewayError, validate_loopback
 
@@ -230,7 +234,24 @@ class ModelsConfig:
             stall_abort_seconds=float(ollama.get("stallAbortSeconds", 900)),
             profiles=profiles, roles=roles, limits=limits, calibration=calibration,
             require_calibration=bool(raw.get("requireCalibration", True)), source=source,
-            allow_lan=bool(ollama.get("allowLan", False)))
+            allow_lan=bool(ollama.get("allowLan", False)), history=history)
+
+
+def _history(raw: object, profiles: dict[str, ModelProfile]) -> HistorySettings:
+    if not isinstance(raw, dict):
+        raise ConfigError("history muss ein Objekt sein, z. B. {\"mode\": \"summary\"}")
+    mode = raw.get("mode", "summary")
+    if mode not in ("summary", "trim", "off"):
+        raise ConfigError("history.mode: erlaubt sind summary, trim, off")
+    names = raw.get("summaryProfiles") or []
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise ConfigError("history.summaryProfiles muss eine Liste von Profilnamen sein (leer = Modell der Rolle)")
+    # Wie bei den Rollen: Profile, die (z. B. durch eine eigene Profilliste in models.local.json) fehlen, übergehen.
+    return HistorySettings(
+        mode=mode, summary_profiles=tuple(n for n in names if n in profiles),
+        keep_recent=_bounded(raw, "keepRecentNotes", 3, 0, 20),
+        max_note_tokens=_bounded(raw, "maxNoteTokens", 1500, 200, 100_000),
+        summary_tokens=_bounded(raw, "summaryTokens", 600, 100, 4000))
 
 
 def merge(base: Any, override: Any) -> Any:
@@ -321,42 +342,51 @@ class ProfileChoice:
         return f"{self.profile.label()} ({cal})"
 
 
+def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str], hardware_fingerprint: str,
+            role: str, names: list[str] | tuple[str, ...]) -> ProfileChoice:
+    """Erstes Profil aus ``names``, das installiert und (falls verlangt) stabil kalibriert ist."""
+    problems: list[str] = []
+    for name in names:
+        profile = config.profiles[name]
+        if profile.model not in installed:
+            problems.append(f"{profile.label()}: Modell nicht installiert (ollama pull {profile.model})")
+            continue
+        m = store.get(profile)
+        if m is None:
+            if config.require_calibration:
+                problems.append(f"{profile.label()}: nicht kalibriert")
+                continue
+        else:
+            stale = []
+            if m.digest and installed[profile.model] and m.digest != installed[profile.model]:
+                stale.append("Modell wurde seit der Kalibrierung geändert")
+            if m.hardware != hardware_fingerprint:
+                stale.append("Hardware hat sich seit der Kalibrierung geändert")
+            if not m.stable:
+                stale.append(f"nicht stabil ({m.reason})")
+            elif (m.offload_fraction is not None and m.offload_fraction > config.calibration.max_cpu_offload
+                  and not profile.offload):
+                # Auch für ältere Messungen: ohne Offload-Profil muss das Modell in den Grafikspeicher passen.
+                stale.append(f"{m.offload_fraction:.0%} des Modells auf der CPU – passt nicht in den Grafikspeicher")
+            if stale and config.require_calibration:
+                problems.append(f"{profile.label()}: " + "; ".join(stale))
+                continue
+        return ProfileChoice(role, profile, m, problems)
+    return ProfileChoice(role, None, None, problems)
+
+
 def choose_profiles(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
                     hardware_fingerprint: str) -> dict[str, ProfileChoice]:
     """Wählt je Rolle das erste Profil der Vorzugsliste, das installiert und (falls verlangt) stabil kalibriert ist.
 
     ``installed``: Modellname → Digest aus ``/api/tags``.
     """
-    choices: dict[str, ProfileChoice] = {}
-    for role in ROLES:
-        problems: list[str] = []
-        chosen: ProfileChoice | None = None
-        for name in config.roles[role]:
-            profile = config.profiles[name]
-            if profile.model not in installed:
-                problems.append(f"{profile.label()}: Modell nicht installiert (ollama pull {profile.model})")
-                continue
-            m = store.get(profile)
-            if m is None:
-                if config.require_calibration:
-                    problems.append(f"{profile.label()}: nicht kalibriert")
-                    continue
-            else:
-                stale = []
-                if m.digest and installed[profile.model] and m.digest != installed[profile.model]:
-                    stale.append("Modell wurde seit der Kalibrierung geändert")
-                if m.hardware != hardware_fingerprint:
-                    stale.append("Hardware hat sich seit der Kalibrierung geändert")
-                if not m.stable:
-                    stale.append(f"nicht stabil ({m.reason})")
-                elif (m.offload_fraction is not None and m.offload_fraction > config.calibration.max_cpu_offload
-                      and not profile.offload):
-                    # Auch für ältere Messungen: ohne Offload-Profil muss das Modell in den Grafikspeicher passen.
-                    stale.append(f"{m.offload_fraction:.0%} des Modells auf der CPU – passt nicht in den Grafikspeicher")
-                if stale and config.require_calibration:
-                    problems.append(f"{profile.label()}: " + "; ".join(stale))
-                    continue
-            chosen = ProfileChoice(role, profile, m, problems)
-            break
-        choices[role] = chosen or ProfileChoice(role, None, None, problems)
-    return choices
+    return {role: _usable(config, store, installed, hardware_fingerprint, role, config.roles[role]) for role in ROLES}
+
+
+def choose_summary_profile(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
+                           hardware_fingerprint: str) -> ProfileChoice | None:
+    """Eigenes Modell zum Zusammenfassen der Agentennotizen; None = keins eingetragen (Modell der Rolle)."""
+    if config.history.mode != "summary" or not config.history.summary_profiles:
+        return None
+    return _usable(config, store, installed, hardware_fingerprint, "Zusammenfassung", config.history.summary_profiles)

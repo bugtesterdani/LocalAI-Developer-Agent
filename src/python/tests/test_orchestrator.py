@@ -1073,6 +1073,58 @@ def test_auflistung_nicht_doppelt_und_nach_ablauf_warten(ollama, tmp_path):
     thread.join(5)
 
 
+def test_agent_sieht_eigene_notizen_der_vorigen_schritte(ollama, tmp_path):
+    """Echter Lauf: der Coder schreibt in jedem Schritt eine Erkenntnis; in späteren Schritten steht sie (bzw. ihre
+    Zusammenfassung) im Prompt, die Rückmeldungen des Orchestrators vollständig."""
+    seen: list[str] = []
+    summaries: list[dict] = []
+    steps = {"Coder": 0}
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role != "Coder":
+            return scripted_answer(body)
+        steps["Coder"] += 1
+        seen.append(user)
+        n = steps["Coder"]
+        if n < 6:
+            filler = " ".join(f"word{n}x{i}" for i in range(90))  # verschieden, sonst greift die Wiederholungserkennung
+            return (f"Clue {n}: the constant LIMIT_{n} matters. {filler}"
+                    + f'\n```json\n{{"action": "search", "query": "LIMIT_{n}", "reason": "find uses"}}\n```'), ""
+        return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return b + a\n>>>>>>> REPLACE\n"
+                '```json\n{"action": "finish", "result": {"message_de": "fertig"}}\n```'), ""
+
+    def summarizer(body):
+        summaries.append(body)
+        text = body["messages"][-1]["content"]
+        before = re.search(r"clues so far: ([\d, ]+)", text)
+        found = (before[1].split(", ") if before else []) + re.findall(r"Clue (\d+)", text)
+        return "- clues so far: " + ", ".join(found), ""
+
+    ollama.responder = responder
+    ollama.summarizer = summarizer
+    broker = FakeBroker(test_runs=[], toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: finished(broker), timeout=60)
+    orch.stop()
+    thread.join(5)
+
+    assert "Step 1 – your note: Clue 1: the constant LIMIT_1 matters." in seen[1], "Schritt 2 kennt Schritt 1"
+    assert re.search(r"Step 1: search .LIMIT_1.", seen[1]), "Rückmeldung des Orchestrators wörtlich"
+    assert summaries, "ältere Notizen wurden zusammengefasst"
+    last = seen[-1]
+    assert "(summarised):\n- clues so far: 1" in last
+    assert "your note: Clue 5" in last, "neueste Notizen wörtlich"
+    for n in range(1, 6):
+        assert re.search(rf"Step {n}: search .LIMIT_{n}.", last), "alle Rückmeldungen des Orchestrators bleiben"
+    request = summaries[0]
+    assert request["model"] == "qwen2.5-coder:14b" and request["options"]["num_ctx"] == 8192, \
+        "ohne eigenes Profil: Modell und Kontext der Rolle (kein Neuladen)"
+    assert any(e.kind == ActivityKind.Metric and "Eigene Notizen" in (e.text or "") for e in broker.of("Coder"))
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
