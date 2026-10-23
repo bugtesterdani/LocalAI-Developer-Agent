@@ -974,6 +974,33 @@ def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
     thread.join(5)
 
 
+def test_nur_vollstaendige_und_sichtbare_auflistungen_ersetzen_eine_neue():
+    """Review: eine abgeschnittene (zu viele Einträge) oder im Prompt gekürzte Auflistung darf eine neue Anfrage nicht
+    unterdrücken – sonst fehlen dem Agenten Ordner, und er verbraucht seine Schritte mit unterdrückten Anfragen."""
+    from types import SimpleNamespace
+
+    from localai.orchestrator.agents import Agent
+    agent = Agent.__new__(Agent)
+    agent.bridge = SimpleNamespace(snapshot_id="s1")
+    full = Evidence("E1", "File.List src depth=2", "src/a.py  (1 Bytes)", snapshot_id="s1")
+    cut = Evidence("E2", "File.List lib depth=3 truncated", "lib/x  (1 Bytes)", snapshot_id="s1")
+    old = Evidence("E3", "File.List doc depth=2", "doc/a.md  (1 Bytes)", snapshot_id="s0")
+
+    def known(path, depth, dropped=frozenset()):
+        return agent._known_listing(protocol.Action("list", "", path=path, depth=depth), [full, cut, old], set(dropped))
+
+    assert known("src", 2) == "E1" and known("src", 1) == "E1"
+    assert known("src", 3) is None, "tiefer als vorhanden"
+    assert known("lib", 1) is None, "abgeschnittene Auflistung"
+    assert known("doc", 1) is None, "anderer Stand"
+    assert known("src", 2, {"E1"}) is None, "weggelassen bzw. gekürzt im Prompt"
+    # assemble meldet gekürzte Evidenz, damit der Agent sie als nicht sichtbar behandelt.
+    big = Evidence("E9", "File.List . depth=4", "\n".join(f"pfad/{i}.txt  (1 Bytes)" for i in range(3000)), pinned=True,
+                   snapshot_id="s1")
+    parts = assemble("rules", "task", [], [big], Budget.split(8192, 2048))
+    assert parts.truncated_evidence == ["E9"]
+
+
 def test_auflistung_nicht_doppelt_und_nach_ablauf_warten(ollama, tmp_path):
     """Diagnose eines echten Laufs: File.List desselben Ordners immer wieder, und nach abgelaufenen Vorschlägen (Nutzer
     nicht da) sofort der nächste. Jetzt: gleiche Auflistung auf demselben Stand nicht erneut, nach Ablauf warten."""

@@ -470,8 +470,9 @@ class ToolBridge:
                 if request.tool in ("File.Search", "Repo.Index") and request.arguments.get("query"):
                     source += f" query={request.arguments.get('query')!r}"
                 if request.tool == "File.List":
-                    # Ordner, Tiefe und Stand: dieselbe Auflistung wird nicht erneut vorgeschlagen (Agent.listing_known).
-                    source += f" depth={request.arguments.get('depth')}"
+                    # Ordner, Tiefe und Stand: dieselbe Auflistung wird nicht erneut vorgeschlagen (Agent._known_listing) –
+                    # außer sie war unvollständig (zu viele Einträge).
+                    source += f" depth={request.arguments.get('depth')}" + (" truncated" if outcome.result.truncated else "")
                 whole = (request.tool in ("File.Read", "File.ReadMany") and target is not None and target.line_start is None
                          and target.line_end is None and "gekürzt" not in (r.message or "") and not outcome.result.truncated)
                 listing = request.tool == "File.List"

@@ -118,7 +118,8 @@ class Agent:
                 self.clock.wait_for_user(cancel)
                 self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
             parts = assemble(self.system, self._task_text(assignment), history, evidence, self.budget, self.chars_per_token)
-            dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence}
+            # Nicht (vollständig) sichtbare Evidenz: weggelassen oder gekürzt – darauf nie verweisen statt erneut anzufragen.
+            dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence} | set(parts.truncated_evidence)
             request = ChatRequest(
                 model=self.profile.model,
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
@@ -245,7 +246,8 @@ class Agent:
         return known
 
     def _known_listing(self, action: protocol.Action, evidence: list[Evidence], dropped: set[str]) -> str | None:
-        """Evidenz-ID einer Auflistung desselben Ordners auf dem aktuellen Stand mit mindestens dieser Tiefe."""
+        """Evidenz-ID einer vollständigen Auflistung desselben Ordners auf dem aktuellen Stand mit mindestens dieser Tiefe,
+        die ungekürzt im Prompt steht (abgeschnittene Auflistungen tragen „truncated“ und passen nicht auf _LISTING)."""
         snapshot = self._current_snapshot()
         if not snapshot:
             return None
