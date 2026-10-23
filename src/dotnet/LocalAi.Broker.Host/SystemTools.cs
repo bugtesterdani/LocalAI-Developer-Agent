@@ -314,7 +314,7 @@ public static class DiagnosticsExport
 
     public static string Create(string dataDirectory, JsonObject manifest, AuditReport? audit, string? auditError,
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, int>> states, IReadOnlyList<BrokerEvent> events, bool includeLogs,
-        DateTimeOffset now)
+        DateTimeOffset now, IReadOnlyDictionary<string, (string Tool, string Agent, string TaskId)>? kinds = null)
     {
         var dir = Directory.CreateDirectory(Path.Combine(dataDirectory, "diagnose")).FullName;
         var file = Path.Combine(dir, $"diagnose-{now:yyyyMMdd-HHmmss}.zip");
@@ -333,10 +333,20 @@ public static class DiagnosticsExport
             stateNode[tool] = new JsonObject(counts.Select(c => KeyValuePair.Create(c.Key, (JsonNode?)c.Value)));
         }
         Add("zustaende.json", stateNode);
-        // Ereignisse ohne Text (Meldungen können Pfade oder Inhalte enthalten).
-        Add("ereignisse.json", new JsonArray(events.Select(e => (JsonNode?)new JsonObject
+        // Ereignisse ohne Text (Meldungen können Pfade oder Inhalte enthalten); Werkzeug, Rolle und Aufgabe sind keine Inhalte.
+        Add("ereignisse.json", new JsonArray(events.Select(e =>
         {
-            ["seq"] = e.Seq, ["at"] = e.At, ["type"] = e.Type, ["proposalId"] = e.ProposalId, ["runId"] = e.RunId, ["state"] = e.State?.ToString(),
+            var node = new JsonObject
+            {
+                ["seq"] = e.Seq, ["at"] = e.At, ["type"] = e.Type, ["proposalId"] = e.ProposalId, ["runId"] = e.RunId, ["state"] = e.State?.ToString(),
+            };
+            if (e.ProposalId is { } id && kinds is not null && kinds.TryGetValue(id, out var kind))
+            {
+                node["tool"] = kind.Tool;
+                node["agent"] = kind.Agent;
+                node["taskId"] = kind.TaskId;
+            }
+            return (JsonNode?)node;
         }).ToArray()));
         using var process = Process.GetCurrentProcess();
         var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dataDirectory))!);

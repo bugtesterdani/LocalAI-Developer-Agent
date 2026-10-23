@@ -6,6 +6,7 @@ ggf. Toolvorschlag beim Broker (wartet auf Nutzerentscheidung) → Evidenz über
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -27,6 +28,9 @@ from localai.orchestrator.gateway import (
 from localai.orchestrator.models import Limits, Measurement, ModelProfile
 from localai.orchestrator.runtime import PRIORITY_NORMAL, FairGate, LimitReached, RunClock
 from localai.orchestrator.tools import ToolBridge
+
+# Quelle einer Auflistung (tools.ToolBridge._evidence): "File.List <Ordner> depth=<n>"
+_LISTING = re.compile(r"File\.List (.+) depth=(\d+)")
 
 
 class AgentFailed(Exception):
@@ -114,7 +118,8 @@ class Agent:
                 self.clock.wait_for_user(cancel)
                 self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
             parts = assemble(self.system, self._task_text(assignment), history, evidence, self.budget, self.chars_per_token)
-            dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence}
+            # Nicht (vollständig) sichtbare Evidenz: weggelassen oder gekürzt – darauf nie verweisen statt erneut anzufragen.
+            dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence} | set(parts.truncated_evidence)
             request = ChatRequest(
                 model=self.profile.model,
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
@@ -187,7 +192,24 @@ class Agent:
                         history.append(f"Step {step}: {note} Continue with your task now.")
                         continue
                     history.append(f"Step {step}: {note}")
+            if action.kind == "list" and (known_list := self._known_listing(action, evidence, dropped)):
+                self.reporter.state(role, AgentState.Generating, f"Auflistung {action.path} liegt schon vor – nicht erneut "
+                                    "angefragt", task_id)
+                history.append(f"Step {step}: list {action.path} depth {action.depth}: not requested again – the same listing "
+                               f"(same snapshot) is already in the evidence ({known_list}). Use it and continue with your task.")
+                continue
             outcome = self.bridge.execute(role, task_id, action, cancel)
+            if outcome.expired:
+                # Niemand entscheidet: nicht weiter vorschlagen (jeder Vorschlag wartet sonst wieder bis zum Ablauf),
+                # sondern warten, bis der Nutzer zurück ist.
+                self.reporter.state(role, AgentState.WaitingUser, "Vorschlag abgelaufen – wartet auf dich", task_id)
+                self.reporter.chat("Orchestrator", f"{role}: Ein Vorschlag ist abgelaufen, ohne dass du entschieden hast. Ich "
+                                   "warte, bis du wieder da bist – schreib eine Nachricht (z. B. „weiter“), dann geht es weiter.")
+                self.clock.wait_for_user(cancel)
+                self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
+                history.append(f"Step {step}: {outcome.summary}. The user was away and is back now; propose it again only if "
+                               "you still need it.")
+                continue
             if outcome.denied:
                 denials += 1
                 if self.limits.max_denials_per_task and denials >= self.limits.max_denials_per_task:
@@ -222,6 +244,19 @@ class Agent:
                     known[ref.path] = item.evidence_id
                     break
         return known
+
+    def _known_listing(self, action: protocol.Action, evidence: list[Evidence], dropped: set[str]) -> str | None:
+        """Evidenz-ID einer vollständigen Auflistung desselben Ordners auf dem aktuellen Stand mit mindestens dieser Tiefe,
+        die ungekürzt im Prompt steht (abgeschnittene Auflistungen tragen „truncated“ und passen nicht auf _LISTING)."""
+        snapshot = self._current_snapshot()
+        if not snapshot:
+            return None
+        for item in reversed(evidence):
+            match = _LISTING.fullmatch(item.source)
+            if (match and item.snapshot_id == snapshot and item.evidence_id not in dropped
+                    and match.group(1) == action.path and int(match.group(2)) >= action.depth):
+                return item.evidence_id
+        return None
 
     def _callbacks(self, task_id: str) -> StreamCallbacks:
         role, reporter, model = self.role, self.reporter, self.profile.model

@@ -991,6 +991,74 @@ def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
     thread.join(5)
 
 
+def test_nur_vollstaendige_und_sichtbare_auflistungen_ersetzen_eine_neue():
+    """Review: eine abgeschnittene (zu viele Einträge) oder im Prompt gekürzte Auflistung darf eine neue Anfrage nicht
+    unterdrücken – sonst fehlen dem Agenten Ordner, und er verbraucht seine Schritte mit unterdrückten Anfragen."""
+    from types import SimpleNamespace
+
+    from localai.orchestrator.agents import Agent
+    agent = Agent.__new__(Agent)
+    agent.bridge = SimpleNamespace(snapshot_id="s1")
+    full = Evidence("E1", "File.List src depth=2", "src/a.py  (1 Bytes)", snapshot_id="s1")
+    cut = Evidence("E2", "File.List lib depth=3 truncated", "lib/x  (1 Bytes)", snapshot_id="s1")
+    old = Evidence("E3", "File.List doc depth=2", "doc/a.md  (1 Bytes)", snapshot_id="s0")
+
+    def known(path, depth, dropped=frozenset()):
+        return agent._known_listing(protocol.Action("list", "", path=path, depth=depth), [full, cut, old], set(dropped))
+
+    assert known("src", 2) == "E1" and known("src", 1) == "E1"
+    assert known("src", 3) is None, "tiefer als vorhanden"
+    assert known("lib", 1) is None, "abgeschnittene Auflistung"
+    assert known("doc", 1) is None, "anderer Stand"
+    assert known("src", 2, {"E1"}) is None, "weggelassen bzw. gekürzt im Prompt"
+    # assemble meldet gekürzte Evidenz, damit der Agent sie als nicht sichtbar behandelt.
+    big = Evidence("E9", "File.List . depth=4", "\n".join(f"pfad/{i}.txt  (1 Bytes)" for i in range(3000)), pinned=True,
+                   snapshot_id="s1")
+    parts = assemble("rules", "task", [], [big], Budget.split(8192, 2048))
+    assert parts.truncated_evidence == ["E9"]
+
+
+def test_auflistung_nicht_doppelt_und_nach_ablauf_warten(ollama, tmp_path):
+    """Diagnose eines echten Laufs: File.List desselben Ordners immer wieder, und nach abgelaufenen Vorschlägen (Nutzer
+    nicht da) sofort der nächste. Jetzt: gleiche Auflistung auf demselben Stand nicht erneut, nach Ablauf warten."""
+    steps = {"Coder": 0}
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Planner":
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": [], "tasks": [{"id": "T1", '
+                    '"role": "Coder", "title": "x", "description": "x", "reads": [], "writes": ["src/calc.py"], '
+                    '"depends_on": []}]}}\n```'), ""
+        if role == "Coder":
+            steps["Coder"] += 1
+            if steps["Coder"] in (1, 2):
+                return '```json\n{"action": "list", "path": "src", "depth": 2}\n```', ""
+            if steps["Coder"] == 3:
+                assert "not requested again" in user
+                return '```json\n{"action": "list", "path": "lib", "depth": 1}\n```', ""
+            assert "is back now" in user
+            return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return b + a\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "fertig"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[],
+                        decide=lambda r: ProposalState.Expired if r.tool == "File.List" and r.targets[0].path == "lib"
+                        else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: any("abgelaufen" in c for c in broker.chats("Orchestrator")), timeout=60)
+    time.sleep(0.5)
+    assert steps["Coder"] == 3, "nach dem Ablauf kein weiterer Vorschlag, bis der Nutzer schreibt"
+    broker.send(OrchestratorCommandKind.Chat, "weiter")
+    wait_for(lambda: finished(broker), timeout=60)
+    lists = [p.targets[0].path for p in broker.proposals.values() if p.tool == "File.List" and p.agent.value == "Coder"]
+    assert lists == ["src", "lib"], "src nur einmal aufgelistet"
+    orch.stop()
+    thread.join(5)
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
