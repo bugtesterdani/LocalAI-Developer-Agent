@@ -930,6 +930,20 @@ def test_tester_aufgabe_wird_ergaenzt_wenn_tests_gewuenscht():
     assert ensure_tester_task("Führe die Tests aus", [{"id": "T1", "role": "Coder"}], []) is None
 
 
+def test_leerer_snapshot_beendet_den_run_mit_hinweis(ollama, tmp_path):
+    """Echter Fall: freigegebener Ordner enthielt nur Unterordner, der Snapshot war leer – der Planner riet Dateinamen und
+    listete immer wieder auf. Jetzt: klare Meldung, keine Agentenschritte."""
+    ollama.responder = scripted_answer
+    broker = FakeBroker(snapshot_message="0 Dateien, 0 Bytes, 0 übersprungen")
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Übertrage das Robot-Skript in die Testumgebung.")
+    wait_for(lambda: any("Snapshot ist leer" in c for c in broker.chats("Orchestrator")), timeout=30)
+    time.sleep(0.3)
+    assert [p.tool for p in broker.proposals.values()] == ["Workspace.Snapshot"], "kein Repo.Index, kein File.List"
+    orch.stop()
+    thread.join(5)
+
+
 def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
     """Nachbau des echten Laufs (qwen2.5-coder:7b): Planner liest die Datei ganz, plant nur eine Coder-Aufgabe;
     Coder will dieselbe Datei erneut lesen und liefert dann SEARCH/REPLACE-Blöcke."""

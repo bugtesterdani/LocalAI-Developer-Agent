@@ -517,6 +517,18 @@ class Orchestrator:
                 reporter.chat("Orchestrator", "Ohne Snapshot kann ich nicht arbeiten. Schreib mir erneut, wenn du den "
                               "Snapshot freigeben möchtest.")
                 return None
+            note = getattr(bridge, "snapshot_note", "")
+            if note.startswith("0 Dateien"):
+                # Leerer Snapshot: die Agenten würden sonst nur raten und immer wieder auflisten.
+                grant = bridge.grant
+                hint = ("" if grant is None or grant.recursive
+                        else " Der Ordner ist ohne Unterordner freigegeben (\"recursive\": false) – Dateien in Unterordnern "
+                             "werden dann nicht übernommen.")
+                reporter.chat("Orchestrator", f"Der Snapshot ist leer ({note}): aus dem freigegebenen Ordner "
+                              f"{grant.root if grant else ''} wurde keine Datei übernommen.{hint} Bitte die Freigabe in der "
+                              "Projektdatei prüfen (\"root\", \"recursive\": true, \"exclude\") und neu starten.")
+                bridge.snapshot_id = bridge.base_snapshot_id = None
+                return None
         return agents
 
     def _start_evidence(self, state: GoalState, bridge: ToolBridge, planner: Agent) -> None:

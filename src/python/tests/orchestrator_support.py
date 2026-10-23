@@ -76,6 +76,7 @@ class FakeBroker:
     exported: list[str] = field(default_factory=list)  # in den „Projektordner“ übernommene Dateien
     # M9: Einstellung osDebug wie vom Broker (None = nicht eingerichtet)
     os_debug: dict | None = None
+    snapshot_message: str = ""  # Umfang laut Broker, z. B. „0 Dateien, 0 Bytes, 0 übersprungen“
     _results: dict = field(default_factory=dict)
 
     # -------------------------------------------------- Orchestrator-Methoden
@@ -206,7 +207,8 @@ class FakeBroker:
             return special
         results = []
         if request.tool == "Workspace.Snapshot":
-            results.append(TargetResult(target_id="snapshot", status=ResultStatus.Succeeded, text="snap-1"))
+            results.append(TargetResult(target_id="snapshot", status=ResultStatus.Succeeded, text="snap-1",
+                                        message=self.snapshot_message or None))
         for t in request.targets:
             if request.tool == "File.List":
                 text = "\n".join(f"{p}  ({len(c)} Bytes)" for p, c in sorted(self.files.items()))

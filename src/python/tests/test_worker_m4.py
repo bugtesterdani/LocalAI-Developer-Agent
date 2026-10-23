@@ -365,6 +365,18 @@ def test_repo_index_nutzt_cache_fuer_abgeleitete_snapshots(tmp_path, store):
     assert "src/neu.py" in text and derived.snapshot_id[:12] in text
 
 
+def test_repo_map_nennt_auch_dateien_ohne_quelltext(tmp_path, store):
+    """Doku, Robot-Testfälle, Konfiguration: ohne sie in der Map raten kleine Modelle Namen und listen immer wieder auf."""
+    base = imported(tmp_path, store, {"Old_Project/testcases/Butler_EFI_Endprüfung.robot": b"*** Test Cases ***\n",
+                                      "docs/ki-testprogramme.md": b"# KI\n", "Old_Project/gui.py": b"def main(): pass\n"})
+    infos = RepoIndexer(tmp_path / "work").build(base)
+    text = build_map(base, infos, 4000)
+    assert "Other files (not parsed):" in text
+    assert "Old_Project/testcases/Butler_EFI_Endprüfung.robot (" in text and "docs/ki-testprogramme.md (" in text
+    small = build_map(base, infos, 700)
+    assert "more non-source files not listed" in small or "Other files" in small
+
+
 def test_einrueckung_im_kontext_falsch_wird_toleriert_und_datei_bleibt_exakt():
     file = patching.TextFile.decode(b"def f():\n    x = 1\n    return x\n", "f.py")
     # Modell hat die Kontextzeilen mit einem Leerzeichen zu wenig eingerückt

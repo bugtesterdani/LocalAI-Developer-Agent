@@ -303,10 +303,24 @@ def build_map(index: SnapshotIndex, infos: list[FileInfo], max_chars: int) -> st
         used += len(entry) + 1
         shown_files += 1
     rest = len(infos) - shown_files
-    others = total - len(infos)
     tail = []
     if rest > 0:
         tail.append(f"(+{rest} more source files not shown – use search or read)")
-    if others > 0:
-        tail.append(f"({others} non-source files not listed)")
+    # Übrige Dateien (Doku, Testskripte wie *.robot, Konfiguration, Daten) mit Pfad und Größe, soweit das Budget reicht:
+    # sonst kennen die Agenten sie nicht und raten Namen bzw. listen immer wieder auf.
+    parsed = {i.path for i in infos}
+    others = sorted(p for p in index.files if p not in parsed)
+    if others:
+        used += sum(len(t) + 1 for t in tail)
+        listed: list[str] = []
+        for path in others:
+            entry = f"{path} ({index.files[path][0]} bytes)"
+            if used + len(entry) + 40 > budget:
+                break
+            listed.append(entry)
+            used += len(entry) + 1
+        if listed:
+            tail.append("Other files (not parsed):\n" + "\n".join(listed))
+        if len(listed) < len(others):
+            tail.append(f"({len(others) - len(listed)} more non-source files not listed – use list)")
     return "\n".join([header, *body, *tail])
