@@ -344,6 +344,8 @@ public sealed class ExecutionTests : IAsyncLifetime
         var snap = await adapter.ExecuteAsync(Proposal("Workspace.Snapshot", "-", new { grantId = "g", root }), "i0", ct);
         Assert.True(snap.Status == ResultStatus.Succeeded, Detail(snap));
         var baseId = snap.TargetResults.Single(t => t.TargetId == "snapshot").Text!;
+        // Umfang aus dem Manifest des Hosts – der Orchestrator erkennt daran einen leeren Snapshot.
+        Assert.Matches(@"^[1-9]\d* Dateien, \d+ Bytes, 0 übersprungen$", snap.TargetResults.Single(t => t.TargetId == "snapshot").Message);
 
         // Nur die Testdatei ausgewählt (Abwahl von src/Calc.cs)
         var narrowed = await adapter.ExecuteAsync(Proposal("Patch.Apply", baseId, new { grantId = "g", patch = Patch }, "tests/CalcTests.cs"), "i1", ct);

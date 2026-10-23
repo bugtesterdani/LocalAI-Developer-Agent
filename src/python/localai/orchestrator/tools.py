@@ -96,6 +96,7 @@ class ToolBridge:
         self.grant: FolderGrant | None = None
         self.snapshot_id: str | None = None  # aktueller Stand (nach angewendeten Patches)
         self.base_snapshot_id: str | None = None  # Stand des Projektordners beim Snapshot
+        self.snapshot_note = ""  # Umfang des Snapshots laut Broker („N Dateien, …, M übersprungen“)
         self._apply_lock = threading.Lock()
         self._toolchains: list[dict[str, Any]] | None = None
         # Freigegebene Webinhalte dieses Runs (Runbook „Inhalt verdächtig“: Capture-ID, Aufgabe, Agent, URL)
@@ -162,6 +163,8 @@ class ToolBridge:
             return None
         self.snapshot_id = outcome.result.target_results[0].text or None
         self.base_snapshot_id = self.snapshot_id
+        # „N Dateien, B Bytes, M übersprungen[: Gründe]“ (vom Broker aus dem Snapshot-Manifest)
+        self.snapshot_note = outcome.result.target_results[0].message or ""
         return self.snapshot_id
 
     def rights(self) -> set[FolderRight]:

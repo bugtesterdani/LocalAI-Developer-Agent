@@ -453,6 +453,15 @@ public sealed class SandboxToolAdapter(
                 }
                 snapshots.Add(id, job.Snapshot.GrantId);
                 RetainSnapshot?.Invoke(proposal, job.Snapshot, archive!);
+                // Umfang aus dem eigenen Manifest (nicht aus der VM): Anzahl, Größe und die ersten übersprungenen Dateien mit
+                // Grund – ein leerer Snapshot (z. B. recursive false) fällt so sofort auf.
+                var skipped = job.Snapshot.Skipped ?? [];
+                var note = $"{job.Snapshot.Files.Count} Dateien, {job.Snapshot.Files.Sum(f => f.Size)} Bytes, {skipped.Count} übersprungen"
+                           + (skipped.Count > 0 ? ": " + string.Join("; ", skipped.Take(5)) + (skipped.Count > 5 ? "; …" : "") : "");
+                result = result with
+                {
+                    TargetResults = result.TargetResults.Select(t => t.TargetId == "snapshot" ? t with { Message = note } : t).ToList(),
+                };
             }
             if (proposal.Tool == "Patch.Apply" && result.Status == ResultStatus.Succeeded)
             {
