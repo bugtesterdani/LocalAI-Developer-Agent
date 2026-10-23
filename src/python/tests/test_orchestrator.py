@@ -860,6 +860,10 @@ def test_platzhalter_aus_testskripten_gelten_nicht_als_json():
     action = protocol.parse(analysis + '\n{"action": "read", "files": [{"path": "Old_Project/testcases/a.robot"}]}')
     assert action.kind == "read" and action.files[0].path == "Old_Project/testcases/a.robot"
     assert protocol.parse("Text mit ${x} und dann {action: \"list\", path: \"src\"}").path == "src"
+    # Review: Kommentar direkt nach der Klammer (loads_lenient erlaubt ihn) – auch mit Anführungszeichen darin.
+    commented = protocol.parse('{ // read "source"\n "action": "read", "files": [{"path": "src/a.py"}]}')
+    assert commented.kind == "read" and commented.files[0].path == "src/a.py"
+    assert protocol.parse('${x}\n{ // auflisten\n  // zweite Zeile\n action: "list", path: "src"}').path == "src"
 
 
 @pytest.mark.parametrize("raw", [

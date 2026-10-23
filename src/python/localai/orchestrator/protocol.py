@@ -90,16 +90,26 @@ def fences(text: str) -> list[Fence]:
     return result
 
 
-# Beginn eines Objekts: Schlüssel in doppelten/einfachen Anführungszeichen oder ohne (kleine Modelle), nie ${x} / {x}.
-_JSON_START = re.compile(r'\{\s*(?:"|\'|[A-Za-z_]\w*\s*:)')
+# Beginn eines Objekts: Schlüssel in doppelten/einfachen Anführungszeichen oder ohne (kleine Modelle), auch nach
+# //-Kommentaren direkt hinter der Klammer (loads_lenient entfernt sie) – nie ${x} / {x}.
+_JSON_START = re.compile(r'\{\s*(?://[^\n]*\n\s*)*(?:"|\'|[A-Za-z_]\w*\s*:)')
 
 
 def _balanced_end(text: str, start: int) -> int | None:
-    """Position der schließenden Klammer zum Objekt ab ``start`` (Klammern in Zeichenketten zählen nicht)."""
+    """Position der schließenden Klammer zum Objekt ab ``start`` (Klammern in Zeichenketten und //-Kommentaren zählen
+    nicht)."""
     depth = 0
     in_string = escaped = False
-    for i in range(start, len(text)):
+    i = start - 1
+    while i + 1 < len(text):
+        i += 1
         ch = text[i]
+        if not in_string and ch == "/" and text.startswith("//", i):
+            newline = text.find("\n", i)
+            if newline < 0:
+                return None
+            i = newline
+            continue
         if in_string:
             if escaped:
                 escaped = False
