@@ -184,3 +184,23 @@ class StepHistory:
             elif note.step > self.summarized_through:
                 result.append(HistoryLine(note.line()))
         return result
+
+
+def batch_notes(notes: list[str], room_chars: int) -> list[list[str]]:
+    """Teilt die Notizen für die Zusammenfassung so auf, dass jeder Aufruf in den Kontext des Zusammenfassers passt
+    (älteste zuerst; eine einzelne zu lange Notiz wird gekürzt – Denkphase und Ende zuerst)."""
+    room_chars = max(room_chars, 400)
+    batches: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for note in notes:
+        if len(note) > room_chars:
+            note = _clip(note, room_chars - 2)
+        if current and size + len(note) + 2 > room_chars:
+            batches.append(current)
+            current, size = [], 0
+        current.append(note)
+        size += len(note) + 2
+    if current:
+        batches.append(current)
+    return batches

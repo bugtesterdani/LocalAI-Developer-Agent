@@ -125,8 +125,10 @@ def assemble(rules: str, task: str, history: list[str | HistoryLine], evidence: 
     used += sum(c for h, c in zip(lines, costs) if h.keep)
     kept = [h.keep for h in lines]
     omitted = 0
+    # Was nicht passt, wird ausgelassen; kleinere (z. B. die neueste Notiz nach einer zu großen Zusammenfassung) dürfen
+    # trotzdem noch hinein.
     for i in sorted((i for i, h in enumerate(lines) if not h.keep), key=lambda i: (-lines[i].rank, -i)):
-        if omitted or used + costs[i] > room:
+        if used + costs[i] > room:
             omitted += 1
             continue
         kept[i] = True

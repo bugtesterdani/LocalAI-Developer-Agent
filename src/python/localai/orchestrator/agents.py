@@ -33,7 +33,7 @@ from localai.orchestrator.gateway import (
     RepetitionLoop,
     StreamCallbacks,
 )
-from localai.orchestrator.history import HistorySettings, StepHistory
+from localai.orchestrator.history import HistorySettings, StepHistory, batch_notes
 from localai.orchestrator.models import Limits, Measurement, ModelProfile
 from localai.orchestrator.runtime import (
     PRIORITY_NORMAL,
@@ -271,26 +271,40 @@ class Agent:
                                 f"{history.summary}", task_id=task_id)
 
     def _summarize(self, assignment: Assignment, previous: str, notes: list[str], cancel: CancelToken) -> str:
-        """Fasst ältere Notizen des Modells zusammen (Rückmeldungen des Orchestrators bleiben ohnehin wörtlich)."""
+        """Fasst ältere Notizen des Modells zusammen (Rückmeldungen des Orchestrators bleiben ohnehin wörtlich).
+
+        Passen die Notizen (inkl. Denkphase) nicht in einen Aufruf, wird in mehreren Aufrufen nacheinander
+        fortgeschrieben – Grenze ist der Kontext des Zusammenfassers, nicht der der Rolle."""
         profile = self.summary_profile or self.profile
         settings = self.history_settings
-        user = f"## Task of the agent\n{assignment.title}\n\n"
-        if previous:
-            user += f"## Previous summary\n{previous}\n\n"
-        user += "## New notes (oldest first)\n" + "\n\n".join(notes)
-        # Gleiches num_ctx wie das Profil: Ollama lädt das Modell sonst neu.
-        request = ChatRequest(
-            model=profile.model,
-            messages=[{"role": "system", "content": self.summary_prompt.text.replace("{words}", str(settings.summary_tokens // 2))},
-                      {"role": "user", "content": user}],
-            num_ctx=profile.context_tokens, num_predict=min(settings.summary_tokens + 200, profile.max_output_tokens),
-            temperature=0.1, think=False if profile.think else profile.think, extra_options=dict(profile.options))
+        cpt = self.chars_per_token if self.summary_profile is None else DEFAULT_CHARS_PER_TOKEN
+        system = self.summary_prompt.text.replace("{words}", str(settings.summary_tokens // 2))
+        header = f"## Task of the agent\n{assignment.title}\n\n## Previous summary\n\n## New notes (oldest first)\n"
+        output = min(settings.summary_tokens + 200, profile.max_output_tokens)
+        # Kontext minus Ausgabe, Reserve, Anweisungen, Kopf und (höchstens so lange) bisherige Zusammenfassung.
+        room = (profile.context_tokens - output - profile.context_tokens // 16 - estimate_tokens(system, cpt)
+                - estimate_tokens(header, cpt) - settings.summary_tokens)
         role, task_id = self.role, assignment.task_id
-        with self.gpu.slot(role, profile.key, assignment.priority, cancel,
-                           on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
-            self.reporter.state(role, AgentState.Generating, f"Eigene Notizen zusammenfassen ({profile.model})", task_id)
-            result = self.gateway.chat(request, cancel)
-        return _THINK.sub("", result.content).strip()
+        for batch in batch_notes(notes, int(room * cpt)):
+            user = f"## Task of the agent\n{assignment.title}\n\n"
+            if previous:
+                user += f"## Previous summary\n{previous}\n\n"
+            user += "## New notes (oldest first)\n" + "\n\n".join(batch)
+            # Gleiches num_ctx wie das Profil: Ollama lädt das Modell sonst neu.
+            request = ChatRequest(
+                model=profile.model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                num_ctx=profile.context_tokens, num_predict=output, temperature=0.1,
+                think=False if profile.think else profile.think, extra_options=dict(profile.options))
+            with self.gpu.slot(role, profile.key, assignment.priority, cancel,
+                               on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
+                self.reporter.state(role, AgentState.Generating, f"Eigene Notizen zusammenfassen ({profile.model})", task_id)
+                result = self.gateway.chat(request, cancel)
+            previous = _THINK.sub("", result.content).strip()
+            if not previous:
+                raise ValueError("leere Zusammenfassung")
+            # Für den nächsten Teil auf die zulässige Länge begrenzen.
+            previous = previous[:int(settings.summary_tokens * cpt)]
+        return previous
 
     def _current_snapshot(self) -> str:
         return getattr(self.bridge, "snapshot_id", None) or ""

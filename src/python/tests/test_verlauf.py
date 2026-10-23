@@ -9,7 +9,12 @@ import pytest
 
 from localai.orchestrator import protocol
 from localai.orchestrator.context import Budget, HistoryLine, assemble
-from localai.orchestrator.history import HistorySettings, StepHistory, prose
+from localai.orchestrator.history import (
+    HistorySettings,
+    StepHistory,
+    batch_notes,
+    prose,
+)
 from localai.orchestrator.models import ConfigError, ModelsConfig
 
 
@@ -138,3 +143,53 @@ def test_eigenes_modell_zum_zusammenfassen_wird_wie_eine_rolle_gewaehlt(tmp_path
     assert chosen.profile.name == "kurz"
     off = ModelsConfig.parse({**raw, "history": {"mode": "trim", "summaryProfiles": ["kurz"]}})
     assert choose_summary_profile(off, store, {"qwen3:4b": "d4"}, "hw") is None
+
+
+def test_kleine_notiz_passt_auch_wenn_die_zusammenfassung_nicht_passt():
+    budget = Budget.split(8192, 2048)
+    feedback = [HistoryLine(f"Step {i}: " + "f" * 600, keep=True) for i in range(1, 8)]
+    summary = HistoryLine("Your notes from steps 1–6 (summarised):\n" + "s" * 1800, rank=1)
+    latest = HistoryLine("Step 7 – your note: short")
+    parts = assemble("RULES", "## Task\nDo it", [summary, *feedback, latest], [], budget)
+    assert "s" * 1800 not in parts.user, "Zusammenfassung passt nicht mehr"
+    assert latest.text in parts.user, "die neueste Notiz bleibt trotzdem"
+    assert "[1 older entries omitted for context budget]" in parts.user
+
+
+def test_notizen_werden_fuer_den_zusammenfasser_aufgeteilt():
+    notes = [f"Step {i}: " + "n" * 900 for i in range(1, 10)]
+    batches = batch_notes(notes, 2000)
+    assert [len(b) for b in batches] == [2, 2, 2, 2, 1] and [n for b in batches for n in b] == notes
+    long = batch_notes(["Step 1: " + "x" * 5000], 1000)
+    assert len(long) == 1 and len(long[0][0]) <= 1000
+
+
+def test_zusammenfasser_mit_kleinem_kontext_schreibt_in_mehreren_aufrufen_fort():
+    from types import SimpleNamespace
+
+    from localai.orchestrator.agents import Agent, Assignment
+    from localai.orchestrator.gateway import CancelToken
+    from localai.orchestrator.models import Limits, ModelProfile
+    from localai.orchestrator.runtime import FairGate
+
+    requests = []
+
+    class Gateway:
+        def chat(self, request, cancel=None, callbacks=None):
+            requests.append(request)
+            user = request.messages[-1]["content"]
+            assert len(user) / 3 + 600 < request.num_ctx - request.num_predict, "Eingabe passt in den Kontext"
+            previous = re.search(r"## Previous summary\n(.*?)\n\n", user, re.DOTALL)
+            steps = re.findall(r"^Step (\d+):", user, re.MULTILINE)
+            return SimpleNamespace(content=((previous[1] + ",") if previous else "seen ") + ",".join(steps))
+
+    reporter = SimpleNamespace(state=lambda *a, **k: None, event=lambda *a, **k: None)
+    role = ModelProfile("rolle", "qwen3-coder:30b", 65536, 4096, think=True)
+    small = ModelProfile("kurz", "qwen3:4b", 4096, 1024)
+    agent = Agent("Coder", role, None, Gateway(), FairGate(), None, reporter, None, Limits(), list,
+                  HistorySettings(summary_tokens=300), small)
+    notes = [f"Step {i}: note\n(end of your thinking in step {i}: " + "t" * 2400 + ")" for i in range(1, 19)]
+    summary = agent._summarize(Assignment("T1", "Aufgabe", "x"), "", notes, CancelToken())
+    assert len(requests) > 1 and all(r.model == "qwen3:4b" and r.num_ctx == 4096 for r in requests)
+    assert summary.startswith("seen 1") and summary.split(",")[-1] == "18", "alle Schritte in der Reihenfolge"
+    assert requests[0].think is None and requests[0].num_predict == 500
