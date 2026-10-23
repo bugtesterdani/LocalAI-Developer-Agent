@@ -974,6 +974,47 @@ def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
     thread.join(5)
 
 
+def test_auflistung_nicht_doppelt_und_nach_ablauf_warten(ollama, tmp_path):
+    """Diagnose eines echten Laufs: File.List desselben Ordners immer wieder, und nach abgelaufenen Vorschlägen (Nutzer
+    nicht da) sofort der nächste. Jetzt: gleiche Auflistung auf demselben Stand nicht erneut, nach Ablauf warten."""
+    steps = {"Coder": 0}
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Planner":
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": [], "tasks": [{"id": "T1", '
+                    '"role": "Coder", "title": "x", "description": "x", "reads": [], "writes": ["src/calc.py"], '
+                    '"depends_on": []}]}}\n```'), ""
+        if role == "Coder":
+            steps["Coder"] += 1
+            if steps["Coder"] in (1, 2):
+                return '```json\n{"action": "list", "path": "src", "depth": 2}\n```', ""
+            if steps["Coder"] == 3:
+                assert "not requested again" in user
+                return '```json\n{"action": "list", "path": "lib", "depth": 1}\n```', ""
+            assert "is back now" in user
+            return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return b + a\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "fertig"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[],
+                        decide=lambda r: ProposalState.Expired if r.tool == "File.List" and r.targets[0].path == "lib"
+                        else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: any("abgelaufen" in c for c in broker.chats("Orchestrator")), timeout=60)
+    time.sleep(0.5)
+    assert steps["Coder"] == 3, "nach dem Ablauf kein weiterer Vorschlag, bis der Nutzer schreibt"
+    broker.send(OrchestratorCommandKind.Chat, "weiter")
+    wait_for(lambda: finished(broker), timeout=60)
+    lists = [p.targets[0].path for p in broker.proposals.values() if p.tool == "File.List" and p.agent.value == "Coder"]
+    assert lists == ["src", "lib"], "src nur einmal aufgelistet"
+    orch.stop()
+    thread.join(5)
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():

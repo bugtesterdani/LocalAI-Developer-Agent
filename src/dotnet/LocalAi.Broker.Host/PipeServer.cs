@@ -303,7 +303,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 var manifest = BuildManifest?.Invoke() ?? new JsonObject();
                 var events = await broker.WaitEventsAsync(0, TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
                 var file = DiagnosticsExport.Create(options.DataDirectory, manifest, audit, auditError, broker.StateCounts(), events, includeLogs,
-                    DateTimeOffset.Now);
+                    DateTimeOffset.Now, broker.ProposalKinds());
                 broker.PublishInfo("run.diagnosticsExported", $"Diagnosepaket erstellt: {file}" + (includeLogs ? " (mit Protokollen)" : ""));
                 return new JsonObject { ["path"] = file, ["includeLogs"] = includeLogs };
             }

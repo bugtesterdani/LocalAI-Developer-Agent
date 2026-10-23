@@ -55,6 +55,7 @@ class ToolOutcome:
     evidence: list[Evidence]
     summary: str  # englische Kurzfassung für den Verlauf des Agenten
     denied: bool = False  # vom Nutzer abgelehnt
+    expired: bool = False  # Nutzer hat nicht rechtzeitig entschieden (vermutlich nicht da)
 
 
 @dataclass
@@ -453,7 +454,11 @@ class ToolBridge:
                 messages = [r.message for r in outcome.result.target_results if r.message]
                 if messages:
                     hint = "; ".join(messages)[:500]
-            return ToolOutcome([], f"{describe}: {state}" + (f" ({hint})" if hint else ""), denied=state == "denied")
+                if request.tool == "File.List" and any("nicht im Snapshot" in m for m in messages):
+                    hint += (" – this folder does not exist; take folder names only from the file list / repo map in the "
+                             "evidence instead of guessing")
+            return ToolOutcome([], f"{describe}: {state}" + (f" ({hint})" if hint else ""), denied=state == "denied",
+                               expired=state == "expired")
         targets = {t.target_id: t for t in request.targets}
         evidence: list[Evidence] = []
         notes: list[str] = []
@@ -464,10 +469,15 @@ class ToolBridge:
                 source = f"{request.tool} {_ref(path, target.line_start if target else None, target.line_end if target else None)}"
                 if request.tool in ("File.Search", "Repo.Index") and request.arguments.get("query"):
                     source += f" query={request.arguments.get('query')!r}"
+                if request.tool == "File.List":
+                    # Ordner, Tiefe und Stand: dieselbe Auflistung wird nicht erneut vorgeschlagen (Agent.listing_known).
+                    source += f" depth={request.arguments.get('depth')}"
                 whole = (request.tool in ("File.Read", "File.ReadMany") and target is not None and target.line_start is None
                          and target.line_end is None and "gekürzt" not in (r.message or "") and not outcome.result.truncated)
+                listing = request.tool == "File.List"
                 evidence.append(Evidence(f"E{next(self._evidence_ids)}", source, r.text or "(empty)",
-                                         path=path if whole else "", snapshot_id=request.snapshot_id if whole else ""))
+                                         path=path if whole else "",
+                                         snapshot_id=request.snapshot_id if whole or listing else ""))
             else:
                 notes.append(f"{path}: {r.status.value} {r.message or ''}".strip())
         for skipped in outcome.result.skipped_target_ids or []:

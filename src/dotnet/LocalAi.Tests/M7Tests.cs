@@ -291,6 +291,7 @@ public sealed class M7Tests : IAsyncDisposable
         }
         File.WriteAllText(Path.Combine(data, "hyperv.log"), "LOGZEILE");
         var events = await broker.WaitEventsAsync(0, TimeSpan.Zero, TestContext.Current.CancellationToken);
+        var kinds = broker.ProposalKinds();
         await broker.DisposeAsync();
         var audit = AuditCheck.Verify(Path.Combine(data, "audit.db"));
         var manifest = VersionManifest.Build(Options(), null, []);
@@ -298,8 +299,12 @@ public sealed class M7Tests : IAsyncDisposable
         var file = DiagnosticsExport.Create(data, manifest, audit, null, new Dictionary<string, IReadOnlyDictionary<string, int>>
         {
             ["File.Read"] = new Dictionary<string, int> { ["AwaitingApproval"] = 1 },
-        }, events, includeLogs: false, _clock.UtcNow);
+        }, events, includeLogs: false, _clock.UtcNow, kinds);
         var all = ReadZip(file);
+        // Werkzeug und Rolle je Vorschlag (z. B. wiederholtes File.List erkennbar), aber weiterhin ohne Argumente.
+        var created = JsonNode.Parse(all["ereignisse.json"])!.AsArray().First(e => e!["type"]!.GetValue<string>() == "proposal.created")!;
+        Assert.False(string.IsNullOrEmpty(created["tool"]?.GetValue<string>()));
+        Assert.False(string.IsNullOrEmpty(created["agent"]?.GetValue<string>()));
         Assert.Contains("manifest.json", all.Keys);
         Assert.Contains("audit.json", all.Keys);
         Assert.Contains("ereignisse.json", all.Keys);

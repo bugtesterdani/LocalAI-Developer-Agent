@@ -245,6 +245,16 @@ public sealed class ApprovalBroker : IAsyncDisposable
         }
     }
 
+    /// <summary>Werkzeug, Rolle und Aufgabe je Vorschlag (Diagnose: wer hat was wie oft vorgeschlagen – ohne Argumente).</summary>
+    public IReadOnlyDictionary<string, (string Tool, string Agent, string TaskId)> ProposalKinds()
+    {
+        lock (_gate)
+        {
+            return _entries.Values.ToDictionary(e => e.Proposal.ProposalId,
+                e => (e.Proposal.Tool, e.Proposal.Agent.ToString(), e.Proposal.TaskId), StringComparer.Ordinal);
+        }
+    }
+
     public IReadOnlyList<ProposalView> Pending()
     {
         lock (_gate)

@@ -533,7 +533,8 @@ class Orchestrator:
         except Cancelled:
             state.controls.run.raise_if_cancelled()
             return
-        self.listing = [Evidence(e.evidence_id, e.source, e.text, pinned=True) for e in outcome.evidence]
+        self.listing = [Evidence(e.evidence_id, e.source, e.text, pinned=True, path=e.path, snapshot_id=e.snapshot_id)
+                        for e in outcome.evidence]
         self.listing_snapshot = bridge.snapshot_id
 
     def _announce_capabilities(self, bridge: ToolBridge) -> None:
