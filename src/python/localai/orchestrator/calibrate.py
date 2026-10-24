@@ -124,9 +124,16 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
                 pass
         if result.prompt_tokens:
             prompt_tokens_seen.append(result.prompt_tokens)
-            ratios.append(len(request.messages[1]["content"]) / result.prompt_tokens)
+            ratio = len(request.messages[1]["content"]) / result.prompt_tokens
+            if 1.0 <= ratio <= 8.0:
+                ratios.append(ratio)
+            else:
+                # Zu wenige gemeldete Prompt-Token (z. B. Cache) – würde den Prompt im Betrieb massiv unterschätzen.
+                errors.append(f"Lauf {run}: unplausibel {ratio:.1f} Zeichen je Token ({result.prompt_tokens} Prompt-Token "
+                              "gemeldet) – nicht übernommen")
             # Tatsächliches Verhältnis Zeichen/Token übernehmen; nahe der Grenze schneidet Ollama still ab → kleiner füllen.
-            cpt = statistics.median(ratios)
+            if ratios:
+                cpt = statistics.median(ratios)
             if result.prompt_tokens > target.context_tokens - output_tokens - 64:
                 fill_tokens = int(fill_tokens * 0.9)
         if result.prompt_seconds > 0:

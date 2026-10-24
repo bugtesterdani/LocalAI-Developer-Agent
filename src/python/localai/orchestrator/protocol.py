@@ -217,6 +217,77 @@ def loads_lenient(raw: str) -> Any:
     raise error
 
 
+# Namen, unter denen Modelle (v. a. gpt-oss) „Funktionen“ aufrufen → Aktion des Antwortformats.
+_CALL_KINDS = (
+    ("finish", ("finish", "submit", "result", "plan", "answer", "done", "complete")),
+    ("symbols", ("symbol", "definition")),
+    ("search", ("search", "grep", "find")),
+    ("list", ("list", "ls", "dir", "tree")),
+    ("read", ("read", "open", "cat", "view", "show", "get_file", "file")),
+    ("fetch", ("fetch", "browse", "web", "url", "http")),
+)
+
+
+def _call_kind(name: str) -> str | None:
+    # read_file, readFile, functions.list_dir → Wortteile
+    words_in_name = [w.lower() for w in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+", name.rsplit(".", 1)[-1])]
+    for kind, words in _CALL_KINDS:
+        if any(part.startswith(w) for part in words_in_name for w in words):
+            return kind
+    return None
+
+
+def _call_arguments(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            data = loads_lenient(raw)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+    return {}
+
+
+def tool_call_action(calls: list[dict[str, Any]]) -> str | None:
+    """Funktionsaufrufe aus Ollama als ```json-Aktionsblock (mehrere Leseaufrufe werden zu einem zusammengefasst).
+
+    None, wenn kein Aufruf zu einer Aktion passt; ProtocolError bei unbrauchbaren Argumenten (Rückmeldung an das Modell
+    wie bei jeder anderen ungültigen Antwort)."""
+    actions: list[dict[str, Any]] = []
+    for call in calls:
+        args = _call_arguments(call.get("arguments"))
+        kind = str(args.get("action") or "") or _call_kind(str(call.get("name") or ""))
+        if kind not in ("finish", "symbols", "search", "list", "read", "fetch"):
+            continue
+        args.pop("action", None)
+        if kind == "read" and "files" not in args:
+            paths = args.pop("paths", None) or args.pop("path", None) or args.pop("file", None) or args.pop("filename", None)
+            paths = paths if isinstance(paths, list) else [paths] if paths else []
+            files = [p if isinstance(p, dict) else {"path": str(p)} for p in paths]
+            if files and ("start" in args or "end" in args) and len(files) == 1:
+                files[0].update({k: args.pop(k) for k in ("start", "end") if k in args})
+            args["files"] = files
+        if kind == "finish" and "result" not in args:
+            args = {"result": args}
+        if kind == "read" and not (isinstance(args["files"], list) and args["files"]
+                                   and all(isinstance(f, (dict, str)) and f for f in args["files"])):
+            raise ProtocolError(f"Your function call {call.get('name') or 'read'} has invalid files "
+                                f"({json.dumps(args['files'], ensure_ascii=False)[:120]}). Write the action as one ```json "
+                                'block instead: {"action": "read", "files": [{"path": "src/a.py"}], "reason": "why"}')
+        if kind == "read":
+            args["files"] = [f if isinstance(f, dict) else {"path": f} for f in args["files"]]
+        actions.append({"action": kind, **args})
+    if not actions:
+        return None
+    reads = [a for a in actions if a["action"] == "read"]
+    action = actions[0]
+    if action["action"] == "read" and len(reads) > 1:
+        action = {"action": "read", "files": [f for a in reads for f in a.get("files", [])][:MAX_READ_FILES],
+                  "reason": "; ".join(str(a.get("reason", "")) for a in reads if a.get("reason"))}
+    return "```json\n" + json.dumps(action, ensure_ascii=False) + "\n```"
+
+
 def parse(text: str) -> Action:
     raw, reasoning = _last_json_object(text)
     try:

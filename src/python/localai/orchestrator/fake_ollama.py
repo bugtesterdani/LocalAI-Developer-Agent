@@ -107,7 +107,7 @@ class FakeOllama:
     chunk_chars: int = 6
     first_token_delay: float = 0.0
     load_delay: float = 0.0  # vor dem Antwortkopf (Modell wird geladen)
-    responder: Callable[[dict[str, Any]], tuple[str, str]] = scripted_answer
+    responder: Callable[[dict[str, Any]], tuple[Any, ...]] = scripted_answer
     # Anfragen zum Zusammenfassen der Agentennotizen; None = an ``responder``.
     summarizer: Callable[[dict[str, Any]], tuple[str, str]] | None = summary_answer
     error: str | None = None
@@ -184,9 +184,12 @@ class FakeOllama:
                     fake.loaded = {body["model"]: body.get("options", {}).get("num_ctx", 2048)}
                 system = (body.get("messages") or [{}])[0].get("content", "")
                 if fake.summarizer is not None and system.startswith(SUMMARIZER_MARK):
-                    content, thinking = fake.summarizer(body)
+                    answer = fake.summarizer(body)
                 else:
-                    content, thinking = fake.responder(body)
+                    answer = fake.responder(body)
+                # (Inhalt, Thinking) oder (Inhalt, Thinking, Funktionsaufrufe) wie bei gpt-oss: [{"name", "arguments"}]
+                content, thinking = answer[0], answer[1]
+                calls = list(answer[2]) if len(answer) > 2 else []
                 if fake.load_delay:
                     time.sleep(fake.load_delay)
                 self.send_response(200)
@@ -208,6 +211,10 @@ class FakeOllama:
                             pieces += 1
                             if fake.delay:
                                 time.sleep(fake.delay)
+                    if calls:
+                        msg = {"role": "assistant", "content": "", "tool_calls": [{"function": c} for c in calls]}
+                        self.wfile.write(json.dumps({"model": body["model"], "message": msg, "done": False}).encode() + b"\n")
+                        pieces += 1
                     elapsed = max(time.monotonic() - started, 1e-3)
                     final = {"model": body["model"], "message": {"role": "assistant", "content": ""}, "done": True,
                              "done_reason": "stop", "prompt_eval_count": int(prompt_chars / fake.chars_per_token),

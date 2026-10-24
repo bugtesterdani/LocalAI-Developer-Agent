@@ -43,6 +43,8 @@ from localai.orchestrator.runtime import (
 )
 from localai.orchestrator.tools import ToolBridge
 
+# Zeichen je Token, die eine Kalibrierung realistisch liefern kann (Code/Englisch ≈ 2,5–4,5).
+PLAUSIBLE_CHARS_PER_TOKEN = (1.5, 6.0)
 # Quelle einer Auflistung (tools.ToolBridge._evidence): "File.List <Ordner> depth=<n>"
 _LISTING = re.compile(r"File\.List (.+) depth=(\d+)")
 # Denkphase, die manche Modelle trotz think=false in den Text schreiben
@@ -83,8 +85,15 @@ class Agent:
                  summary_profile: ModelProfile | None = None) -> None:
         self.role = role
         self.profile = profile
-        self.chars_per_token = (measurement.chars_per_token * 0.9) if measurement and measurement.chars_per_token > 0 \
+        measured = measurement.chars_per_token if measurement else 0.0
+        self.chars_per_token = measured * 0.9 if PLAUSIBLE_CHARS_PER_TOKEN[0] <= measured <= PLAUSIBLE_CHARS_PER_TOKEN[1] \
             else DEFAULT_CHARS_PER_TOKEN
+        if measured and self.chars_per_token == DEFAULT_CHARS_PER_TOKEN:
+            # Unplausible Messung (z. B. Ollama meldet zu wenige Prompt-Token): sonst würde der Prompt um ein Vielfaches
+            # unterschätzt und Ollama schneidet still den Anfang (die Regeln) ab.
+            reporter.event(role, ActivityKind.Warning, f"Kalibrierung meldet {measured:g} Zeichen je Token für "
+                           f"{profile.model} – unplausibel, gerechnet wird mit {DEFAULT_CHARS_PER_TOKEN:g}. Profil neu "
+                           "kalibrieren.")
         self.gateway = gateway
         self.gpu = gpu
         self.bridge = bridge
@@ -186,8 +195,17 @@ class Agent:
                                 context_tokens=result.prompt_tokens or parts.prompt_tokens)
             if result.done_reason == "length":
                 history.orchestrator(step, "your answer was cut off at the output limit. Be much shorter.")
+            content = result.content
             try:
-                action = protocol.parse(result.content)
+                called = protocol.tool_call_action(result.tool_calls) if result.tool_calls else None
+                if called:
+                    # Funktionsaufruf statt Text (gpt-oss): als Aktion übernehmen; die Antwort zählt wie geschrieben.
+                    content = content.rstrip() + "\n" + called
+                    self.reporter.stream(role, ActivityKind.Output,
+                                         f"\n[Funktionsaufruf übernommen: {called.strip('`').strip()}]\n", task_id)
+                if not content.strip():
+                    raise protocol.ProtocolError(self._empty_answer_hint(result))
+                action = protocol.parse(content)
                 history.model(step, action, thinking=result.thinking)
                 if action.kind == "finish":
                     protocol.resolve_patch(role, action, assignment.files, lambda p: self._file_lines(evidence, p))
@@ -202,8 +220,10 @@ class Agent:
             except protocol.ProtocolError as err:
                 self.reporter.event(role, ActivityKind.Warning, f"Antwort nicht verwertbar: {err}", task_id=task_id)
                 # Für die Fehlersuche im Orchestrator-Log (bleibt lokal): was das Modell tatsächlich geschrieben hat.
-                print(f"[{role}] {task_id} Schritt {step} – unbrauchbare Antwort ({len(result.content)} Zeichen):\n"
-                      f"{result.content[:2500]}\n[Ende der Antwort]", file=sys.stderr, flush=True)
+                print(f"[{role}] {task_id} Schritt {step} – unbrauchbare Antwort ({len(result.content)} Zeichen, "
+                      f"Denkphase {len(result.thinking)} Zeichen, done_reason={result.done_reason or '-'}, "
+                      f"Funktionsaufrufe {result.tool_calls or '-'}):\n{result.content[:2500]}\n"
+                      f"[Ende der Denkphase: {result.thinking[-600:]}]\n[Ende der Antwort]", file=sys.stderr, flush=True)
                 history.orchestrator(step, f"invalid answer – {err}")
                 invalid += 1
                 if self.limits.max_invalid_answers and invalid >= self.limits.max_invalid_answers:
@@ -305,6 +325,18 @@ class Agent:
             # Für den nächsten Teil auf die zulässige Länge begrenzen.
             previous = previous[:int(settings.summary_tokens * cpt)]
         return previous
+
+    @staticmethod
+    def _empty_answer_hint(result) -> str:
+        if result.tool_calls:
+            names = ", ".join(sorted({c.get("name") or "?" for c in result.tool_calls}))
+            return (f"You called the function(s) {names}, but no functions are available here. Write the action as one "
+                    "```json block in your visible answer instead (see Actions), e.g. "
+                    '```json\n{"action": "read", "files": [{"path": "..."}], "reason": "..."}\n```')
+        if result.thinking.strip():
+            return ("Your visible answer was empty – you only thought. After thinking, always write the visible answer: "
+                    "a few sentences of reasoning and exactly one ```json block with the action (see Actions).")
+        return "Your answer was empty. Write a few sentences of reasoning and exactly one ```json block with the action."
 
     def _current_snapshot(self) -> str:
         return getattr(self.bridge, "snapshot_id", None) or ""
