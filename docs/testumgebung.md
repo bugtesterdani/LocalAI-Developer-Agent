@@ -52,6 +52,14 @@ Szenarien (Unterspannung an der Grenze, Werkerabbruch) liegen in der Testumgebun
 | `test {path}` | `testumgebung-cli test --junit` | zusätzlich alle Szenarien |
 | `run {script}` | `testumgebung-cli simulate` | ein Szenario mit Ablaufprotokoll |
 
+Welcher Prüflauf gilt, steht im Plan unter „Prüfung in der Sandbox“. `testumgebung test (path=.)` wird gewählt, sobald
+die Toolchain registriert ist und entweder Prüfprogramme im Projekt liegen, eine Aufgabe `*.tproj.json`/`*.tsim.json`
+schreibt oder das Ziel die Testumgebung, ein Prüf-/Testprogramm oder `testumgebung-cli` nennt. Ist das Ziel ein
+Prüfprogramm, prüft der Standard nur dieses (ein Python-Altprojekt daneben nicht). Beispiel für ein Ziel:
+
+> Schreib `Old_Project/testcases/Butler_EFI_Endprüfung.robot` als Prüfprogramm für die Testumgebung um
+> (`pruefung/butler_efi.tproj.json`). Der Tester schreibt Szenarien dazu; geprüft wird mit `testumgebung test`.
+
 Erwartungen in Szenarien müssen aus der Prüfvorschrift bzw. dem Ziel stammen. Die Agenten sind angewiesen, keine
 Grenzwerte, Geräteprotokolle oder Zeitgrenzen zu erfinden und Annahmen in der Projektbeschreibung zu nennen.
 

@@ -223,7 +223,7 @@ _LANGUAGE_HINTS = (
 
 _LANGUAGE_SAMPLE = {"HDevelop": "x.hdev", "Batch": "x.cmd", "PowerShell": "x.ps1", "C/C++": "x.cpp"}
 
-_TESTUMGEBUNG_GOAL = re.compile(r"\b(testumgebung|pr[uü]fprogramm\w*|testprogramm\w*|pr[uü]fablauf\w*|tproj|tsim)\b", re.IGNORECASE)
+_TESTUMGEBUNG_GOAL = re.compile(r"\b(testumgebung\w*|testumgebungs-?cli|pr[uü]fprogramm\w*|testprogramm\w*|pr[uü]fablauf\w*|tproj|tsim)\b", re.IGNORECASE)
 
 
 def is_testumgebung_file(path: str) -> bool:
@@ -664,7 +664,7 @@ class Orchestrator:
             acceptance = result.result.get("acceptance", [])
             # Ganze Dateien, die der Planner gelesen hat: bekommen die Aufgaben mit (solange der Stand gilt).
             self.plan_evidence = [e for e in result.evidence if e.path]
-            self._choose_verify(result.result.get("verify") or [])
+            self._choose_verify(result.result.get("verify") or [], state.goal, tasks)
             lines = [result.result["message_de"], "", "Plan:"]
             for t in tasks:
                 deps = f" (nach {', '.join(t.depends_on)})" if t.depends_on else ""
@@ -684,12 +684,24 @@ class Orchestrator:
         self.reporter.chat("Planner", f"Ich konnte keinen gültigen Plan erstellen ({attempts}× ungültig). Bitte formuliere das Ziel genauer.")
         return None, []
 
-    def _choose_verify(self, entries: list[dict[str, Any]]) -> None:
+    def _choose_verify(self, entries: list[dict[str, Any]], goal: str = "", tasks: list[dag.Task] | None = None) -> None:
         toolchains = self.bridge.toolchains() if self.bridge else []
         steps, problems = check_verify(entries, toolchains)
         if problems:
             self.reporter.event("Planner", ActivityKind.Warning, "Prüfläufe aus dem Plan verworfen: " + "; ".join(problems))
-        self.verify_steps = steps or default_verify(toolchains, self.projects, self.languages)
+        # Prüfprogramme, die erst entstehen (noch nicht in der Repo-Map), zählen mit: sonst prüfte z. B. „python test“ ein
+        # Altprojekt statt des neuen Prüfprogramms.
+        planned = [p for t in tasks or [] for p in (*t.writes, *t.reads)]
+        names = [tc.get("name", "") for tc in toolchains]
+        wanted = wants_testumgebung(planned, self.projects, goal, names) and "testumgebung" in names
+        testumgebung = default_verify([tc for tc in toolchains if tc.get("name") == "testumgebung"], ["x.tproj.json"], {}) \
+            if wanted else []
+        if not steps:
+            # Ziel ist ein Prüfprogramm: dann prüft der Standard nur dieses (Altprojekt daneben nicht).
+            steps = testumgebung or default_verify(toolchains, self.projects + planned, self.languages)
+        elif testumgebung and not any(s.toolchain == "testumgebung" for s in steps):
+            steps = steps + testumgebung
+        self.verify_steps = steps
 
     # ------------------------------------------------------------------ Coder/Tester-Aufgaben
     def _task_text(self, state: GoalState, task: dag.Task, tasks: list[dag.Task], acceptance: list[str]) -> str:

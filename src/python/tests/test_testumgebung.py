@@ -63,3 +63,44 @@ def test_selbsttest_der_vorlage_hat_projekt_und_passendes_szenario():
     steps = {s["id"] for s in project["loop"]["children"][0]["children"]}
     assert {a["step"] for a in scenario["answers"]} <= steps
     assert {e["step"] for e in scenario["expect"]["steps"]} <= steps
+
+
+def test_neues_pruefprogramm_wird_mit_der_testumgebung_geprueft(tmp_path):
+    """Echter Lauf: Robot-Programm in ein Testumgebung-Projekt übertragen – noch kein *.tproj.json im Projekt, daher
+    prüfte der Standard „python test“ das Altprojekt. Jetzt zählen die geplanten Dateien und das Ziel."""
+    import re
+
+    from orchestrator_support import FakeBroker, wait_for
+    from test_orchestrator import start
+
+    from localai.contracts import OrchestratorCommandKind
+    from localai.orchestrator.fake_ollama import FakeOllama, scripted_answer
+
+    manifest = json.loads((TOOLCHAIN / "toolchain.json").read_text(encoding="utf-8"))
+    python = {"name": "python", "actions": {"test": {"parameters": {"path": {"type": "Path"}}, "timeoutSeconds": 600}}}
+
+    def responder(body):
+        system = body["messages"][0]["content"]
+        if re.search(r"You are the (\w+) agent", system)[1] == "Planner":
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": [], "tasks": ['
+                    '{"id": "T1", "role": "Coder", "title": "Programm", "description": "x", "reads": [], '
+                    '"writes": ["pruefung/butler.tproj.json"], "depends_on": []}]}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama = FakeOllama(responder=responder).start()
+    try:
+        broker = FakeBroker(test_runs=[], toolchains=[python, manifest])
+        orch, thread = start(broker, ollama, tmp_path)
+        broker.send(OrchestratorCommandKind.Chat, "Schreib das Robot-Programm für meine neue Testumgebungs Software um.")
+        wait_for(lambda: any("Prüfung in der Sandbox" in c for c in broker.chats("Planner")), timeout=60)
+        plan = next(c for c in broker.chats("Planner") if "Prüfung in der Sandbox" in c)
+        assert "testumgebung test (path=.)" in plan and "python test" not in plan
+        orch.stop()
+        thread.join(5)
+    finally:
+        ollama.stop()
+
+
+def test_ziel_mit_testumgebungs_software_wird_erkannt():
+    assert wants_testumgebung(["testplan.md"], [], "für meine neue Testumgebungs Software", ["testumgebung"])
+    assert wants_testumgebung(["a.md"], [], "teste mit testumgebung-cli", ["testumgebung"])
