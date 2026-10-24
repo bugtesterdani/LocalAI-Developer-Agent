@@ -32,13 +32,30 @@ public sealed class ToolchainTests : IDisposable
         }
         """;
 
+    /// <summary>Echtes ZIP mit dem Programm aus „binaries“ (Registrierung prüft den Inhalt).</summary>
+    private static readonly byte[] DemoZip = CreateZip("bin/demo.exe");
+
+    private static byte[] CreateZip(params string[] entries)
+    {
+        using var stream = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var entry in entries)
+            {
+                using var writer = new StreamWriter(zip.CreateEntry(entry).Open());
+                writer.Write("zip-inhalt");
+            }
+        }
+        return stream.ToArray();
+    }
+
     private string ToolchainsRoot => Path.Combine(_dir, "toolchains");
 
     private string CreateDemo(string folder = "demo-1.0", string manifest = DemoManifest)
     {
         var dir = Directory.CreateDirectory(Path.Combine(ToolchainsRoot, folder)).FullName;
         File.WriteAllText(Path.Combine(dir, "toolchain.json"), manifest);
-        File.WriteAllBytes(Path.Combine(dir, "demo.zip"), Encoding.ASCII.GetBytes("zip-inhalt"));
+        File.WriteAllBytes(Path.Combine(dir, "demo.zip"), DemoZip);
         Directory.CreateDirectory(Path.Combine(dir, "selftest"));
         File.WriteAllText(Path.Combine(dir, "selftest", "a.txt"), "ok");
         return dir;
@@ -64,6 +81,49 @@ public sealed class ToolchainTests : IDisposable
     {
         var problems = ToolchainValidator.Validate(Reference(name), _ => true, _ => true);
         Assert.True(problems.Count == 0, string.Join("; ", problems));
+    }
+
+    [Fact, Trait("Pruefung", "M2c")]
+    public void Programm_aus_binaries_muss_im_ZIP_liegen()
+    {
+        // Echter Fall: die Kommandozeile heißt Testumgebung.Cli.exe, toolchain.json nannte testumgebung-cli.exe – das fiel
+        // erst nach dem VM-Aufbau auf („Binary fehlt nach der Installation“).
+        var root = Directory.CreateDirectory(Path.Combine(_dir, "root")).FullName;
+        var tc = Directory.CreateDirectory(Path.Combine(root, "testumgebung")).FullName;
+        var template = Path.Combine(ContractTests.RepoRoot(), "toolchains", "testumgebung");
+        var json = File.ReadAllText(Path.Combine(template, "toolchain.json"));
+        var manifest = ToolchainValidator.Parse(json);
+        foreach (var file in Directory.GetFiles(Path.Combine(template, "selftest")))
+        {
+            Directory.CreateDirectory(Path.Combine(tc, "selftest"));
+            File.Copy(file, Path.Combine(tc, "selftest", Path.GetFileName(file)));
+        }
+        void Zip(params string[] entries)
+        {
+            var path = Path.Combine(tc, manifest.Install.File!);
+            File.Delete(path);
+            using var zip = System.IO.Compression.ZipFile.Open(path, System.IO.Compression.ZipArchiveMode.Create);
+            foreach (var entry in entries)
+            {
+                using var writer = new StreamWriter(zip.CreateEntry(entry).Open());
+                writer.Write("x");
+            }
+        }
+        var registry = new ToolchainRegistry(Path.Combine(_dir, "toolchains.json"), root, ["testumgebung"], SystemClock.Instance);
+        List<string> Problems() => registry.Inspect(tc, null, TestContext.Current.CancellationToken).Info.Problems.ToList();
+
+        File.WriteAllText(Path.Combine(tc, "toolchain.json"), json);
+        Zip("Testumgebung.Cli.exe", "testumgebung-cli.cmd", "workers/csharp/Worker.exe");
+        Assert.Empty(Problems());
+
+        File.WriteAllText(Path.Combine(tc, "toolchain.json"), json.Replace("\"Testumgebung.Cli.exe\"", "\"testumgebung-cli.exe\"", StringComparison.Ordinal));
+        var wrongName = Assert.Single(Problems());
+        Assert.Contains("testumgebung-cli.exe ist nicht im ZIP", wrongName, StringComparison.Ordinal);
+        Assert.Contains("Testumgebung.Cli.exe", wrongName, StringComparison.Ordinal);
+
+        File.WriteAllText(Path.Combine(tc, "toolchain.json"), json);
+        Zip("Testumgebung-Cli-1.0.0/Testumgebung.Cli.exe");
+        Assert.Contains(Problems(), p => p.Contains("unter Testumgebung-Cli-1.0.0/Testumgebung.Cli.exe", StringComparison.Ordinal));
     }
 
     [Fact, Trait("Pruefung", "SEC-20")]
@@ -156,7 +216,7 @@ public sealed class ToolchainTests : IDisposable
         Assert.Contains("Hash weicht ab", Assert.Throws<ToolchainException>(() => registry.Stage(stage, TestContext.Current.CancellationToken)).Message,
             StringComparison.Ordinal);
 
-        File.WriteAllBytes(Path.Combine(dir, "demo.zip"), Encoding.ASCII.GetBytes("zip-inhalt"));
+        File.WriteAllBytes(Path.Combine(dir, "demo.zip"), DemoZip);
         Assert.Equal(["demo"], registry.Stage(Path.Combine(_dir, "stage2"), TestContext.Current.CancellationToken));
         Assert.True(File.Exists(Path.Combine(_dir, "stage2", "demo", "pinned.json")));
         Assert.True(File.Exists(Path.Combine(_dir, "stage2", "demo", "selftest", "a.txt")));
