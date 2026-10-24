@@ -624,6 +624,11 @@ class Orchestrator:
     # ------------------------------------------------------------------ Planner
     def _plan(self, state: GoalState, planner: Agent) -> tuple[list[dag.Task] | None, list[str]]:
         text = f"## User goal (German)\n{state.goal}"
+        # Steht hier statt im Rollenprompt (Regelbudget kleiner Profile ist ausgeschöpft).
+        text += ("\n\n## Task results\nOnly file changes and the findings of a task (\"notes\") reach the tasks that depend "
+                 "on it. Prefer tasks that change files and read what they need themselves. Plan a separate analysis task "
+                 "(Coder, \"writes\" empty) only when a large source must be digested for several later tasks; let those "
+                 "depend on it.")
         if self.previous_summary:
             text += f"\n\n## Summary of the previous run\n{self.previous_summary}"
         if self.bridge is not None:
@@ -690,7 +695,13 @@ class Orchestrator:
     def _task_text(self, state: GoalState, task: dag.Task, tasks: list[dag.Task], acceptance: list[str]) -> str:
         lines = [f"## User goal (German)\n{state.goal}", f"## Your task {task.task_id}: {task.title}\n{task.description}",
                  f"Files to read: {', '.join(task.reads) or 'decide yourself'}",
-                 f"Files you may change: {', '.join(task.writes) or 'unknown – keep changes minimal and name them'}"]
+                 f"Files you may change: {', '.join(task.writes) or 'none named'}"]
+        if not task.writes and task.role == "Coder":
+            lines.append("If this task only analyses: change nothing, finish without edit blocks and put your findings into "
+                         "\"notes\" (English, concrete: names, lines, values, mappings, open questions) – later tasks see "
+                         "only these notes, not your reading. Example: {\"action\": \"finish\", \"result\": {\"message_de\": "
+                         "\"was untersucht wurde\", \"notes\": \"- finding 1\\n- finding 2\"}}. If it does need changes: "
+                         "keep them minimal and name the files.")
         if acceptance:
             lines.append("## Acceptance criteria\n" + "\n".join(f"- {a}" for a in acceptance))
         paths = [*task.reads, *task.writes] or [_LANGUAGE_SAMPLE[lang] for lang in self.languages if lang in _LANGUAGE_SAMPLE]
@@ -712,6 +723,15 @@ class Orchestrator:
         evidence = []
         for dep in task.depends_on:
             result = by_id[dep].result or {}
+            # Erkenntnisse der Vorgängeraufgabe: sonst ginge eine reine Analyse für die folgende Aufgabe verloren.
+            findings = [f"{by_id[dep].title}", str(result.get("message_de") or "")]
+            if result.get("notes"):
+                findings.append(str(result["notes"]))
+            if result.get("rationale"):
+                findings.append("Rationale: " + str(result["rationale"]))
+            if any(findings[1:]):
+                evidence.append(Evidence(f"N{dep}", f"findings of task {dep} ({by_id[dep].role})",
+                                         "\n\n".join(f for f in findings if f), pinned=True))
             patch = result.get("patch") or result.get("test_patch")
             if patch:
                 applied = isinstance(result.get("apply"), PatchOutcome) and result["apply"].applied
@@ -801,7 +821,10 @@ class Orchestrator:
 
     def _post_result(self, task: dag.Task) -> None:
         r = task.result or {}
-        if task.role == "Coder":
+        if task.role == "Coder" and not r.get("patch"):
+            text = f"{task.task_id} · {task.title}\n{r['message_de']}\n\nErgebnis der Analyse (für die folgenden Aufgaben):\n" \
+                   f"{r.get('notes', '')}"
+        elif task.role == "Coder":
             text = (f"{task.task_id} · {task.title}\n{r['message_de']}\n\nPatch – {self._apply_text(r)}:\n"
                     f"```diff\n{r['patch']}\n```")
         elif task.role == "Debugger":

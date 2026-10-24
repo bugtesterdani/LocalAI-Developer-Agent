@@ -192,4 +192,42 @@ def test_zusammenfasser_mit_kleinem_kontext_schreibt_in_mehreren_aufrufen_fort()
     summary = agent._summarize(Assignment("T1", "Aufgabe", "x"), "", notes, CancelToken())
     assert len(requests) > 1 and all(r.model == "qwen3:4b" and r.num_ctx == 4096 for r in requests)
     assert summary.startswith("seen 1") and summary.split(",")[-1] == "18", "alle Schritte in der Reihenfolge"
-    assert requests[0].think is None and requests[0].num_predict == 500
+    assert requests[0].think is False and requests[0].num_predict == 500, "ohne Denkphase"
+
+
+def test_zusammenfasser_ohne_denkphase_und_zweiter_versuch_bei_leerer_antwort():
+    """Echter Lauf mit qwen3.6: Das Modell denkt von sich aus, die Ausgabegrenze ging fürs Denken drauf – „leere
+    Zusammenfassung“. Jetzt think=false, sonst ein zweiter Versuch mit mehr Ausgabe."""
+    from types import SimpleNamespace
+
+    from localai.orchestrator.agents import Agent, Assignment
+    from localai.orchestrator.gateway import CancelToken, GatewayError
+    from localai.orchestrator.models import Limits, ModelProfile
+    from localai.orchestrator.runtime import FairGate
+
+    answers = []
+    requests = []
+
+    class Gateway:
+        def chat(self, request, cancel=None, callbacks=None):
+            requests.append(request)
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return SimpleNamespace(content=answer[0], thinking=answer[1])
+
+    reporter = SimpleNamespace(state=lambda *a, **k: None, event=lambda *a, **k: None)
+    profile = ModelProfile("coder", "qwen3.6-256k:35b-a3b", 262144, 8192)
+    agent = Agent("Coder", profile, None, Gateway(), FairGate(), None, reporter, None, Limits(), list)
+    task = Assignment("T1", "Aufgabe", "x")
+    answers[:] = [("- found X", "")]
+    assert agent._summarize(task, "", ["Step 1: a"], CancelToken()) == "- found X"
+    assert requests[-1].think is False
+    answers[:] = [("", "long thinking"), ("- found Y", "")]
+    assert agent._summarize(task, "", ["Step 1: a"], CancelToken()) == "- found Y"
+    assert requests[-1].think is None and requests[-1].num_predict == 3200
+    answers[:] = [GatewayError("think value false is not supported"), ("- found Z", "")]
+    assert agent._summarize(task, "", ["Step 1: a"], CancelToken()) == "- found Z"
+    answers[:] = [("", "t"), ("", "t")]
+    with pytest.raises(ValueError, match="nur Denkphase"):
+        agent._summarize(task, "", ["Step 1: a"], CancelToken())

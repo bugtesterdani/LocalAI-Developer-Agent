@@ -1192,6 +1192,86 @@ def test_unplausible_kalibrierung_zeichen_je_token_wird_nicht_uebernommen():
     assert abs(agent(4.0).chars_per_token - 3.6) < 1e-9 and len(events) == 1
 
 
+def test_analyseaufgabe_ohne_aenderung_gibt_erkenntnisse_weiter(ollama, tmp_path):
+    """Echter Lauf: Plan mit Analyseaufgabe T1 (Coder, keine Dateien) – der Coder bekam „No change found“, und was er
+    herausfand, erreichte die folgende Aufgabe nicht. Jetzt: Abschluss mit notes, T2 sieht sie als Evidenz."""
+    prompts_seen: dict[str, str] = {}
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Planner":
+            assert "Only file changes and the findings of a task" in user
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": [], "tasks": ['
+                    '{"id": "T1", "role": "Coder", "title": "Analyse", "description": "analyse calc", "reads": ["src/calc.py"], '
+                    '"writes": [], "depends_on": []}, '
+                    '{"id": "T2", "role": "Coder", "title": "Umsetzen", "description": "change add", "reads": [], '
+                    '"writes": ["src/calc.py"], "depends_on": ["T1"]}]}}\n```'), ""
+        if role == "Coder" and "Your task T1" in user:
+            prompts_seen.setdefault("T1", user)
+            if "No change found" not in user:
+                return '```json\n{"action": "finish", "result": {"message_de": "nur gelesen"}}\n```', ""
+            assert "put your findings for the following tasks into" in user
+            return ('```json\n{"action": "finish", "result": {"message_de": "Analyse fertig", '
+                    '"notes": "- add() in src/calc.py line 2 returns a + b\\n- keep argument order"}}\n```'), ""
+        if role == "Coder" and "Your task T2" in user:
+            prompts_seen["T2"] = user
+            return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return b + a\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "fertig"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: finished(broker), timeout=60)
+    orch.stop()
+    thread.join(5)
+    assert "If this task only analyses" in prompts_seen["T1"]
+    assert 'findings of task T1' in prompts_seen["T2"] and "keep argument order" in prompts_seen["T2"]
+    assert "If this task only analyses" not in prompts_seen["T2"]
+    assert any("Ergebnis der Analyse" in c and "keep argument order" in c for c in broker.chats("Coder"))
+
+
+def test_coder_ohne_patch_nur_bei_analyseaufgabe_mit_notizen():
+    ok = protocol.validate_result("Coder", {"message_de": "x", "notes": "- a"}, analysis_allowed=True)
+    assert ok["patch"] == "" and ok["notes"] == "- a"
+    with pytest.raises(protocol.ProtocolError, match="put your findings"):
+        protocol.validate_result("Coder", {"message_de": "x"}, analysis_allowed=True)
+    with pytest.raises(protocol.ProtocolError, match="No change found") as err:
+        protocol.validate_result("Coder", {"message_de": "x", "notes": "- a"})
+    assert "findings" not in str(err.value), "Aufgabe mit Dateien muss ändern"
+
+
+def test_abgeschnittene_antwort_wird_klar_zurueckgemeldet(ollama, tmp_path):
+    """Echter Lauf: Der Coder schrieb eine große Projektdatei als JSON in den Text, die Antwort endete an der
+    Ausgabegrenze, und das letzte innere Objekt ergab „Unknown action“. Jetzt: klare Rückmeldung „cut off“."""
+    seen = []
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Coder":
+            seen.append(user)
+            if len(seen) == 1:
+                ollama.done_reasons.append("length")
+                return 'Here is the file:\n{"format": "testumgebung.projekt", "children": [{"art": "schritt", "id": "a"}', ""
+            assert "cut off at the output limit" in user and "Unknown action" not in user
+            return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return b + a\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "fertig"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: finished(broker), timeout=60)
+    orch.stop()
+    thread.join(5)
+    assert len(seen) >= 2
+    assert any("Ausgabegrenze abgeschnitten" in (e.text or "") for e in broker.of("Coder"))
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():

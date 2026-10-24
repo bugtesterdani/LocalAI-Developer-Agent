@@ -193,10 +193,18 @@ class Agent:
                                 tokens_per_second=round(result.tokens_per_second, 2),
                                 elapsed_ms=int(result.total_seconds * 1000),
                                 context_tokens=result.prompt_tokens or parts.prompt_tokens)
-            if result.done_reason == "length":
-                history.orchestrator(step, "your answer was cut off at the output limit. Be much shorter.")
             content = result.content
             try:
+                if result.done_reason == "length":
+                    # Abgeschnittene Antwort: das letzte JSON darin ist meist ein inneres Objekt (z. B. aus einer Datei) –
+                    # „Unknown action“ oder „No change found“ würden das Modell auf eine falsche Fährte setzen.
+                    self.reporter.event(role, ActivityKind.Warning, f"Antwort an der Ausgabegrenze abgeschnitten "
+                                        f"({self.budget.output} Token, maxOutputTokens des Profils {self.profile.name})",
+                                        task_id=task_id)
+                    raise protocol.ProtocolError(
+                        f"Your answer was cut off at the output limit ({self.budget.output} tokens) and was not used. "
+                        "Answer again much shorter: reasoning in a few sentences, findings only in \"notes\", and for a large "
+                        "new file nothing but its edit block before the JSON (no copy of it anywhere else).")
                 called = protocol.tool_call_action(result.tool_calls) if result.tool_calls else None
                 if called:
                     # Funktionsaufruf statt Text (gpt-oss): als Aktion übernehmen; die Antwort zählt wie geschrieben.
@@ -209,7 +217,7 @@ class Agent:
                 history.model(step, action, thinking=result.thinking)
                 if action.kind == "finish":
                     protocol.resolve_patch(role, action, assignment.files, lambda p: self._file_lines(evidence, p))
-                    final = protocol.validate_result(role, action.result)
+                    final = protocol.validate_result(role, action.result, analysis_allowed=not assignment.files)
                     feedback = assignment.finisher(final) if assignment.finisher else None
                     if feedback is not None:
                         history.orchestrator(step, feedback)
@@ -304,27 +312,46 @@ class Agent:
         # Kontext minus Ausgabe, Reserve, Anweisungen, Kopf und (höchstens so lange) bisherige Zusammenfassung.
         room = (profile.context_tokens - output - profile.context_tokens // 16 - estimate_tokens(system, cpt)
                 - estimate_tokens(header, cpt) - settings.summary_tokens)
-        role, task_id = self.role, assignment.task_id
         for batch in batch_notes(notes, int(room * cpt)):
             user = f"## Task of the agent\n{assignment.title}\n\n"
             if previous:
                 user += f"## Previous summary\n{previous}\n\n"
             user += "## New notes (oldest first)\n" + "\n\n".join(batch)
             # Gleiches num_ctx wie das Profil: Ollama lädt das Modell sonst neu.
-            request = ChatRequest(
-                model=profile.model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                num_ctx=profile.context_tokens, num_predict=output, temperature=0.1,
-                think=False if profile.think else profile.think, extra_options=dict(profile.options))
-            with self.gpu.slot(role, profile.key, assignment.priority, cancel,
-                               on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
-                self.reporter.state(role, AgentState.Generating, f"Eigene Notizen zusammenfassen ({profile.model})", task_id)
-                result = self.gateway.chat(request, cancel)
-            previous = _THINK.sub("", result.content).strip()
-            if not previous:
-                raise ValueError("leere Zusammenfassung")
+            previous = self._summary_call(profile, system, user, output, assignment, cancel)
             # Für den nächsten Teil auf die zulässige Länge begrenzen.
             previous = previous[:int(settings.summary_tokens * cpt)]
         return previous
+
+    def _summary_call(self, profile: ModelProfile, system: str, user: str, output: int, assignment: Assignment,
+                      cancel: CancelToken) -> str:
+        """Ohne Denkphase (think=false): Modelle, die von sich aus denken (z. B. qwen3.6), verbrauchten sonst die ganze
+        Ausgabe fürs Denken und lieferten eine leere Zusammenfassung. Lehnt das Modell think=false ab oder bleibt die
+        Antwort leer: einmal mit der Einstellung des Profils und mehr Ausgabe."""
+        role, task_id = self.role, assignment.task_id
+        attempts = [(False, output), (profile.think, min(profile.max_output_tokens, max(output * 4, 2048)))]
+        last_error: Exception | None = None
+        for think, num_predict in attempts:
+            request = ChatRequest(
+                model=profile.model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                num_ctx=profile.context_tokens, num_predict=num_predict, temperature=0.1, think=think,
+                extra_options=dict(profile.options))
+            with self.gpu.slot(role, profile.key, assignment.priority, cancel,
+                               on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
+                self.reporter.state(role, AgentState.Generating, f"Eigene Notizen zusammenfassen ({profile.model})", task_id)
+                try:
+                    result = self.gateway.chat(request, cancel)
+                except OutOfMemory:
+                    raise
+                except GatewayError as err:
+                    last_error = err
+                    continue
+            text = _THINK.sub("", result.content).strip()
+            if text:
+                return text
+            last_error = ValueError("leere Zusammenfassung" + (" (nur Denkphase)" if result.thinking.strip() else ""))
+        assert last_error is not None
+        raise last_error
 
     @staticmethod
     def _empty_answer_hint(result) -> str:

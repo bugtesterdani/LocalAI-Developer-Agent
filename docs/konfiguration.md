@@ -222,7 +222,7 @@ diese Hardware und diesen Modell-Digest **kalibriert** ist (`requireCalibration:
 |---|---|
 | `name` | Profilname (`standard`, `leicht`, `planung`, `erweitert`, `gross`, `offload`) |
 | `model` | Ollama-Tag mit fester Version – `latest` ist unzulässig |
-| `contextTokens`, `maxOutputTokens` | Kontextgröße und Ausgabegrenze je Anfrage |
+| `contextTokens`, `maxOutputTokens` | Kontextgröße und Ausgabegrenze je Anfrage (höchstens ein Viertel des Kontexts). Eine neue Datei entsteht in einer einzigen Antwort – für große Dateien (z. B. Prüfprogramme `*.tproj.json`) beim Coder großzügig wählen, etwa `16384`; „Antwort an der Ausgabegrenze abgeschnitten“ im Verlauf zeigt, dass es nicht reicht |
 | `think` | Thinking anfordern (z. B. `qwen3`) |
 | `offload` | CPU-Offload erlaubt (Qualität vor Geschwindigkeit) |
 | `temperature` | Standard `0.2` |
