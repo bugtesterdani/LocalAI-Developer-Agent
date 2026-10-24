@@ -207,6 +207,16 @@ als Aktion übernommen (`read_file` → `read`, `list_dir` → `list`, …). Ein
 eigene Rückmeldung statt „No JSON object found“. Unplausible Kalibrierwerte für Zeichen je Token (außerhalb 1,5–6) werden
 nicht übernommen, sonst würde der Prompt um ein Vielfaches unterschätzt.
 
+**Analyseaufgaben und Übergabe zwischen Aufgaben (Stand 24.10.2026):** Eine Coder-Aufgabe ohne zu ändernde Dateien darf
+ohne Patch abschließen, wenn sie ihre Erkenntnisse in `notes` festhält. Jede Aufgabe gibt Zusammenfassung, `notes` und
+Begründung als angeheftete Evidenz („findings of task T1“) an die Aufgaben weiter, die von ihr abhängen – bisher kamen
+dort nur Patches an. Im Chat steht „Ergebnis der Analyse“. Der Planner wird angehalten, Analyse nur dann als eigene
+Aufgabe zu planen, wenn mehrere spätere Aufgaben sie brauchen.
+Eine an der Ausgabegrenze abgeschnittene Antwort wird nicht mehr ausgewertet (vorher „Unknown action“ aus einem inneren
+JSON-Objekt), sondern klar zurückgemeldet; im Verlauf steht „Antwort an der Ausgabegrenze abgeschnitten“. Die
+Zusammenfassung der eigenen Notizen läuft ohne Denkphase (`think: false`), sonst lieferten von sich aus denkende Modelle
+(qwen3.6) eine leere Zusammenfassung.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

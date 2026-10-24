@@ -614,9 +614,18 @@ def resolve_patch(role: str, action: Action, known_files: list[str] | None = Non
         result[field_name] = normalize_diff(patch, files)
 
 
-def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
-    """Prüft das Abschlussergebnis; Fehlermeldungen gehen ans Modell zurück (englisch)."""
+MAX_NOTES_CHARS = 20_000
+
+
+def validate_result(role: str, result: dict[str, Any], analysis_allowed: bool = False) -> dict[str, Any]:
+    """Prüft das Abschlussergebnis; Fehlermeldungen gehen ans Modell zurück (englisch).
+
+    ``analysis_allowed``: Aufgabe ohne zu ändernde Dateien – der Coder darf dann ohne Patch abschließen, wenn er seine
+    Erkenntnisse in ``notes`` für die folgenden Aufgaben festhält."""
     _str(result, "message_de")
+    notes = _str(result, "notes", required=False).strip()
+    if notes:
+        result["notes"] = notes[:MAX_NOTES_CHARS]
     if role == "Planner":
         tasks = result.get("tasks")
         if not isinstance(tasks, list) or not tasks:
@@ -641,8 +650,15 @@ def validate_result(role: str, result: dict[str, Any]) -> dict[str, Any]:
     elif role == "Coder":
         patch = result.get("patch")
         if not isinstance(patch, str) or not patch.strip():
+            if analysis_allowed and notes:
+                result["patch"] = ""
+                result["files"] = []
+                return result
+            hint = (" This task changes no files: if it only analyses, finish without edit blocks and put your findings "
+                    "for the following tasks into \"notes\" (English, concrete: names, lines, values, mappings)."
+                    if analysis_allowed else "")
             raise ProtocolError("No change found: put SEARCH/REPLACE edit blocks (file path line, <<<<<<< SEARCH, "
-                                "exact current lines, =======, new lines, >>>>>>> REPLACE) before the JSON.")
+                                "exact current lines, =======, new lines, >>>>>>> REPLACE) before the JSON." + hint)
         check_diff(patch, "patch")
         result["files"] = _str_list(result.get("files"), "result.files")
     elif role == "Tester":

@@ -111,6 +111,7 @@ class FakeOllama:
     # Anfragen zum Zusammenfassen der Agentennotizen; None = an ``responder``.
     summarizer: Callable[[dict[str, Any]], tuple[str, str]] | None = summary_answer
     error: str | None = None
+    done_reasons: list[str] = field(default_factory=list)  # je Anfrage der Reihe nach, danach "stop"
     chars_per_token: float = 3.5
     vram_fraction: float = 1.0
     requests: list[dict[str, Any]] = field(default_factory=list)
@@ -216,8 +217,10 @@ class FakeOllama:
                         self.wfile.write(json.dumps({"model": body["model"], "message": msg, "done": False}).encode() + b"\n")
                         pieces += 1
                     elapsed = max(time.monotonic() - started, 1e-3)
+                    with fake.lock:
+                        done_reason = fake.done_reasons.pop(0) if fake.done_reasons else "stop"
                     final = {"model": body["model"], "message": {"role": "assistant", "content": ""}, "done": True,
-                             "done_reason": "stop", "prompt_eval_count": int(prompt_chars / fake.chars_per_token),
+                             "done_reason": done_reason, "prompt_eval_count": int(prompt_chars / fake.chars_per_token),
                              "prompt_eval_duration": int(0.1e9), "eval_count": pieces, "eval_duration": int(elapsed * 1e9),
                              "load_duration": 0, "total_duration": int(elapsed * 1e9)}
                     self.wfile.write(json.dumps(final).encode() + b"\n")
