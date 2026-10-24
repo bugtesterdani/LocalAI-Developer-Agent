@@ -34,6 +34,13 @@
     "maxGpuRequests": 1,
     "maxTasks": 12
   },
+  "history": {
+    "mode": "summary",
+    "summaryProfiles": [],
+    "keepRecentNotes": 3,
+    "maxNoteTokens": 1500,
+    "summaryTokens": 600
+  },
   "calibration": {
     "runs": 10,
     "minVramReserveGiB": 2.0,

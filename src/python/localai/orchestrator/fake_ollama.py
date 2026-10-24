@@ -87,6 +87,17 @@ def scripted_answer(body: dict[str, Any]) -> tuple[str, str]:
     return _fence({"action": "finish", "result": {"message_de": "?"}}, ""), thinking
 
 
+SUMMARIZER_MARK = "You compress the working notes"
+
+
+def summary_answer(body: dict[str, Any]) -> tuple[str, str]:
+    """Zusammenfassung der Agentennotizen (history.py): je Schritt der Anfang der Notiz."""
+    user = body["messages"][-1]["content"]
+    previous = user.split("## Previous summary\n", 1)[1].split("\n\n## ", 1)[0] if "## Previous summary" in user else ""
+    lines = [f"- step {m.group(1)}: {m.group(2)[:80]}" for m in re.finditer(r"^Step (\d+): (.+)$", user, re.MULTILINE)]
+    return "\n".join(([previous] if previous else []) + lines), ""
+
+
 @dataclass
 class FakeOllama:
     """Konfigurierbarer Fake. ``responder(body) -> (content, thinking)`` ersetzt das Skript."""
@@ -97,6 +108,8 @@ class FakeOllama:
     first_token_delay: float = 0.0
     load_delay: float = 0.0  # vor dem Antwortkopf (Modell wird geladen)
     responder: Callable[[dict[str, Any]], tuple[str, str]] = scripted_answer
+    # Anfragen zum Zusammenfassen der Agentennotizen; None = an ``responder``.
+    summarizer: Callable[[dict[str, Any]], tuple[str, str]] | None = summary_answer
     error: str | None = None
     chars_per_token: float = 3.5
     vram_fraction: float = 1.0
@@ -169,7 +182,11 @@ class FakeOllama:
                     return
                 with fake.lock:
                     fake.loaded = {body["model"]: body.get("options", {}).get("num_ctx", 2048)}
-                content, thinking = fake.responder(body)
+                system = (body.get("messages") or [{}])[0].get("content", "")
+                if fake.summarizer is not None and system.startswith(SUMMARIZER_MARK):
+                    content, thinking = fake.summarizer(body)
+                else:
+                    content, thinking = fake.responder(body)
                 if fake.load_delay:
                     time.sleep(fake.load_delay)
                 self.send_response(200)

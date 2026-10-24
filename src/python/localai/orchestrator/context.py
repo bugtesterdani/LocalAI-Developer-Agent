@@ -71,6 +71,23 @@ class Evidence:
                 f"{body}\n{EVIDENCE_CLOSE} {self.evidence_id}>>>")
 
 
+@dataclass(frozen=True)
+class HistoryLine:
+    """Eintrag unter „Previous steps“. ``keep``: Rückmeldung des Orchestrators – nie gekürzt oder weggelassen."""
+    text: str
+    keep: bool = False
+    rank: int = 0  # unter den übrigen: höherer Rang wird zuerst behalten (Zusammenfassung vor alten wörtlichen Notizen)
+
+
+def task_budget(rules: str, budget: Budget, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> int:
+    """Token für Aufgabe und Verlauf (ungenutzter Regelanteil kommt hinzu) – wie in ``assemble``."""
+    return budget.task + max(0, budget.rules - estimate_tokens(rules, chars_per_token))
+
+
+def task_text(task: str, budget_tokens: int, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> str:
+    return truncate_marked(task, int(budget_tokens * chars_per_token * 0.7), "Aufgabentext")
+
+
 @dataclass
 class PromptParts:
     system: str
@@ -88,29 +105,37 @@ class PromptParts:
         return self.rules_tokens + self.task_tokens + self.evidence_tokens
 
 
-def assemble(rules: str, task: str, history: list[str], evidence: list[Evidence], budget: Budget,
+def assemble(rules: str, task: str, history: list[str | HistoryLine], evidence: list[Evidence], budget: Budget,
              chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> PromptParts:
     """Baut System- und Nutzernachricht innerhalb des Budgets.
 
-    Verlauf: neueste Einträge zuerst behalten. Evidenz: angeheftete und neueste zuerst; was nicht passt, wird
-    weggelassen und im Prompt benannt (der Agent kann es erneut anfordern).
+    Verlauf: Rückmeldungen des Orchestrators (``HistoryLine.keep``) immer vollständig, sonst neueste Einträge zuerst
+    behalten. Evidenz: angeheftete und neueste zuerst; was nicht passt, wird weggelassen und im Prompt benannt (der
+    Agent kann es erneut anfordern).
     """
     cpt = chars_per_token
     rules_tokens = estimate_tokens(rules, cpt)
     if rules_tokens > budget.rules * 2:
         raise BudgetError(f"Regeln benötigen ~{rules_tokens} Token, Profil erlaubt höchstens {budget.rules * 2}")
-    task_budget = budget.task + max(0, budget.rules - rules_tokens)
-    task_text = truncate_marked(task, int(task_budget * cpt * 0.7), "Aufgabentext")
-    used = estimate_tokens(task_text, cpt)
-    kept_history: list[str] = []
-    for entry in reversed(history):
-        cost = estimate_tokens(entry, cpt)
-        if used + cost > task_budget:
-            kept_history.append(f"[{len(history) - len(kept_history)} ältere Verlaufseinträge ausgelassen]")
-            break
-        kept_history.append(entry)
-        used += cost
-    kept_history.reverse()
+    room = task_budget(rules, budget, cpt)
+    task_text_ = task_text(task, room, cpt)
+    used = estimate_tokens(task_text_, cpt)
+    lines = [h if isinstance(h, HistoryLine) else HistoryLine(h) for h in history]
+    costs = [estimate_tokens(h.text, cpt) for h in lines]
+    used += sum(c for h, c in zip(lines, costs) if h.keep)
+    kept = [h.keep for h in lines]
+    omitted = 0
+    # Was nicht passt, wird ausgelassen; kleinere (z. B. die neueste Notiz nach einer zu großen Zusammenfassung) dürfen
+    # trotzdem noch hinein.
+    for i in sorted((i for i, h in enumerate(lines) if not h.keep), key=lambda i: (-lines[i].rank, -i)):
+        if used + costs[i] > room:
+            omitted += 1
+            continue
+        kept[i] = True
+        used += costs[i]
+    kept_history = [h.text for h, k in zip(lines, kept) if k]
+    if omitted:
+        kept_history.insert(0, f"[{omitted} older entries omitted for context budget]")
     task_tokens = used
     # Unbenutzte Anteile von Regeln/Aufgabe fließen der Evidenz zu; Ausgabe und Reserve bleiben unangetastet.
     evidence_budget = budget.total - budget.output - budget.reserve - max(rules_tokens, 0) - task_tokens
@@ -135,9 +160,10 @@ def assemble(rules: str, task: str, history: list[str], evidence: list[Evidence]
         rendered.append((i, block))
         spent += cost
     rendered.sort()
-    parts = [task_text]
+    parts = [task_text_]
     if kept_history:
-        parts.append("## Previous steps\n" + "\n".join(kept_history))
+        parts.append("## Previous steps (your own notes – earlier ones possibly summarised – and the orchestrator's results)\n"
+                     + "\n".join(kept_history))
     if dropped:
         parts.append("## Evidence omitted for context budget (request again if needed)\n" + "\n".join(dropped))
     if rendered:

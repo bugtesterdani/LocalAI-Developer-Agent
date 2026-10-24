@@ -244,6 +244,40 @@ diese Hardware und diesen Modell-Digest **kalibriert** ist (`requireCalibration:
 | `maxGpuRequests` | `1` | gleichzeitige Modellanfragen |
 | `maxTasks` | `12` | Aufgaben je Plan |
 
+### `history`
+
+Ein Agent arbeitet eine Aufgabe in bis zu `maxStepsPerTask` Modellschritten ab. Jeder Schritt ist eine neue Anfrage an
+Ollama. Damit das Modell weiß, was es in den Schritten davor gedacht und vorgehabt hat, steht unter
+„Previous steps“ ein Verlauf mit zwei Arten von Einträgen:
+
+- **Rückmeldungen des Orchestrators** (Ergebnis eines Tools, Ablehnung, Formatfehler, Rückmeldung zum Patch): immer
+  wörtlich und vollständig.
+- **Eigene Notizen des Modells**: seine Begründung und die gewählte Aktion. Codeblöcke und SEARCH/REPLACE-Blöcke werden
+  durch einen Platzhalter ersetzt. Hat das Modell nur in der Denkphase geschrieben, wird deren Ende genommen.
+  Die neuesten Notizen bleiben wörtlich. Brauchen sie mehr als `maxNoteTokens` oder mehr als der freie Platz im
+  Kontext, werden die älteren zu einer laufenden Zusammenfassung verdichtet. Bei knappem Platz bleibt nur die letzte
+  Notiz wörtlich.
+
+| Feld | Standard | Bedeutung |
+|---|---|---|
+| `mode` | `summary` | `summary`: ältere Notizen per Modell zusammenfassen. `trim`: nur mechanisch kürzen (kein zusätzlicher Modellaufruf). `off`: nur Rückmeldungen des Orchestrators (früheres Verhalten) |
+| `summaryProfiles` | `[]` | Profile zum Zusammenfassen, Auswahl wie bei `roles` (installiert, kalibriert). Leer: das Modell der jeweiligen Rolle |
+| `keepRecentNotes` | `3` | so viele neueste Notizen bleiben wörtlich |
+| `maxNoteTokens` | `1500` | ab so vielen Token wörtlicher Notizen wird verdichtet |
+| `summaryTokens` | `600` | Höchstlänge der Zusammenfassung |
+
+Zur Wahl von `summaryProfiles`:
+
+- **Leer lassen (empfohlen bei einer GPU):** Die Zusammenfassung läuft mit dem Modell und der Kontextgröße der Rolle.
+  Das Modell ist schon geladen, es muss nichts gewechselt werden. Kosten: ein kurzer Aufruf alle paar Schritte.
+- **Eigenes kleines Modell** (z. B. ein Profil mit `qwen3:4b`, 8K): Lohnt sich nur, wenn beide Modelle gleichzeitig in
+  den Speicher passen (`OLLAMA_MAX_LOADED_MODELS` ≥ 2). Mit `1` lädt Ollama bei jeder Zusammenfassung das kleine
+  Modell und danach das der Rolle neu. Das dauert meist länger als die Zusammenfassung selbst.
+- Ist keins der eingetragenen Profile nutzbar, fasst das Modell der Rolle zusammen. Der Grund steht im Aktivitätsfeed.
+
+Im Aktivitätsfeed steht jede Verdichtung mit dem Text der Zusammenfassung („Eigene Notizen Schritte 1–4
+zusammengefasst“). Scheitert der Aufruf, wird mechanisch gekürzt; der Agent arbeitet weiter.
+
 ### `calibration`
 
 | Feld | Standard | Bedeutung |

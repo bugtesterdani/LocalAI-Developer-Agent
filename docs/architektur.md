@@ -223,6 +223,10 @@ Der Orchestrator legt je Ziel einen Run mit fünf Rollen an:
   Erkennung von Wiederholungsschleifen. Kontext wird je Anfrage gesetzt – nur nach Kalibrierung.
 - **Kontextaufteilung** (`orchestrator/context.py`): 12,5 % Regeln, 12,5 % Aufgabe, 44 % Evidenz, 25 % Ausgabe, 6 %
   Reserve. Regeln werden nie gekürzt; Evidenz ist als untrusted markiert und kann ihren Rahmen nicht schließen.
+- **Verlauf über die Schritte** (`orchestrator/history.py`): Im Anteil „Aufgabe“ stehen die Rückmeldungen des
+  Orchestrators zu jedem Schritt vollständig und die eigenen Notizen des Modells (Begründung, Aktion). Ältere Notizen
+  fasst das Modell der Rolle (oder ein eigenes Profil) zusammen, sobald sie zu viel Platz brauchen
+  (`history` in `models.json`, siehe [Konfiguration](konfiguration.md#history)).
 - **Prompts** liegen versioniert in `src/python/localai/orchestrator/prompts/*.md` (Englisch). Antworten an den Nutzer
   sind Deutsch.
 - **Runjournal:** Ziel, Plan, Aufgabenstände und angewendete Patches – nie Freigaben. Damit lässt sich ein

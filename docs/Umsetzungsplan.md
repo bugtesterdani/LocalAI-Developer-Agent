@@ -195,6 +195,12 @@ Szenarien (`*.tsim.json`) und simulieren sie in der VM. Der Planer schlägt `tes
 und Tester bekommen eine Kurzfassung von Format und Bausteinkatalog. Anleitung: `docs/testumgebung.md`. Offen: Prüfung
 mit dem veröffentlichten ZIP in der echten Windows-VM.
 
+**Verlauf über die Modellschritte (Stand 23.10.2026):** Bisher sah ein Agent in jedem Schritt nur die Rückmeldungen
+des Orchestrators, nicht, was er selbst zuvor überlegt hatte. Jetzt stehen zusätzlich seine eigenen Notizen
+(Begründung und Aktion) im Prompt. Die neuesten bleiben wörtlich, ältere werden per Modell zusammengefasst;
+Rückmeldungen des Orchestrators bleiben immer vollständig. Einstellungen: `history` in `models.json`
+(`docs/konfiguration.md`). Offen: Wirkung auf Schrittzahl und Qualität mit echten Modellen messen.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
