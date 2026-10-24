@@ -70,7 +70,8 @@ Grenzwerte, Geräteprotokolle oder Zeitgrenzen zu erfinden und Annahmen in der P
    Ergebnis: `artifacts\Testumgebung-Cli-1.0.0-win-x64.zip`. Vor dem Packen läuft der Selbsttest mit den Beispielen.
 2. Toolchain-Ordner `D:\Agent\Toolchains\testumgebung` anlegen. Den Inhalt von `toolchains\testumgebung`
    (`toolchain.json`, `selftest\`) und das ZIP hineinlegen. Andere Version: `version`, `displayName` und `install.file`
-   in `toolchain.json` anpassen.
+   in `toolchain.json` anpassen. Das Programm im ZIP heißt `Testumgebung.Cli.exe` (`testumgebung-cli.cmd` daneben ist nur
+   ein Starter für die Konsole); „Toolchain-Ordner prüfen“ meldet, wenn `binaries` auf eine Datei zeigt, die nicht im ZIP liegt.
 3. Im Projekt `"toolchains": ["testumgebung"]` eintragen (zusätzlich zu anderen).
 4. Oberfläche → TOOLCHAINS → „Toolchain-Ordner prüfen“ → `testumgebung` registrieren → VM neu aufbauen.
 

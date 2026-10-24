@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -429,6 +430,7 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
                     var prefix = rel.Replace('\\', '/').TrimEnd('/') + "/";
                     return files.Keys.Any(k => k.StartsWith(prefix, StringComparison.Ordinal));
                 }));
+            problems.AddRange(ArchiveBinaryProblems(manifest, directory, files));
             foreach (var (rel, expected) in manifest.Files ?? new Dictionary<string, string>())
             {
                 var key = rel.Replace('\\', '/');
@@ -456,6 +458,55 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
             manifest?.License.Proprietary ?? false, problems, projectToolchains.Contains(name),
             RegisteredDigest: registered ? registration!.Digest : null, LicenseNote: manifest?.License.Note, Guest: manifest?.Guest ?? GuestOs.Windows);
         return new Inspection(info, manifest, manifestSha, files);
+    }
+
+    /// <summary>
+    /// Windows-ZIP: Liegen die Programme aus „binaries“ dort, wo sie nach dem Entpacken erwartet werden? Sonst fiele es
+    /// erst nach dem VM-Aufbau auf („Binary fehlt nach der Installation“). Mit deploy kann ein Programm auch anders
+    /// hineinkommen – dann wird nicht geprüft; mit postInstall nur, was postInstall selbst aufruft.
+    /// </summary>
+    public static List<string> ArchiveBinaryProblems(ToolchainManifest manifest, string directory, IReadOnlyDictionary<string, string> files)
+    {
+        var problems = new List<string>();
+        if (manifest.Install.Kind != ToolchainInstallKind.Archive || manifest.Guest == GuestOs.Linux || manifest.Install.File is null
+            || (manifest.Deploy?.Count ?? 0) > 0 || !manifest.Install.File.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            || !files.ContainsKey(manifest.Install.File.Replace('\\', '/')))
+        {
+            return problems;
+        }
+        List<string> entries;
+        try
+        {
+            using var zip = ZipFile.OpenRead(Path.Combine(directory, manifest.Install.File));
+            entries = zip.Entries.Select(e => e.FullName.Replace('\\', '/')).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            problems.Add($"install.file: ZIP nicht lesbar ({GuestReport.Clip(ex.Message, 200)})");
+            return problems;
+        }
+        var present = new HashSet<string>(entries, StringComparer.OrdinalIgnoreCase);
+        // postInstall läuft nach dem Entpacken und kann weitere Programme erzeugen (z. B. Scripts\pytest.exe aus Wheels):
+        // dann müssen vorab nur die Programme im ZIP liegen, die postInstall selbst aufruft.
+        var postInstall = manifest.PostInstall ?? [];
+        var needed = postInstall.Count == 0
+            ? manifest.Binaries
+            : manifest.Binaries.Where(b => postInstall.Any(c => c.Binary == b.Name)).ToList();
+        foreach (var b in needed.Where(b => !ToolchainValidator.IsSystemBinary(b.Path)))
+        {
+            var wanted = b.Path.Replace('\\', '/');
+            if (present.Contains(wanted))
+            {
+                continue;
+            }
+            var exes = entries.Where(e => e.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).ToList();
+            var nested = exes.FirstOrDefault(e => e.EndsWith("/" + wanted, StringComparison.OrdinalIgnoreCase));
+            var hint = nested is not null
+                ? $" – im ZIP liegt es unter {nested} (Ordner im ZIP: path anpassen oder ohne Oberordner packen)"
+                : exes.Count > 0 ? $" – Programme im ZIP: {string.Join(", ", exes.Where(e => !e.Contains('/')).DefaultIfEmpty(exes[0]).Take(5))}" : "";
+            problems.Add($"Binary {b.Name}: {b.Path} ist nicht im ZIP {manifest.Install.File}{hint}");
+        }
+        return problems;
     }
 
     /// <summary>Registriert den Ordner, wenn er unverändert dem angezeigten Stand (<paramref name="expectedDigest"/>) entspricht.</summary>

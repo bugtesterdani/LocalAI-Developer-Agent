@@ -9,7 +9,7 @@
     "note": "Testumgebung: MIT (eigene Software); .NET-Laufzeit: MIT; Python: PSF License; Weitere siehe THIRD-PARTY-NOTICES.md im ZIP"
   },
   "binaries": [
-    { "name": "testumgebung", "path": "testumgebung-cli.exe" }
+    { "name": "testumgebung", "path": "Testumgebung.Cli.exe" }
   ],
   "install": {
     "kind": "Archive",
