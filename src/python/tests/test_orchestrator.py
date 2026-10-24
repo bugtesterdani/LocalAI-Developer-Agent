@@ -1159,7 +1159,7 @@ def test_gpt_oss_funktionsaufruf_und_leere_antwort(ollama, tmp_path):
 
 
 def test_funktionsaufrufe_werden_zu_aktionen():
-    from localai.orchestrator.protocol import parse, tool_call_action
+    from localai.orchestrator.protocol import ProtocolError, parse, tool_call_action
     read = parse(tool_call_action([{"name": "functions.read_file", "arguments": '{"path": "a.py", "start": 1, "end": 9}'},
                                    {"name": "read_file", "arguments": {"paths": ["b.py"]}}]))
     assert read.kind == "read" and [(f.path, f.start, f.end) for f in read.files] == [("a.py", 1, 9), ("b.py", None, None)]
@@ -1169,6 +1169,10 @@ def test_funktionsaufrufe_werden_zu_aktionen():
     assert plan.kind == "finish" and plan.result["message_de"] == "Plan"
     assert parse(tool_call_action([{"name": "x", "arguments": {"action": "list", "path": "."}}])).kind == "list"
     assert tool_call_action([{"name": "python", "arguments": {"code": "print(1)"}}]) is None
+    for bad in (None, "a.py", [None], [1], []):
+        with pytest.raises(ProtocolError, match="invalid files"):
+            tool_call_action([{"name": "read_file", "arguments": {"path": "a.py"}},
+                              {"name": "read_file", "arguments": {"files": bad}}])
 
 
 def test_unplausible_kalibrierung_zeichen_je_token_wird_nicht_uebernommen():

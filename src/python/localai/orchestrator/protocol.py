@@ -252,7 +252,8 @@ def _call_arguments(raw: Any) -> dict[str, Any]:
 def tool_call_action(calls: list[dict[str, Any]]) -> str | None:
     """Funktionsaufrufe aus Ollama als ```json-Aktionsblock (mehrere Leseaufrufe werden zu einem zusammengefasst).
 
-    None, wenn kein Aufruf zu einer Aktion passt."""
+    None, wenn kein Aufruf zu einer Aktion passt; ProtocolError bei unbrauchbaren Argumenten (Rückmeldung an das Modell
+    wie bei jeder anderen ungültigen Antwort)."""
     actions: list[dict[str, Any]] = []
     for call in calls:
         args = _call_arguments(call.get("arguments"))
@@ -269,6 +270,13 @@ def tool_call_action(calls: list[dict[str, Any]]) -> str | None:
             args["files"] = files
         if kind == "finish" and "result" not in args:
             args = {"result": args}
+        if kind == "read" and not (isinstance(args["files"], list) and args["files"]
+                                   and all(isinstance(f, (dict, str)) and f for f in args["files"])):
+            raise ProtocolError(f"Your function call {call.get('name') or 'read'} has invalid files "
+                                f"({json.dumps(args['files'], ensure_ascii=False)[:120]}). Write the action as one ```json "
+                                'block instead: {"action": "read", "files": [{"path": "src/a.py"}], "reason": "why"}')
+        if kind == "read":
+            args["files"] = [f if isinstance(f, dict) else {"path": f} for f in args["files"]]
         actions.append({"action": kind, **args})
     if not actions:
         return None

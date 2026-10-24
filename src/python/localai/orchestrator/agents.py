@@ -196,13 +196,13 @@ class Agent:
             if result.done_reason == "length":
                 history.orchestrator(step, "your answer was cut off at the output limit. Be much shorter.")
             content = result.content
-            called = protocol.tool_call_action(result.tool_calls) if result.tool_calls else None
-            if called:
-                # Funktionsaufruf statt Text (gpt-oss): als Aktion übernehmen; die Antwort zählt wie geschrieben.
-                content = content.rstrip() + "\n" + called
-                self.reporter.stream(role, ActivityKind.Output, f"\n[Funktionsaufruf übernommen: {called.strip('`').strip()}]\n",
-                                     task_id)
             try:
+                called = protocol.tool_call_action(result.tool_calls) if result.tool_calls else None
+                if called:
+                    # Funktionsaufruf statt Text (gpt-oss): als Aktion übernehmen; die Antwort zählt wie geschrieben.
+                    content = content.rstrip() + "\n" + called
+                    self.reporter.stream(role, ActivityKind.Output,
+                                         f"\n[Funktionsaufruf übernommen: {called.strip('`').strip()}]\n", task_id)
                 if not content.strip():
                     raise protocol.ProtocolError(self._empty_answer_hint(result))
                 action = protocol.parse(content)
