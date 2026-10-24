@@ -1236,6 +1236,13 @@ def test_analyseaufgabe_ohne_aenderung_gibt_erkenntnisse_weiter(ollama, tmp_path
 def test_coder_ohne_patch_nur_bei_analyseaufgabe_mit_notizen():
     ok = protocol.validate_result("Coder", {"message_de": "x", "notes": "- a"}, analysis_allowed=True)
     assert ok["patch"] == "" and ok["notes"] == "- a"
+    # Echter Lauf: notes als Liste von Punkten („result.notes must be a non-empty string“)
+    listed = protocol.validate_result("Coder", {"message_de": "x", "notes": ["Struktur: init", "- GUI: werker", ""]},
+                                      analysis_allowed=True)
+    assert listed["notes"] == "- Struktur: init\n- GUI: werker"
+    keyed = protocol.validate_result("Coder", {"message_de": "x", "notes": {"SSH": "netz.ssh", "IPs": ["a", "b"]}},
+                                     analysis_allowed=True)
+    assert keyed["notes"] == "- SSH: netz.ssh\n- IPs: a; b"
     with pytest.raises(protocol.ProtocolError, match="put your findings"):
         protocol.validate_result("Coder", {"message_de": "x"}, analysis_allowed=True)
     with pytest.raises(protocol.ProtocolError, match="No change found") as err:

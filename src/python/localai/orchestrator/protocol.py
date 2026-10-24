@@ -617,15 +617,33 @@ def resolve_patch(role: str, action: Action, known_files: list[str] | None = Non
 MAX_NOTES_CHARS = 20_000
 
 
+def _notes_text(value: Any) -> str:
+    """notes als Text – Modelle liefern oft eine Liste von Punkten oder ein Objekt; beides ist inhaltlich gleichwertig."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        lines = [_notes_text(v) for v in value]
+        return "\n".join(line if line.startswith(("-", "*")) else f"- {line}" for line in lines if line)
+    if isinstance(value, dict):
+        inline = {k: "; ".join(_notes_text(i).lstrip("-* ") for i in v) if isinstance(v, list) else _notes_text(v)
+                  for k, v in value.items()}
+        return "\n".join(f"- {k}: {v}" for k, v in inline.items() if v)
+    return str(value).strip()
+
+
 def validate_result(role: str, result: dict[str, Any], analysis_allowed: bool = False) -> dict[str, Any]:
     """Prüft das Abschlussergebnis; Fehlermeldungen gehen ans Modell zurück (englisch).
 
     ``analysis_allowed``: Aufgabe ohne zu ändernde Dateien – der Coder darf dann ohne Patch abschließen, wenn er seine
     Erkenntnisse in ``notes`` für die folgenden Aufgaben festhält."""
     _str(result, "message_de")
-    notes = _str(result, "notes", required=False).strip()
+    notes = _notes_text(result.get("notes"))
     if notes:
         result["notes"] = notes[:MAX_NOTES_CHARS]
+    else:
+        result.pop("notes", None)
     if role == "Planner":
         tasks = result.get("tasks")
         if not isinstance(tasks, list) or not tasks:
