@@ -144,6 +144,9 @@ class ChatResult:
     total_seconds: float = 0.0
     first_token_seconds: float | None = None
     done_reason: str = ""
+    # Funktionsaufrufe, die Ollama aus der Antwort gelesen hat (gpt-oss ruft trotz fehlender Tools gern „Funktionen“
+    # auf, statt die Aktion als Text zu schreiben): [{"name": …, "arguments": {…}}]
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def tokens_per_second(self) -> float:
@@ -327,6 +330,7 @@ class OllamaGateway:
         started = time.monotonic()
         content: list[str] = []
         thinking: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
         splitter = _ThinkSplitter()
         first_token: float | None = None
         tokens = 0
@@ -412,6 +416,11 @@ class OllamaGateway:
                     if think_piece:
                         thinking.append(think_piece)
                         callbacks.on_thinking(think_piece)
+                    for call in msg.get("tool_calls") or []:
+                        function = call.get("function") if isinstance(call, dict) else None
+                        if isinstance(function, dict):
+                            tool_calls.append({"name": str(function.get("name") or ""),
+                                               "arguments": function.get("arguments")})
                     piece = msg.get("content") or ""
                     if piece:
                         for inside, text in splitter.feed(piece):
@@ -454,7 +463,7 @@ class OllamaGateway:
             output_seconds=float(final.get("eval_duration") or 0) * ns,
             load_seconds=float(final.get("load_duration") or 0) * ns,
             total_seconds=time.monotonic() - started, first_token_seconds=first_token,
-            done_reason=str(final.get("done_reason", "")),
+            done_reason=str(final.get("done_reason", "")), tool_calls=tool_calls,
         )
 
 

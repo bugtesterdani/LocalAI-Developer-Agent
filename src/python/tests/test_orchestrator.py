@@ -1125,6 +1125,69 @@ def test_agent_sieht_eigene_notizen_der_vorigen_schritte(ollama, tmp_path):
     assert any(e.kind == ActivityKind.Metric and "Eigene Notizen" in (e.text or "") for e in broker.of("Coder"))
 
 
+def test_gpt_oss_funktionsaufruf_und_leere_antwort(ollama, tmp_path):
+    """Echter Lauf mit gpt-oss:20b: Antwort nur aus Denkphase, die Aktion kam als Funktionsaufruf (Ollama liefert sie in
+    message.tool_calls, der Text bleibt leer) – 20 Schritte lang „No JSON object found“. Jetzt wird der Aufruf als
+    Aktion übernommen und eine leere Antwort gezielt zurückgemeldet."""
+    seen: list[str] = []
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role != "Planner":
+            return scripted_answer(body)
+        seen.append(user)
+        if len(seen) == 1:
+            return "", "We need to read calc.py. Let's read it.", [
+                {"name": "read_file", "arguments": {"path": "src/calc.py"}}]
+        if len(seen) == 2:
+            assert 'source="File.Read' in user, "Funktionsaufruf wurde als Leseaktion ausgeführt"
+            return "", "We need to plan tasks. Let's plan.", []
+        assert "Your visible answer was empty" in user
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: len(seen) >= 3, timeout=60)
+    orch.stop()
+    thread.join(5)
+    reads = [p for p in broker.proposals.values() if p.tool.startswith("File.Read") and p.agent.value == "Planner"]
+    assert reads and reads[0].targets[0].path == "src/calc.py"
+    assert any("Funktionsaufruf übernommen" in (e.text or "") for e in broker.of("Planner"))
+
+
+def test_funktionsaufrufe_werden_zu_aktionen():
+    from localai.orchestrator.protocol import parse, tool_call_action
+    read = parse(tool_call_action([{"name": "functions.read_file", "arguments": '{"path": "a.py", "start": 1, "end": 9}'},
+                                   {"name": "read_file", "arguments": {"paths": ["b.py"]}}]))
+    assert read.kind == "read" and [(f.path, f.start, f.end) for f in read.files] == [("a.py", 1, 9), ("b.py", None, None)]
+    assert parse(tool_call_action([{"name": "list_dir", "arguments": {"path": "src", "depth": 2}}])).path == "src"
+    assert parse(tool_call_action([{"name": "grep", "arguments": {"query": "LIMIT"}}])).query == "LIMIT"
+    plan = parse(tool_call_action([{"name": "submit_plan", "arguments": {"message_de": "Plan", "tasks": []}}]))
+    assert plan.kind == "finish" and plan.result["message_de"] == "Plan"
+    assert parse(tool_call_action([{"name": "x", "arguments": {"action": "list", "path": "."}}])).kind == "list"
+    assert tool_call_action([{"name": "python", "arguments": {"code": "print(1)"}}]) is None
+
+
+def test_unplausible_kalibrierung_zeichen_je_token_wird_nicht_uebernommen():
+    from types import SimpleNamespace
+
+    from localai.orchestrator.agents import Agent
+    from localai.orchestrator.models import Limits, ModelProfile
+    from localai.orchestrator.runtime import FairGate
+    events = []
+    reporter = SimpleNamespace(event=lambda *a, **k: events.append(a), state=lambda *a, **k: None)
+    profile = ModelProfile("planung", "gpt-oss:20b", 32768, 4096)
+
+    def agent(cpt):
+        return Agent("Planner", profile, SimpleNamespace(chars_per_token=cpt), None, FairGate(), None, reporter, None,
+                     Limits(), list)
+    assert agent(30.4).chars_per_token == 3.0 and "unplausibel" in events[-1][2]
+    assert abs(agent(4.0).chars_per_token - 3.6) < 1e-9 and len(events) == 1
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():

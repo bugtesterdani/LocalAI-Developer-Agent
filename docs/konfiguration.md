@@ -294,6 +294,8 @@ uv run --project src/python python -m localai.orchestrator.calibrate --profile l
 uv run --project src/python python -m localai.orchestrator.calibrate --profile standard
 ```
 
+Die Kalibrierung misst auch Zeichen je Token. Werte außerhalb 1–8 (Messung) bzw. 1,5–6 (Betrieb) gelten als unplausibel; dann rechnet der Orchestrator mit 3 und meldet „unplausibel … Profil neu kalibrieren“ im Verlauf des Agenten.
+
 Ollama auf einem anderen Rechner: zusätzlich `--ohne-vram-messung`. Ergebnis: `calibration.json` und ein Bericht
 `kalibrierung-*.md` im Datenordner. Details: [Prüfanleitung M3, Abschnitt 3](pruefung-M3.md).
 

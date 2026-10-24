@@ -201,6 +201,12 @@ des Orchestrators, nicht, was er selbst zuvor überlegt hatte. Jetzt stehen zus�
 Rückmeldungen des Orchestrators bleiben immer vollständig. Einstellungen: `history` in `models.json`
 (`docs/konfiguration.md`). Offen: Wirkung auf Schrittzahl und Qualität mit echten Modellen messen.
 
+**Funktionsaufrufe von gpt-oss (Stand 24.10.2026):** gpt-oss schreibt die Aktion oft nicht als Text, sondern ruft eine
+„Funktion“ auf (Ollama liefert sie in `message.tool_calls`, der Antworttext bleibt leer). Solche Aufrufe werden jetzt
+als Aktion übernommen (`read_file` → `read`, `list_dir` → `list`, …). Eine Antwort nur aus der Denkphase bekommt eine
+eigene Rückmeldung statt „No JSON object found“. Unplausible Kalibrierwerte für Zeichen je Token (außerhalb 1,5–6) werden
+nicht übernommen, sonst würde der Prompt um ein Vielfaches unterschätzt.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
