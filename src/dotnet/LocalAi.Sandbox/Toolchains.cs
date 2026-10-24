@@ -463,7 +463,7 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
     /// <summary>
     /// Windows-ZIP: Liegen die Programme aus „binaries“ dort, wo sie nach dem Entpacken erwartet werden? Sonst fiele es
     /// erst nach dem VM-Aufbau auf („Binary fehlt nach der Installation“). Mit deploy kann ein Programm auch anders
-    /// hineinkommen – dann wird nicht geprüft.
+    /// hineinkommen – dann wird nicht geprüft; mit postInstall nur, was postInstall selbst aufruft.
     /// </summary>
     public static List<string> ArchiveBinaryProblems(ToolchainManifest manifest, string directory, IReadOnlyDictionary<string, string> files)
     {
@@ -486,7 +486,13 @@ public sealed class ToolchainRegistry(string registryPath, string? toolchainsDir
             return problems;
         }
         var present = new HashSet<string>(entries, StringComparer.OrdinalIgnoreCase);
-        foreach (var b in manifest.Binaries.Where(b => !ToolchainValidator.IsSystemBinary(b.Path)))
+        // postInstall läuft nach dem Entpacken und kann weitere Programme erzeugen (z. B. Scripts\pytest.exe aus Wheels):
+        // dann müssen vorab nur die Programme im ZIP liegen, die postInstall selbst aufruft.
+        var postInstall = manifest.PostInstall ?? [];
+        var needed = postInstall.Count == 0
+            ? manifest.Binaries
+            : manifest.Binaries.Where(b => postInstall.Any(c => c.Binary == b.Name)).ToList();
+        foreach (var b in needed.Where(b => !ToolchainValidator.IsSystemBinary(b.Path)))
         {
             var wanted = b.Path.Replace('\\', '/');
             if (present.Contains(wanted))

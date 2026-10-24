@@ -126,6 +126,22 @@ public sealed class ToolchainTests : IDisposable
         Assert.Contains(Problems(), p => p.Contains("unter Testumgebung-Cli-1.0.0/Testumgebung.Cli.exe", StringComparison.Ordinal));
     }
 
+    [Fact, Trait("Pruefung", "M2c")]
+    public void Programme_aus_postInstall_muessen_nicht_im_ZIP_liegen()
+    {
+        // postInstall läuft nach dem Entpacken und kann Programme erzeugen (z. B. pytest.exe aus Offline-Wheels).
+        var manifest = DemoManifest
+            .Replace("""{ "name": "demo", "path": "bin/demo.exe" }""",
+                     """{ "name": "demo", "path": "bin/demo.exe" }, { "name": "pytest", "path": "Scripts/pytest.exe" }""", StringComparison.Ordinal)
+            .Replace("\"selfTest\"", "\"postInstall\": [ { \"binary\": \"demo\", \"arguments\": [\"install\"] } ], \"selfTest\"", StringComparison.Ordinal);
+        var dir = CreateDemo("post-1.0", manifest);
+        Assert.Empty(Registry().Inspect(dir, null, TestContext.Current.CancellationToken).Info.Problems);
+
+        File.WriteAllBytes(Path.Combine(dir, "demo.zip"), CreateZip("other.exe"));
+        var problem = Assert.Single(Registry().Inspect(dir, null, TestContext.Current.CancellationToken).Info.Problems);
+        Assert.Contains("Binary demo: bin/demo.exe ist nicht im ZIP", problem, StringComparison.Ordinal);
+    }
+
     [Fact, Trait("Pruefung", "SEC-20")]
     public void M5_mehrstufige_Aktionen_Windows_Programme_und_deploy_streng_geprueft()
     {
