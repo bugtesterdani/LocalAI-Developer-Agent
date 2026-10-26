@@ -1371,9 +1371,46 @@ def test_nicht_angewendete_aenderungen_werden_als_entwurf_gespeichert(ollama, tm
     thread.join(5)
     summary = next(c for c in broker.chats("Orchestrator") if "Entwurf gespeichert" in c)
     assert "T1/pruefung/neu.tproj.json" in summary
-    drafts = tmp_path / "entwuerfe" / "run-t" / "T1"
+    goals = list((tmp_path / "entwuerfe" / "run-t").iterdir())
+    drafts = goals[0] / "T1"
+    assert len(goals) == 1 and str(goals[0]) in summary, "eigener Ordner je Ziel"
     assert (drafts / "pruefung" / "neu.tproj.json").read_text(encoding="utf-8") == '{"format": "testumgebung.projekt"}\n'
     assert "+++ b/pruefung/neu.tproj.json" in (drafts / "T1.patch").read_text(encoding="utf-8")
+
+
+def test_entwuerfe_mit_unsicheren_ids_teilfreigabe_und_mehreren_zielen(tmp_path):
+    """Review: Aufgaben-IDs vom Modell nicht als Pfad, abgewählte Dateien einer Teilfreigabe behalten, zweites Ziel
+    überschreibt das erste nicht."""
+    from types import SimpleNamespace
+
+    from localai.orchestrator.run import Orchestrator
+    from localai.orchestrator.tools import PatchOutcome
+
+    def diff(path, text):
+        return f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+{text}\n"
+
+    fake = SimpleNamespace(data_dir=tmp_path / "data", run_id="run-x")
+    fake._draft_root = lambda: Orchestrator._draft_root(fake)
+    escape = str(tmp_path / "draussen")
+    tasks = [
+        SimpleNamespace(task_id=escape, result={"patch": diff("a.txt", "A"), "apply": None}),
+        SimpleNamespace(task_id="../../oben", result={"patch": diff("b.txt", "B"), "apply": None}),
+        SimpleNamespace(task_id="T3", result={"patch": diff("c.txt", "C") + diff("d.txt", "D"),
+                                              "apply": PatchOutcome(True, "applied", files=["c.txt"], deselected=["d.txt"])}),
+        SimpleNamespace(task_id="T4", result={"patch": diff("e.txt", "E"),
+                                              "apply": PatchOutcome(True, "applied", files=["e.txt"])}),
+    ]
+    first = Orchestrator._save_drafts(fake, tasks)
+    second = Orchestrator._save_drafts(fake, tasks)
+    assert not (tmp_path / "draussen").exists() and not (tmp_path / "oben").exists()
+    written = sorted(p.relative_to(tmp_path / "data").as_posix() for p in (tmp_path / "data").rglob("*") if p.is_file())
+    assert all(p.startswith("entwuerfe/run-x/") for p in written)
+    goals = sorted((tmp_path / "data" / "entwuerfe" / "run-x").iterdir())
+    assert len(goals) == 2 and first != second, "zweites Ziel in eigenem Ordner"
+    t3 = goals[0] / "T3"
+    assert (t3 / "d.txt").read_text(encoding="utf-8") == "D\n" and not (t3 / "c.txt").exists()
+    assert "d.txt" in (t3 / "T3.patch").read_text(encoding="utf-8") and "c.txt" not in (t3 / "T3.patch").read_text("utf-8")
+    assert not (goals[0] / "T4").exists(), "vollständig angewendet – kein Entwurf"
 
 
 # ---------------------------------------------------------------------- M5: weitere Sprachen

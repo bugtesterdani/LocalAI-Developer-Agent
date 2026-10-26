@@ -843,42 +843,66 @@ class Orchestrator:
         return finish
 
     def _save_drafts(self, tasks: list[dag.Task]) -> str | None:
-        """Änderungen, die nicht angewendet wurden (abgelehnt, abgelaufen, passten nicht), als Entwürfe im Datenordner:
-        neue Dateien mit ihrem Inhalt, geänderte als .patch. So geht fertige Arbeit nicht verloren; in den Projektordner
-        kommt nur, was du über die Übernahme freigibst."""
+        """Änderungen, die nicht angewendet wurden (abgelehnt, abgelaufen, passten nicht, bei der Freigabe abgewählt), als
+        Entwürfe im Datenordner: neue Dateien mit ihrem Inhalt, dazu je Aufgabe die .patch-Datei. So geht fertige Arbeit
+        nicht verloren; in den Projektordner kommt nur, was du über die Übernahme freigibst."""
         unapplied: list[tuple[str, str]] = []
         for t in tasks:
             r = t.result or {}
             patch = r.get("patch") or r.get("test_patch") or r.get("fix_patch") or ""
             outcome = r.get("apply")
-            if patch.strip() and not (isinstance(outcome, PatchOutcome) and outcome.applied):
-                unapplied.append((t.task_id, patch))
+            if not patch.strip():
+                continue
+            if isinstance(outcome, PatchOutcome) and outcome.applied:
+                # Teilweise freigegeben: nur die abgewählten Dateien sind noch offen.
+                patch = "\n".join(sec for path in outcome.deselected if (sec := patching.file_section(patch, path)))
+                if not patch.strip():
+                    continue
+            unapplied.append((t.task_id, patch))
         if not unapplied:
             return None
-        root = self.data_dir / "entwuerfe" / self.run_id
+        root = self._draft_root()
         saved: list[str] = []
+        names: list[str] = []
         for task_id, patch in unapplied:
-            folder = root / task_id
+            # Aufgaben-IDs stammen vom Modell: nur als einfacher, ungefährlicher Ordnername verwenden.
+            name = re.sub(r"[^A-Za-z0-9_-]", "_", task_id)[:40].strip("_") or "Aufgabe"
+            while name in names:
+                name += "_"
+            names.append(name)
+            folder = root / name
             folder.mkdir(parents=True, exist_ok=True)
-            (folder / f"{task_id}.patch").write_text(patch.rstrip("\n") + "\n", encoding="utf-8")
+            (folder / f"{name}.patch").write_text(patch.rstrip("\n") + "\n", encoding="utf-8")
             try:
                 files = patching.parse(patch + "\n")
             except patching.PatchError:
                 files = []
             for f in files:
                 rel = pathlib.PurePosixPath(f.path)
-                if rel.is_absolute() or not rel.parts or any(p in ("..", "") or ":" in p for p in rel.parts):
+                if rel.is_absolute() or not rel.parts or any(p in ("..", ".", "") or ":" in p or "\\" in p for p in rel.parts):
                     continue
                 if f.kind == "create":
                     target = folder / pathlib.Path(*rel.parts)
+                    if not target.resolve().is_relative_to(folder.resolve()):
+                        continue
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(patching.new_file(f).encode())
-                    saved.append(f"{task_id}/{rel}")
-        where = str(root)
-        text = f"Nicht angewendete Änderungen ({', '.join(t for t, _ in unapplied)}) als Entwurf gespeichert: {where}"
+                    saved.append(f"{name}/{rel}")
+        text = f"Nicht angewendete Änderungen ({', '.join(names)}) als Entwurf gespeichert: {root}"
         if saved:
             text += " – neue Dateien: " + ", ".join(saved[:8]) + (" …" if len(saved) > 8 else "")
-        return text + " (je Aufgabe außerdem die vollständige .patch-Datei)."
+        return text + " (je Aufgabe außerdem die .patch-Datei)."
+
+    def _draft_root(self) -> pathlib.Path:
+        """Eigener Ordner je Ziel (mehrere Ziele in einer Sitzung teilen sich die Run-ID) – nie einen älteren überschreiben."""
+        base = self.data_dir / "entwuerfe" / re.sub(r"[^A-Za-z0-9_-]", "_", self.run_id)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        candidate, n = base / stamp, 1
+        while candidate.exists():
+            n += 1
+            candidate = base / f"{stamp}-{n}"
+        candidate.mkdir(parents=True)
+        return candidate
 
     @staticmethod
     def _apply_text(r: dict[str, Any]) -> str:
