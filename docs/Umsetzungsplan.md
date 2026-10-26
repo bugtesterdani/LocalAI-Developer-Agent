@@ -217,6 +217,10 @@ JSON-Objekt), sondern klar zurückgemeldet; im Verlauf steht „Antwort an der A
 Zusammenfassung der eigenen Notizen läuft ohne Denkphase (`think: false`), sonst lieferten von sich aus denkende Modelle
 (qwen3.6) eine leere Zusammenfassung.
 
+**Fragen ohne Arbeitsauftrag (Stand 26.10.2026):** Ist das Ziel nur eine Frage („Kannst du …?“), antwortet der Planner
+in `message_de` und schließt mit `"tasks": []` ab. Bisher galt das als ungültig und lief bis zum Schrittlimit. Es gibt
+dann keinen Plan, keinen Prüflauf und nichts zu übernehmen.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
