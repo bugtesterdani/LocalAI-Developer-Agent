@@ -497,7 +497,6 @@ class Orchestrator:
             return
         if not plan_tasks:
             # Nur eine Frage beantwortet: kein Plan, keine Prüfung, nichts zu übernehmen.
-            self.previous_summary = f"Question answered (no changes): {state.goal[:500]}"
             self.reporter.state("Planner", AgentState.Done, "Frage beantwortet – kein Plan nötig")
             self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")
             return
@@ -661,7 +660,11 @@ class Orchestrator:
                 self.reporter.chat("Planner", f"Kein Plan: {err}")
                 return None, []
             if result.result.get("answer_only"):
-                self.reporter.chat("Planner", result.result["message_de"][:MAX_CHAT])
+                answer = result.result["message_de"]
+                self.reporter.chat("Planner", answer[:MAX_CHAT])
+                # Frage und Antwort für die nächste Nachricht („nimm die zweite Variante“ muss sich darauf beziehen können).
+                self.previous_summary = (f"Question answered, no changes made.\nQuestion: {state.goal[:500]}\n"
+                                         f"Your answer (German): {answer}")[:3000]
                 return [], []
             added_tester = ensure_tester_task(state.goal, result.result["tasks"], result.result.get("acceptance") or [])
             self._plan_raw = [dict(t) for t in result.result["tasks"] if isinstance(t, dict)]

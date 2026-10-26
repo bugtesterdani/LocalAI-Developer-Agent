@@ -1283,11 +1283,13 @@ def test_frage_ohne_auftrag_wird_vom_planner_direkt_beantwortet(ollama, tmp_path
     """Echter Lauf: „Kannst du aus einem EAGLE-Schaltplan ein Layout entwerfen?“ – gpt-oss antwortete korrekt mit finish
     und message_de, ohne tasks; das galt als ungültig, 20 Schritte lang. Jetzt ist die Antwort das Ergebnis."""
     roles = []
+    prompts_seen = []
 
     def responder(body):
         system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
         role = re.search(r"You are the (\w+) agent", system)[1]
         roles.append(role)
+        prompts_seen.append(user)
         assert role == "Planner", "keine weiteren Agenten"
         assert '"tasks": [] – no plan needed' in user
         return ('```json\n{"action": "finish", "result": {"message_de": "Ja, das geht: Board aus dem Schaltplan erzeugen, '
@@ -1299,9 +1301,14 @@ def test_frage_ohne_auftrag_wird_vom_planner_direkt_beantwortet(ollama, tmp_path
     broker.send(OrchestratorCommandKind.Chat, "Kannst du aus einem EAGLE Schaltplan ein EAGLE Layout entwerfen?")
     wait_for(lambda: any(e.kind == ActivityKind.State and e.state == AgentState.Done and "abgeschlossen" in (e.text or "")
                          for e in broker.of("Orchestrator")), timeout=60)
+    assert roles == ["Planner"], "ein Schritt genügt"
+    # Folgefrage: Frage und Antwort stehen im Kontext des nächsten Planner-Aufrufs.
+    broker.send(OrchestratorCommandKind.Chat, "Dann mach den zweiten Schritt ausführlicher.")
+    wait_for(lambda: len(prompts_seen) >= 2, timeout=60)
+    assert "Question: Kannst du aus einem EAGLE Schaltplan" in prompts_seen[1]
+    assert "Your answer (German): Ja, das geht: Board aus dem Schaltplan" in prompts_seen[1]
     orch.stop()
     thread.join(5)
-    assert roles == ["Planner"], "ein Schritt genügt"
     assert any(c.startswith("Ja, das geht") for c in broker.chats("Planner"))
     assert not [p for p in broker.proposals.values() if p.tool.startswith("Toolchain")], "kein Prüflauf"
     plan = protocol.validate_result("Planner", {"message_de": "Antwort", "tasks": []})
