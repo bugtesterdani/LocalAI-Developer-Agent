@@ -1317,6 +1317,65 @@ def test_frage_ohne_auftrag_wird_vom_planner_direkt_beantwortet(ollama, tmp_path
         protocol.validate_result("Planner", {"message_de": "Plan", "tasks": "T1"})
 
 
+def test_abgelaufener_patch_wird_nach_rueckkehr_erneut_vorgeschlagen(ollama, tmp_path):
+    """Echter Lauf: Die Freigabe für den fertigen Patch lief ab, während der Nutzer weg war – die Aufgabe galt als
+    erledigt, die Datei war verloren („Es wurde keine Änderung angewendet“). Jetzt: warten und erneut vorschlagen."""
+    applies = []
+
+    def decide(request):
+        if request.tool == "Patch.Apply" and request.agent.value == "Coder":
+            applies.append(request)
+            return ProposalState.Expired if len(applies) == 1 else ProposalState.Succeeded
+        return ProposalState.Succeeded
+
+    broker = FakeBroker(test_runs=[], toolchains=[], decide=decide)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    try:
+        wait_for(lambda: any("denselben Patch noch einmal" in c for c in broker.chats("Orchestrator")), timeout=60)
+        assert len(applies) == 1
+    except BaseException:
+        broker.send(OrchestratorCommandKind.Chat, "weiter")  # wartenden Agenten freigeben, sonst hängt das Testende
+        orch.stop()
+        raise
+    broker.send(OrchestratorCommandKind.Chat, "weiter")
+    wait_for(lambda: finished(broker), timeout=60)
+    orch.stop()
+    thread.join(5)
+    assert len(applies) >= 2 and applies[1].arguments["patch"] == applies[0].arguments["patch"]
+    assert any("Patch(es) angewendet" in c for c in broker.chats("Orchestrator"))
+
+
+def test_nicht_angewendete_aenderungen_werden_als_entwurf_gespeichert(ollama, tmp_path):
+    """Abgelehnte Patches: neue Dateien landen mit Inhalt, jede Änderung als .patch im Datenordner."""
+
+    def responder(body):
+        system = body["messages"][0]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Planner":
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": [], "tasks": ['
+                    '{"id": "T1", "role": "Coder", "title": "Neu", "description": "x", "reads": [], '
+                    '"writes": ["pruefung/neu.tproj.json"], "depends_on": []}]}}\n```'), ""
+        if role == "Coder":
+            return ('pruefung/neu.tproj.json\n<<<<<<< SEARCH\n=======\n{"format": "testumgebung.projekt"}\n>>>>>>> REPLACE\n'
+                    '```json\n{"action": "finish", "result": {"message_de": "angelegt"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[],
+                        decide=lambda r: ProposalState.Denied if r.tool == "Patch.Apply" else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Lege das Prüfprogramm an.")
+    wait_for(lambda: finished(broker) or any("Entwurf gespeichert" in c for c in broker.chats("Orchestrator")), timeout=60)
+    orch.stop()
+    thread.join(5)
+    summary = next(c for c in broker.chats("Orchestrator") if "Entwurf gespeichert" in c)
+    assert "T1/pruefung/neu.tproj.json" in summary
+    drafts = tmp_path / "entwuerfe" / "run-t" / "T1"
+    assert (drafts / "pruefung" / "neu.tproj.json").read_text(encoding="utf-8") == '{"format": "testumgebung.projekt"}\n'
+    assert "+++ b/pruefung/neu.tproj.json" in (drafts / "T1.patch").read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():

@@ -60,6 +60,7 @@ from localai.orchestrator.runtime import (
     RunClock,
 )
 from localai.orchestrator.tools import PatchOutcome, ToolBridge, ToolchainOutcome
+from localai.worker import patching
 
 SEVERITY_DE = {"high": "hoch", "medium": "mittel", "low": "niedrig"}
 STATE_DE = {dag.TaskState.DONE: "erledigt", dag.TaskState.FAILED: "gescheitert", dag.TaskState.CANCELLED: "abgebrochen",
@@ -817,6 +818,15 @@ class Orchestrator:
                 result["apply"] = PatchOutcome(False, "no-rights", note_de="nicht angewendet (Recht Modify/Create fehlt)")
                 return None
             outcome = self.bridge.apply_patch(role, task_id, patch + "\n", label, cancel)
+            while outcome.state == "expired":
+                # Niemand hat entschieden (Nutzer nicht da): die fertige Änderung nicht verwerfen, sondern warten und
+                # dieselbe Änderung erneut vorschlagen.
+                self.reporter.state(role, AgentState.WaitingUser, f"{task_id}: Patch-Freigabe abgelaufen – wartet auf dich",
+                                    task_id)
+                self.reporter.chat("Orchestrator", f"{role}: Die Freigabe für den Patch von {task_id} ist abgelaufen. Schreib "
+                                   "eine Nachricht (z. B. „weiter“), dann schlage ich denselben Patch noch einmal vor.")
+                self.bridge.clock.wait_for_user(cancel)
+                outcome = self.bridge.apply_patch(role, task_id, patch + "\n", label, cancel)
             result["apply"] = outcome
             if outcome.applied:
                 with self._applied_lock:
@@ -831,6 +841,44 @@ class Orchestrator:
             return None
 
         return finish
+
+    def _save_drafts(self, tasks: list[dag.Task]) -> str | None:
+        """Änderungen, die nicht angewendet wurden (abgelehnt, abgelaufen, passten nicht), als Entwürfe im Datenordner:
+        neue Dateien mit ihrem Inhalt, geänderte als .patch. So geht fertige Arbeit nicht verloren; in den Projektordner
+        kommt nur, was du über die Übernahme freigibst."""
+        unapplied: list[tuple[str, str]] = []
+        for t in tasks:
+            r = t.result or {}
+            patch = r.get("patch") or r.get("test_patch") or r.get("fix_patch") or ""
+            outcome = r.get("apply")
+            if patch.strip() and not (isinstance(outcome, PatchOutcome) and outcome.applied):
+                unapplied.append((t.task_id, patch))
+        if not unapplied:
+            return None
+        root = self.data_dir / "entwuerfe" / self.run_id
+        saved: list[str] = []
+        for task_id, patch in unapplied:
+            folder = root / task_id
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{task_id}.patch").write_text(patch.rstrip("\n") + "\n", encoding="utf-8")
+            try:
+                files = patching.parse(patch + "\n")
+            except patching.PatchError:
+                files = []
+            for f in files:
+                rel = pathlib.PurePosixPath(f.path)
+                if rel.is_absolute() or not rel.parts or any(p in ("..", "") or ":" in p for p in rel.parts):
+                    continue
+                if f.kind == "create":
+                    target = folder / pathlib.Path(*rel.parts)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(patching.new_file(f).encode())
+                    saved.append(f"{task_id}/{rel}")
+        where = str(root)
+        text = f"Nicht angewendete Änderungen ({', '.join(t for t, _ in unapplied)}) als Entwurf gespeichert: {where}"
+        if saved:
+            text += " – neue Dateien: " + ", ".join(saved[:8]) + (" …" if len(saved) > 8 else "")
+        return text + " (je Aufgabe außerdem die vollständige .patch-Datei)."
 
     @staticmethod
     def _apply_text(r: dict[str, Any]) -> str:
@@ -1128,6 +1176,9 @@ class Orchestrator:
                          "Vorbereitung (nur lesen), dann der Diff je Datei – Dateien kannst du abwählen.")
         else:
             lines.append("Es wurde keine Änderung angewendet; dein Projektordner ist unverändert.")
+        drafts = self._save_drafts(tasks)
+        if drafts:
+            lines.append(drafts)
         self.reporter.chat("Orchestrator", "\n".join(lines))
         self.previous_summary = "\n".join(lines)[:3000]
         blocked = verdict.startswith("angehalten: Offlinepakete")

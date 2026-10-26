@@ -221,6 +221,10 @@ Zusammenfassung der eigenen Notizen läuft ohne Denkphase (`think: false`), sons
 in `message_de` und schließt mit `"tasks": []` ab. Bisher galt das als ungültig und lief bis zum Schrittlimit. Es gibt
 dann keinen Plan, keinen Prüflauf und nichts zu übernehmen.
 
+**Abgelaufene Patch-Freigaben und Entwürfe (Stand 26.10.2026):** Lief die Freigabe für einen fertigen Patch ab, galt die
+Aufgabe bisher als erledigt und die Änderung war verloren. Jetzt wartet der Agent auf den Nutzer und schlägt denselben
+Patch erneut vor. Nicht angewendete Änderungen werden am Ende als Entwurf im Datenordner gespeichert (`entwuerfe\<Run>`).
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
