@@ -1317,6 +1317,102 @@ def test_frage_ohne_auftrag_wird_vom_planner_direkt_beantwortet(ollama, tmp_path
         protocol.validate_result("Planner", {"message_de": "Plan", "tasks": "T1"})
 
 
+def test_abgelaufener_patch_wird_nach_rueckkehr_erneut_vorgeschlagen(ollama, tmp_path):
+    """Echter Lauf: Die Freigabe für den fertigen Patch lief ab, während der Nutzer weg war – die Aufgabe galt als
+    erledigt, die Datei war verloren („Es wurde keine Änderung angewendet“). Jetzt: warten und erneut vorschlagen."""
+    applies = []
+
+    def decide(request):
+        if request.tool == "Patch.Apply" and request.agent.value == "Coder":
+            applies.append(request)
+            return ProposalState.Expired if len(applies) == 1 else ProposalState.Succeeded
+        return ProposalState.Succeeded
+
+    broker = FakeBroker(test_runs=[], toolchains=[], decide=decide)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    try:
+        wait_for(lambda: any("denselben Patch noch einmal" in c for c in broker.chats("Orchestrator")), timeout=60)
+        assert len(applies) == 1
+    except BaseException:
+        broker.send(OrchestratorCommandKind.Chat, "weiter")  # wartenden Agenten freigeben, sonst hängt das Testende
+        orch.stop()
+        raise
+    broker.send(OrchestratorCommandKind.Chat, "weiter")
+    wait_for(lambda: finished(broker), timeout=60)
+    orch.stop()
+    thread.join(5)
+    assert len(applies) >= 2 and applies[1].arguments["patch"] == applies[0].arguments["patch"]
+    assert any("Patch(es) angewendet" in c for c in broker.chats("Orchestrator"))
+
+
+def test_nicht_angewendete_aenderungen_werden_als_entwurf_gespeichert(ollama, tmp_path):
+    """Abgelehnte Patches: neue Dateien landen mit Inhalt, jede Änderung als .patch im Datenordner."""
+
+    def responder(body):
+        system = body["messages"][0]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Planner":
+            return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": [], "tasks": ['
+                    '{"id": "T1", "role": "Coder", "title": "Neu", "description": "x", "reads": [], '
+                    '"writes": ["pruefung/neu.tproj.json"], "depends_on": []}]}}\n```'), ""
+        if role == "Coder":
+            return ('pruefung/neu.tproj.json\n<<<<<<< SEARCH\n=======\n{"format": "testumgebung.projekt"}\n>>>>>>> REPLACE\n'
+                    '```json\n{"action": "finish", "result": {"message_de": "angelegt"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[],
+                        decide=lambda r: ProposalState.Denied if r.tool == "Patch.Apply" else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Lege das Prüfprogramm an.")
+    wait_for(lambda: finished(broker) or any("Entwurf gespeichert" in c for c in broker.chats("Orchestrator")), timeout=60)
+    orch.stop()
+    thread.join(5)
+    summary = next(c for c in broker.chats("Orchestrator") if "Entwurf gespeichert" in c)
+    assert "T1/pruefung/neu.tproj.json" in summary
+    goals = list((tmp_path / "entwuerfe" / "run-t").iterdir())
+    drafts = goals[0] / "T1"
+    assert len(goals) == 1 and str(goals[0]) in summary, "eigener Ordner je Ziel"
+    assert (drafts / "pruefung" / "neu.tproj.json").read_text(encoding="utf-8") == '{"format": "testumgebung.projekt"}\n'
+    assert "+++ b/pruefung/neu.tproj.json" in (drafts / "T1.patch").read_text(encoding="utf-8")
+
+
+def test_entwuerfe_mit_unsicheren_ids_teilfreigabe_und_mehreren_zielen(tmp_path):
+    """Review: Aufgaben-IDs vom Modell nicht als Pfad, abgewählte Dateien einer Teilfreigabe behalten, zweites Ziel
+    überschreibt das erste nicht."""
+    from types import SimpleNamespace
+
+    from localai.orchestrator.run import Orchestrator
+    from localai.orchestrator.tools import PatchOutcome
+
+    def diff(path, text):
+        return f"--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+{text}\n"
+
+    fake = SimpleNamespace(data_dir=tmp_path / "data", run_id="run-x")
+    fake._draft_root = lambda: Orchestrator._draft_root(fake)
+    escape = str(tmp_path / "draussen")
+    tasks = [
+        SimpleNamespace(task_id=escape, result={"patch": diff("a.txt", "A"), "apply": None}),
+        SimpleNamespace(task_id="../../oben", result={"patch": diff("b.txt", "B"), "apply": None}),
+        SimpleNamespace(task_id="T3", result={"patch": diff("c.txt", "C") + diff("d.txt", "D"),
+                                              "apply": PatchOutcome(True, "applied", files=["c.txt"], deselected=["d.txt"])}),
+        SimpleNamespace(task_id="T4", result={"patch": diff("e.txt", "E"),
+                                              "apply": PatchOutcome(True, "applied", files=["e.txt"])}),
+    ]
+    first = Orchestrator._save_drafts(fake, tasks)
+    second = Orchestrator._save_drafts(fake, tasks)
+    assert not (tmp_path / "draussen").exists() and not (tmp_path / "oben").exists()
+    written = sorted(p.relative_to(tmp_path / "data").as_posix() for p in (tmp_path / "data").rglob("*") if p.is_file())
+    assert all(p.startswith("entwuerfe/run-x/") for p in written)
+    goals = sorted((tmp_path / "data" / "entwuerfe" / "run-x").iterdir())
+    assert len(goals) == 2 and first != second, "zweites Ziel in eigenem Ordner"
+    t3 = goals[0] / "T3"
+    assert (t3 / "d.txt").read_text(encoding="utf-8") == "D\n" and not (t3 / "c.txt").exists()
+    assert "d.txt" in (t3 / "T3.patch").read_text(encoding="utf-8") and "c.txt" not in (t3 / "T3.patch").read_text("utf-8")
+    assert not (goals[0] / "T4").exists(), "vollständig angewendet – kein Entwurf"
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():

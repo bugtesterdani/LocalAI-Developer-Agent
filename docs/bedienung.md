@@ -109,6 +109,12 @@ Bis hierhin hat sich nur die Arbeitskopie in der Sandbox geändert. Die Übernah
 Beim Schreiben prüft der Broker jede Datei erneut. Hat sie sich seit der Vorschau verändert, wird **nichts**
 geschrieben. Die Originale werden gesichert, das Schreiben erfolgt atomar; bei einem Fehler wird alles zurückgesetzt.
 
+**Nicht angewendete Änderungen:** Läuft die Freigabe für einen Patch ab, wartet der Agent auf deine nächste Nachricht
+(z. B. „weiter“) und schlägt denselben Patch erneut vor. Was am Ende trotzdem nicht angewendet ist (abgelehnt, passte
+nicht), legt der Orchestrator als Entwurf im Datenordner ab: `%LOCALAPPDATA%\LocalAi\broker\entwuerfe\<Run>\<Zeitpunkt>\<Aufgabe>\` (eigener Ordner je Ziel)
+– neue Dateien mit ihrem Inhalt, dazu je Aufgabe die vollständige `.patch`-Datei. Der Pfad steht in der Zusammenfassung
+im Chat. In deinen Projektordner kommt nur, was du über die Übernahme freigibst.
+
 ## Chat-Befehle
 
 | Befehl | Wirkung |
