@@ -495,6 +495,11 @@ class Orchestrator:
         plan_tasks, acceptance = self._plan(state, agents["Planner"])
         if plan_tasks is None:
             return
+        if not plan_tasks:
+            # Nur eine Frage beantwortet: kein Plan, keine Prüfung, nichts zu übernehmen.
+            self.reporter.state("Planner", AgentState.Done, "Frage beantwortet – kein Plan nötig")
+            self.reporter.state("Orchestrator", AgentState.Done, "Run abgeschlossen – wartet auf deine nächste Nachricht")
+            return
         self._save_journal(state, plan_tasks, acceptance, "running")
         self._execute(state, agents, plan_tasks, acceptance)
 
@@ -628,7 +633,8 @@ class Orchestrator:
         text += ("\n\n## Task results\nOnly file changes and the findings of a task (\"notes\") reach the tasks that depend "
                  "on it. Prefer tasks that change files and read what they need themselves. Plan a separate analysis task "
                  "(Coder, \"writes\" empty) only when a large source must be digested for several later tasks; let those "
-                 "depend on it.")
+                 "depend on it.\nIf the goal is only a question (nothing to change, e.g. \"is it possible …?\"), answer it in "
+                 "German in message_de and finish with \"tasks\": [] – no plan needed.")
         if self.previous_summary:
             text += f"\n\n## Summary of the previous run\n{self.previous_summary}"
         if self.bridge is not None:
@@ -653,6 +659,13 @@ class Orchestrator:
             except (LimitReached, AgentFailed) as err:
                 self.reporter.chat("Planner", f"Kein Plan: {err}")
                 return None, []
+            if result.result.get("answer_only"):
+                answer = result.result["message_de"]
+                self.reporter.chat("Planner", answer[:MAX_CHAT])
+                # Frage und Antwort für die nächste Nachricht („nimm die zweite Variante“ muss sich darauf beziehen können).
+                self.previous_summary = (f"Question answered, no changes made.\nQuestion: {state.goal[:500]}\n"
+                                         f"Your answer (German): {answer}")[:3000]
+                return [], []
             added_tester = ensure_tester_task(state.goal, result.result["tasks"], result.result.get("acceptance") or [])
             self._plan_raw = [dict(t) for t in result.result["tasks"] if isinstance(t, dict)]
             try:

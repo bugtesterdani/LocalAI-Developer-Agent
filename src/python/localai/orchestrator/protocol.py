@@ -646,8 +646,14 @@ def validate_result(role: str, result: dict[str, Any], analysis_allowed: bool = 
         result.pop("notes", None)
     if role == "Planner":
         tasks = result.get("tasks")
+        if tasks in (None, []) and result["message_de"].strip():
+            # Nur eine Frage, kein Arbeitsauftrag: die Antwort in message_de genügt, es gibt nichts zu planen.
+            result["tasks"], result["acceptance"], result["verify"] = [], [], []
+            result["answer_only"] = True
+            return result
         if not isinstance(tasks, list) or not tasks:
-            raise ProtocolError("result.tasks must be a non-empty list.")
+            raise ProtocolError("result.tasks must be a list of tasks (or empty when the goal is only a question that "
+                                "message_de answers).")
         for t in tasks:
             if not isinstance(t, dict):
                 raise ProtocolError("Each task must be an object.")
