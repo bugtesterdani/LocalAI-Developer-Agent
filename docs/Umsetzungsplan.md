@@ -225,6 +225,10 @@ dann keinen Plan, keinen Prüflauf und nichts zu übernehmen.
 Aufgabe bisher als erledigt und die Änderung war verloren. Jetzt wartet der Agent auf den Nutzer und schlägt denselben
 Patch erneut vor. Nicht angewendete Änderungen werden am Ende als Entwurf im Datenordner gespeichert (`entwuerfe\<Run>`).
 
+**Ausgabe bis zum Kontextende (Stand 27.10.2026):** Ollama zählt die Denkphase zur Ausgabegrenze (`num_predict`). Ein
+Denkmodell schrieb eine ganze Projektdatei schon in der Denkphase und wurde nach 32.768 Token abgeschnitten. Neue
+Profiloption `outputUpToContext`: Ausgabe darf den Rest des Kontexts nach der Eingabe nutzen.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |
