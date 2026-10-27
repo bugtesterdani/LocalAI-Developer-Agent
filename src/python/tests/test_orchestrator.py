@@ -1446,6 +1446,12 @@ def test_nur_edit_bloecke_ohne_abschluss_json():
     assert protocol.parse(text + '```json\n{"action": "read", "files": [{"path": "x.py"}]}\n```').kind == "read"
     with pytest.raises(protocol.ProtocolError, match="No JSON object found"):
         protocol.parse("Nur Text ohne Blöcke.")
+    # Review: Planner und Reviewer ändern keine Dateien – nur Blöcke sind für sie keine gültige Antwort.
+    for role in ("Planner", "Reviewer"):
+        planner = protocol.parse(text)
+        protocol.resolve_patch(role, planner, [], lambda p: None)
+        with pytest.raises(protocol.ProtocolError, match="only edit blocks"):
+            protocol.validate_result(role, planner.result)
 
 
 # ---------------------------------------------------------------------- M5: weitere Sprachen

@@ -17,6 +17,8 @@ MAX_READ_FILES = 8
 RESULT_KEYS = {"message_de", "tasks", "patch", "test_plan", "test_patch", "verdict", "findings", "fix_patch", "hypothesis"}
 # Rolle → Feld mit dem Unified Diff des Ergebnisses.
 PATCH_FIELD = {"Coder": "patch", "Tester": "test_patch", "Debugger": "fix_patch"}
+# Ergebnis aus Edit-Blöcken ohne Abschluss-JSON (protocol.parse)
+IMPLICIT_EDITS = "_implicit_edits"
 _FENCE_LINE = re.compile(r"^[ \t]*```[ \t]*([A-Za-z0-9_+.#-]*)[ \t]*$")
 _SEARCH = re.compile(r"^[ \t]*<{5,9}[ \t]*SEARCH[ \t]*$")
 _DIVIDER = re.compile(r"^[ \t]*={5,9}[ \t]*$")
@@ -336,7 +338,8 @@ def parse(text: str) -> Action:
             raise
         paths = sorted({e.path for e in edits if e.path})
         message = "Änderungen an " + ", ".join(paths) if paths else "Änderungen als Edit-Blöcke"
-        return Action("finish", visible.strip(), result={"message_de": message}, edits=edits)
+        # Markiert: nur Rollen mit Patch (Coder, Tester, Debugger) dürfen so abschließen – siehe validate_result.
+        return Action("finish", visible.strip(), result={"message_de": message, IMPLICIT_EDITS: True}, edits=edits)
     try:
         data = loads_lenient(raw)
     except json.JSONDecodeError as err:
@@ -685,6 +688,9 @@ def validate_result(role: str, result: dict[str, Any], analysis_allowed: bool = 
 
     ``analysis_allowed``: Aufgabe ohne zu ändernde Dateien – der Coder darf dann ohne Patch abschließen, wenn er seine
     Erkenntnisse in ``notes`` für die folgenden Aufgaben festhält."""
+    if result.pop(IMPLICIT_EDITS, False) and role not in PATCH_FIELD:
+        raise ProtocolError("Your answer had only edit blocks. You change no files; finish with exactly one ```json block "
+                            "as described for your role.")
     _str(result, "message_de")
     notes = _notes_text(result.get("notes"))
     if notes:
