@@ -1413,6 +1413,17 @@ def test_entwuerfe_mit_unsicheren_ids_teilfreigabe_und_mehreren_zielen(tmp_path)
     assert not (goals[0] / "T4").exists(), "vollständig angewendet – kein Entwurf"
 
 
+def test_leerer_ordner_ist_die_projektwurzel():
+    """Echter Lauf (gpt-oss): search mit "path": "" ergab „Every path must be a non-empty string“."""
+    for raw in ('""', '"  "', "null", '"/"', '"./"', '"."', '"\\\\"'):
+        a = protocol.parse('```json\n{"action": "search", "query": "testumgebung", "path": ' + raw + '}\n```')
+        assert a.path == ".", raw
+        assert protocol.parse('```json\n{"action": "list", "path": ' + raw + ', "depth": 2}\n```').path == ".", raw
+    assert protocol.parse('```json\n{"action": "list", "path": "./src/"}\n```').path == "src/"
+    with pytest.raises(protocol.ProtocolError, match="non-empty"):
+        protocol.parse('```json\n{"action": "read", "files": [{"path": ""}]}\n```')
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
