@@ -157,12 +157,15 @@ class Agent:
             parts = assemble(self.system, task, history.lines(), evidence, self.budget, self.chars_per_token)
             # Nicht (vollständig) sichtbare Evidenz: weggelassen oder gekürzt – darauf nie verweisen statt erneut anzufragen.
             dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence} | set(parts.truncated_evidence)
+            limit = self._output_limit(parts.prompt_tokens)
             request = ChatRequest(
                 model=self.profile.model,
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
-                num_ctx=self.profile.context_tokens, num_predict=self.budget.output, temperature=self.profile.temperature,
+                num_ctx=self.profile.context_tokens, num_predict=limit, temperature=self.profile.temperature,
                 think=self.profile.think, extra_options=dict(self.profile.options))
             label = f"Schritt {step}/{max_steps} · ~{parts.prompt_tokens} Token Eingabe"
+            if limit != self.budget.output:
+                label += f" · bis zu {limit} Token Ausgabe"
             if parts.dropped_evidence:
                 label += f" · {len(parts.dropped_evidence)} Evidenzblöcke wegen Budget ausgelassen"
             try:
@@ -199,10 +202,11 @@ class Agent:
                     # Abgeschnittene Antwort: das letzte JSON darin ist meist ein inneres Objekt (z. B. aus einer Datei) –
                     # „Unknown action“ oder „No change found“ würden das Modell auf eine falsche Fährte setzen.
                     self.reporter.event(role, ActivityKind.Warning, f"Antwort an der Ausgabegrenze abgeschnitten "
-                                        f"({self.budget.output} Token, maxOutputTokens des Profils {self.profile.name})",
+                                        f"({limit} Token, Denkphase eingeschlossen; Profil {self.profile.name}: maxOutputTokens bzw. "
+                                        "outputUpToContext)",
                                         task_id=task_id)
                     raise protocol.ProtocolError(
-                        f"Your answer was cut off at the output limit ({self.budget.output} tokens) and was not used. "
+                        f"Your answer was cut off at the output limit ({limit} tokens, thinking included) and was not used. "
                         "Answer again much shorter: reasoning in a few sentences, findings only in \"notes\", and for a large "
                         "new file nothing but its edit block before the JSON (no copy of it anywhere else).")
                 called = protocol.tool_call_action(result.tool_calls) if result.tool_calls else None
@@ -364,6 +368,13 @@ class Agent:
             return ("Your visible answer was empty – you only thought. After thinking, always write the visible answer: "
                     "a few sentences of reasoning and exactly one ```json block with the action (see Actions).")
         return "Your answer was empty. Write a few sentences of reasoning and exactly one ```json block with the action."
+
+    def _output_limit(self, prompt_tokens: int) -> int:
+        """Höchstzahl erzeugter Token (Ollama zählt die Denkphase mit). Standard: maxOutputTokens. Mit outputUpToContext:
+        alles, was nach dem Prompt im Kontext frei ist (abzüglich Reserve, da der Prompt nur geschätzt ist)."""
+        if not self.profile.output_up_to_context:
+            return self.budget.output
+        return max(self.budget.output, self.profile.context_tokens - prompt_tokens - self.budget.reserve)
 
     def _current_snapshot(self) -> str:
         return getattr(self.bridge, "snapshot_id", None) or ""

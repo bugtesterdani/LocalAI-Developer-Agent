@@ -227,6 +227,7 @@ diese Hardware und diesen Modell-Digest **kalibriert** ist (`requireCalibration:
 | `offload` | CPU-Offload erlaubt (Qualität vor Geschwindigkeit) |
 | `temperature` | Standard `0.2` |
 | `options` | weitere Ollama-Optionen, z. B. `repeat_penalty` |
+| `outputUpToContext` | Standard `false`: Ausgabe höchstens `maxOutputTokens`. `true`: Ausgabe darf den ganzen Rest des Kontexts nutzen (Kontext minus Eingabe minus ~6 % Reserve); `maxOutputTokens` ist dann nur der Teil, der beim Zusammenstellen des Prompts mindestens frei bleibt. **Die Denkphase zählt bei Ollama zur Ausgabe** – Denkmodelle mit großem Kontext (z. B. qwen3.6 mit 256K) brauchen das, sonst endet die Antwort mitten im Denken. Achtung: lange Antworten dauern entsprechend (bei ~57 Token/s rund 10 Minuten je 32K Token) |
 
 ### `limits`
 

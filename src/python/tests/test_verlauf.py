@@ -231,3 +231,29 @@ def test_zusammenfasser_ohne_denkphase_und_zweiter_versuch_bei_leerer_antwort():
     answers[:] = [("", "t"), ("", "t")]
     with pytest.raises(ValueError, match="nur Denkphase"):
         agent._summarize(task, "", ["Step 1: a"], CancelToken())
+
+
+def test_ausgabe_darf_bis_zum_kontextende_gehen():
+    """Ollama zählt die Denkphase zur Ausgabe (num_predict). Mit outputUpToContext darf beides zusammen den Rest des
+    Kontexts nutzen; maxOutputTokens bleibt die Mindestreserve beim Zusammenstellen des Prompts."""
+    from types import SimpleNamespace
+
+    from localai.orchestrator.agents import Agent
+    from localai.orchestrator.models import Limits
+    from localai.orchestrator.runtime import FairGate
+
+    raw = {"requireCalibration": False, "profiles": [
+        {"name": "coder", "model": "qwen3.6-256k:35b-a3b", "contextTokens": 262144, "maxOutputTokens": 32768,
+         "outputUpToContext": True},
+        {"name": "fest", "model": "qwen2.5-coder:7b", "contextTokens": 32768, "maxOutputTokens": 8192}]}
+    config = ModelsConfig.parse(raw)
+    assert config.profiles["coder"].output_up_to_context and not config.profiles["fest"].output_up_to_context
+    reporter = SimpleNamespace(state=lambda *a, **k: None, event=lambda *a, **k: None)
+
+    def agent(name):
+        return Agent("Coder", config.profiles[name], None, None, FairGate(), None, reporter, None, Limits(), list)
+
+    coder = agent("coder")
+    assert coder._output_limit(15_000) == 262144 - 15_000 - 262144 // 16
+    assert coder._output_limit(260_000) == 32768, "nie weniger als maxOutputTokens"
+    assert agent("fest")._output_limit(5_000) == 8192, "ohne Option wie bisher"
