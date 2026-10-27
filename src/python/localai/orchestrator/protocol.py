@@ -295,8 +295,48 @@ def tool_call_action(calls: list[dict[str, Any]]) -> str | None:
     return "```json\n" + json.dumps(action, ensure_ascii=False) + "\n```"
 
 
+def _without_edit_blocks(text: str) -> str:
+    """Text ohne SEARCH/REPLACE-Blöcke (Zeilen geleert): JSON-Dateien darin sind Dateiinhalt, keine Aktion."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    i = 0
+    while i < len(lines):
+        if not _SEARCH.match(lines[i]):
+            i += 1
+            continue
+        k = i + 1
+        while k < len(lines) and not _REPLACE.match(lines[k]) and not _SEARCH.match(lines[k]):
+            k += 1
+        if k >= len(lines) or not _REPLACE.match(lines[k]):
+            break  # unvollständiger Block: parse_edit_blocks meldet ihn
+        start = i
+        if _block_path(lines, i) is not None:
+            # Pfadzeile wie in _block_path: Leerzeilen und Codezäune davor überspringen.
+            start = i - 1
+            while start > 0 and (not lines[start].strip() or _FENCE_LINE.match(lines[start])):
+                start -= 1
+        fenced = any(_FENCE_LINE.match(lines[j]) for j in range(start, i))
+        end = k
+        if fenced and k + 1 < len(lines) and lines[k + 1].strip() == "```":
+            end = k + 1  # schließenden Zaun eines umschlossenen Blocks mit entfernen
+        for j in range(start, end + 1):
+            lines[j] = ""
+        lines[start] = "[edit block]"  # in der Begründung (Verlauf) bleibt sichtbar, dass hier ein Block stand
+        i = end + 1
+    return "\n".join(lines)
+
+
 def parse(text: str) -> Action:
-    raw, reasoning = _last_json_object(text)
+    visible = _without_edit_blocks(text)
+    try:
+        raw, reasoning = _last_json_object(visible)
+    except ProtocolError:
+        # Nur Edit-Blöcke ohne Abschluss-JSON: die Blöcke sind das Ergebnis (Rolle prüft validate_result).
+        edits = parse_edit_blocks(text)
+        if not edits:
+            raise
+        paths = sorted({e.path for e in edits if e.path})
+        message = "Änderungen an " + ", ".join(paths) if paths else "Änderungen als Edit-Blöcke"
+        return Action("finish", visible.strip(), result={"message_de": message}, edits=edits)
     try:
         data = loads_lenient(raw)
     except json.JSONDecodeError as err:

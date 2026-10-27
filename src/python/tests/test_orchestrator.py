@@ -1424,6 +1424,30 @@ def test_leerer_ordner_ist_die_projektwurzel():
         protocol.parse('```json\n{"action": "read", "files": [{"path": ""}]}\n```')
 
 
+def test_nur_edit_bloecke_ohne_abschluss_json():
+    """Echter Lauf: Der Coder lieferte nur SEARCH/REPLACE-Blöcke (neue JSON-Dateien) ohne Abschluss-JSON; das JSON im
+    Dateiinhalt wurde als Aktion gelesen („Unknown action“). Jetzt sind die Blöcke das Ergebnis."""
+    tproj = '{\n  "format": "testumgebung.projekt",\n  "simulation": [ { "name": "Router", "value": 0 } ]\n}'
+    tsim = '{\n  "format": "testumgebung.szenario",\n  "expect": { "status": "PASS" }\n}'
+    text = (f"testumgebung/a.tproj.json\n<<<<<<< SEARCH\n=======\n{tproj}\n>>>>>>> REPLACE\n\n"
+            f"testumgebung/a.tsim.json\n<<<<<<< SEARCH\n=======\n{tsim}\n>>>>>>> REPLACE\n")
+    action = protocol.parse(text)
+    assert action.kind == "finish" and [e.path for e in action.edits] == ["testumgebung/a.tproj.json", "testumgebung/a.tsim.json"]
+    assert action.result["message_de"] == "Änderungen an testumgebung/a.tproj.json, testumgebung/a.tsim.json"
+    protocol.resolve_patch("Coder", action, ["testumgebung/a.tproj.json", "testumgebung/a.tsim.json"], lambda p: None)
+    final = protocol.validate_result("Coder", action.result)
+    assert "+++ b/testumgebung/a.tsim.json" in final["patch"] and '"format": "testumgebung.szenario"' in final["patch"]
+
+    # Mit Abschluss-JSON: dieses zählt, nicht das JSON im Dateiinhalt – auch in Codezäunen.
+    fenced = f"```\n{text}```\n" + '```json\n{"action": "finish", "result": {"message_de": "angelegt"}}\n```'
+    action = protocol.parse(fenced)
+    assert action.kind == "finish" and action.result["message_de"] == "angelegt" and len(action.edits) == 2
+    # Eine Leseaktion nach einem Block bleibt eine Leseaktion.
+    assert protocol.parse(text + '```json\n{"action": "read", "files": [{"path": "x.py"}]}\n```').kind == "read"
+    with pytest.raises(protocol.ProtocolError, match="No JSON object found"):
+        protocol.parse("Nur Text ohne Blöcke.")
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
