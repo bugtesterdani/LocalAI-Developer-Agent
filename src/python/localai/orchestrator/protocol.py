@@ -156,6 +156,13 @@ def _clean_path(value: Any) -> str:
     return path or "."
 
 
+def _clean_dir(value: Any) -> str:
+    """Ordner für list/search: leer, fehlend, null oder „/“ heißt Projektwurzel (wie „.“)."""
+    if value is None or (isinstance(value, str) and value.strip().replace("\\", "/").strip("/") in ("", ".")):
+        return "."
+    return _clean_path(value)
+
+
 _BARE_KEY = re.compile(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)')
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
 
@@ -315,7 +322,7 @@ def _action(data: dict[str, Any], reasoning: str) -> Action:
         depth = data.get("depth", 3)
         if not isinstance(depth, int) or not 1 <= depth <= 5:
             raise ProtocolError("depth must be an integer from 1 to 5.")
-        return Action("list", reasoning, path=_clean_path(data.get("path", ".")), depth=depth)
+        return Action("list", reasoning, path=_clean_dir(data.get("path")), depth=depth)
     if kind == "read":
         files = data.get("files")
         if isinstance(files, list) and files and all(isinstance(f, str) for f in files):
@@ -340,7 +347,7 @@ def _action(data: dict[str, Any], reasoning: str) -> Action:
         query = data.get("query")
         if not isinstance(query, str) or not query.strip() or len(query) > 200:
             raise ProtocolError("search needs a non-empty query of at most 200 characters.")
-        return Action("search", reasoning, path=_clean_path(data.get("path", ".")), query=query.strip(),
+        return Action("search", reasoning, path=_clean_dir(data.get("path")), query=query.strip(),
                       reason=str(data.get("reason", "")))
     if kind == "symbols":
         query = data.get("query")
