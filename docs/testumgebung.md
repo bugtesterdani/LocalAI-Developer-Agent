@@ -42,8 +42,8 @@ Szenarien (Unterspannung an der Grenze, Werkerabbruch) liegen in der Testumgebun
 3. Prüflauf: `testumgebung test` auf dem Projektordner. Das prüft alle Programme, baut alle CodeBlocks und simuliert
    alle Szenarien. Ergebnis als JUnit-Bericht.
 4. Bei Fehlern sieht der Debugger die Meldung samt Katalogauszug (falscher Bausteinparameter), Compilerfehler mit Zeile
-   bzw. das Ende des Ablaufprotokolls (Schritt, Wert, Grenzen, Werkereingaben). Danach repariert er wie bei jeder
-   anderen Sprache.
+   bzw. das Ende des Ablaufprotokolls (Schritt, Wert, Grenzen, Werkereingaben). Er übergibt dem Coder eine Diagnose, der korrigiert –
+   wie bei jeder anderen Sprache.
 
 | Aktion | Aufruf in der VM | Wofür |
 |---|---|---|
@@ -81,7 +81,7 @@ Grenzwerte, Geräteprotokolle oder Zeitgrenzen zu erfinden und Annahmen in der P
 |---|---|
 | VM-Aufbau | Statuszeile: `testumgebung 1.0.0 (Hallo-Welt ok)`. Der Selbsttest meldet „alles bestanden“ |
 | Ziel „Erstelle ein Prüfprogramm für ein Netzteil: Seriennummer, Spannung 220–240 V, Strom 0,5–5 A“ | Plan mit Coder- und Tester-Aufgabe; `*.tproj.json` und mehrere `*.tsim.json`; Prüflauf `testumgebung test (path=.)` grün |
-| Grenzwert absichtlich falsch | `test` schlägt mit „Gesamtergebnis: erwartet …, erhalten …“ fehl; der Debugger korrigiert |
+| Grenzwert absichtlich falsch | `test` schlägt mit „Gesamtergebnis: erwartet …, erhalten …“ fehl; der Debugger findet die Ursache, der Coder korrigiert |
 | Python-Syntaxfehler im CodeBlock | `build` meldet „Fehler Zeile …“ für den CodeBlock |
 
 ## Grenzen

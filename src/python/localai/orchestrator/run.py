@@ -646,7 +646,8 @@ class Orchestrator:
                          "(normal case, limits, FAIL, invalid input, operator abort); verify with testumgebung test on the folder.")
             if self.bridge.os_debug():
                 text += ("\n\n## OS debugging available\nThe OS image can be booted in QEMU and debugged. For goals about boot "
-                         "problems, crashes or behaviour on screen, add a task with role \"Debugger\" (boots, inspects, may fix).")
+                         "problems, crashes or behaviour on screen, add a task with role \"Debugger\" (boots and inspects, reports the cause – changes no code) and a \"Coder\" task that "
+                         "depends on it and fixes the cause.")
         attempts = self.config.limits.max_plan_attempts
         for attempt in range(1, attempts + 1):
             try:
@@ -753,6 +754,10 @@ class Orchestrator:
             findings = [f"{by_id[dep].title}", str(result.get("message_de") or "")]
             if result.get("notes"):
                 findings.append(str(result["notes"]))
+            if result.get("diagnosis"):
+                findings.append(f"Diagnosis (hypothesis: {result.get('hypothesis', '')}):\n{result['diagnosis']}")
+                if result.get("suggestion"):
+                    findings.append("Suggested change (not applied):\n" + str(result["suggestion"]))
             if result.get("rationale"):
                 findings.append("Rationale: " + str(result["rationale"]))
             if any(findings[1:]):
@@ -778,8 +783,10 @@ class Orchestrator:
     def _run_task(self, state: GoalState, agent: Agent, task: dag.Task, tasks: list[dag.Task],
                   acceptance: list[str]) -> None:
         cancel = state.controls.token(task.role)
-        field_name = {"Coder": "patch", "Debugger": "fix_patch"}.get(task.role, "test_patch")
-        finisher = self._finisher(task.role, task.task_id, f"{task.task_id}: {task.title}", field_name, cancel)
+        field_name = {"Coder": "patch"}.get(task.role, "test_patch")
+        # Der Debugger diagnostiziert nur; Änderungen schreibt der Coder.
+        finisher = None if task.role == "Debugger" else \
+            self._finisher(task.role, task.task_id, f"{task.task_id}: {task.title}", field_name, cancel)
         try:
             result = agent.run(Assignment(task.task_id, task.title, self._task_text(state, task, tasks, acceptance),
                                           self.listing + self._dependency_evidence(task, tasks) + self._known_files(task),
@@ -925,9 +932,8 @@ class Orchestrator:
             text = (f"{task.task_id} · {task.title}\n{r['message_de']}\n\nPatch – {self._apply_text(r)}:\n"
                     f"```diff\n{r['patch']}\n```")
         elif task.role == "Debugger":
-            text = f"{task.task_id} · {task.title}\n{r['message_de']}\nHypothese: {r.get('hypothesis', '')}"
-            if r.get("fix_patch"):
-                text += f"\n\nKorrektur – {self._apply_text(r)}:\n```diff\n{r['fix_patch']}\n```"
+            text = (f"{task.task_id} · {task.title}\n{r['message_de']}\nHypothese: {r.get('hypothesis', '')}\n\n"
+                    f"Diagnose für den Coder:\n{r.get('diagnosis', '')}")
         else:
             cases = "\n".join(f"- {c.get('name', '?')}: {c.get('purpose', '')}" for c in r.get("test_plan", [])
                               if isinstance(c, dict))
@@ -1039,30 +1045,66 @@ class Orchestrator:
         return [Evidence(f"A{n}", f"applied patch {n}: {a.label} (already part of the current files)", a.patch, pinned=True)
                 for n, a in enumerate(applied, start=1)]
 
-    def _repair(self, state: GoalState, agents: dict[str, Agent], attempt: int, problem_en: str,
-                evidence: list[Evidence]) -> tuple[bool, str]:
-        """Ein Debugger-Durchlauf; True, wenn ein Fix angewendet wurde."""
+    def _diagnose(self, state: GoalState, agents: dict[str, Agent], attempt: int, problem_en: str,
+                  evidence: list[Evidence]) -> tuple[dict[str, Any] | None, list[Evidence], str]:
+        """Debugger: Ursache eines fehlgeschlagenen Build/Tests finden (ohne Codeänderung). Rückgabe: Diagnose, gelesene
+        Dateien (für den Coder), Grund falls keine Diagnose."""
         task_id = f"D{attempt}"
         cancel = state.controls.token("Debugger")
-        text = f"## User goal (German)\n{state.goal}\n\n## Problem to fix (repair attempt {attempt})\n{problem_en}"
+        text = f"## User goal (German)\n{state.goal}\n\n## Failure to diagnose (repair attempt {attempt})\n{problem_en}"
         if self._os_debug_text():
             text += "\n\n" + self._os_debug_text()
-        finisher = self._finisher("Debugger", task_id, f"Reparatur {attempt}", "fix_patch", cancel)
         try:
-            fix = agents["Debugger"].run(Assignment(task_id, f"Reparatur {attempt}", text, evidence, finisher=finisher,
-                                                    max_steps=self._debug_steps("Debugger")), cancel)
+            found = agents["Debugger"].run(Assignment(task_id, f"Diagnose {attempt}", text, evidence,
+                                                      max_steps=self._debug_steps("Debugger")), cancel)
         except Cancelled:
             state.controls.run.raise_if_cancelled()
-            return False, "Reparatur abgebrochen"
+            return None, [], "Diagnose abgebrochen"
         except (LimitReached, AgentFailed) as err:
-            self.reporter.chat("Debugger", f"Reparatur nicht abgeschlossen: {err}")
-            return False, "Reparatur gescheitert"
-        if not fix.result.get("fix_patch", "").strip():
-            self.reporter.chat("Debugger", f"Reparatur {attempt}: keine Codeänderung – {fix.result['message_de']}")
-            return False, "keine Codekorrektur möglich – bitte selbst prüfen"
-        self.reporter.chat("Debugger", (f"Reparatur {attempt}: {fix.result['message_de']}\nHypothese: {fix.result['hypothesis']}"
-                                        f"\n\nKorrektur – {self._apply_text(fix.result)}:\n```diff\n{fix.result['fix_patch']}\n```")[:MAX_CHAT])
-        outcome = fix.result.get("apply")
+            self.reporter.chat("Debugger", f"Diagnose nicht abgeschlossen: {err}")
+            return None, [], "Diagnose gescheitert"
+        r = found.result
+        self.reporter.chat("Debugger", (f"Diagnose {attempt}: {r['message_de']}\nHypothese: {r['hypothesis']}\n\n"
+                                        f"Für den Coder:\n{r['diagnosis']}")[:MAX_CHAT])
+        if not r.get("fixable", True):
+            return None, [], "nicht per Codeänderung zu beheben – bitte selbst prüfen"
+        read = [e for e in found.evidence if e.path]
+        return r, read, ""
+
+    def _fix(self, state: GoalState, agents: dict[str, Agent], attempt: int, problem_en: str, diagnosis: dict[str, Any] | None,
+             evidence: list[Evidence], acceptance: list[str]) -> tuple[bool, str]:
+        """Coder: Korrektur nach Diagnose des Debuggers bzw. nach Befunden des Reviewers. True, wenn angewendet."""
+        task_id = f"K{attempt}"
+        cancel = state.controls.token("Coder")
+        files = list((diagnosis or {}).get("files") or [])
+        text = (f"## User goal (German)\n{state.goal}\n\n## Your task {task_id}: fix (repair attempt {attempt})\n"
+                f"Change the code so that the problem below is resolved. A code change is required.\n\n"
+                f"## Problem\n{problem_en}")
+        if diagnosis is not None:
+            text += (f"\n\n## Diagnosis by the Debugger\nHypothesis: {diagnosis.get('hypothesis', '')}\n"
+                     f"{diagnosis.get('diagnosis', '')}")
+            if diagnosis.get("suggestion"):
+                text += f"\nSuggested change (not applied, verify it against the current files):\n{diagnosis['suggestion']}"
+        if acceptance:
+            text += "\n\n## Acceptance criteria\n" + "\n".join(f"- {a}" for a in acceptance)
+        text += f"\n\nFiles you may change: {', '.join(files) or 'the files named above'}"
+        finisher = self._finisher("Coder", task_id, f"Korrektur {attempt}", "patch", cancel)
+        try:
+            fix = agents["Coder"].run(Assignment(task_id, f"Korrektur {attempt}", text, evidence, finisher=finisher,
+                                                 files=files, require_change=True), cancel)
+        except Cancelled:
+            state.controls.run.raise_if_cancelled()
+            return False, "Korrektur abgebrochen"
+        except (LimitReached, AgentFailed) as err:
+            self.reporter.chat("Coder", f"Korrektur nicht abgeschlossen: {err}")
+            return False, "Korrektur gescheitert"
+        r = fix.result
+        if not (r.get("patch") or "").strip():
+            self.reporter.chat("Coder", f"Korrektur {attempt}: keine Codeänderung – {r['message_de']}")
+            return False, "keine Codekorrektur – bitte selbst prüfen"
+        self.reporter.chat("Coder", (f"Korrektur {attempt}: {r['message_de']}\n\nPatch – {self._apply_text(r)}:\n"
+                                     f"```diff\n{r['patch']}\n```")[:MAX_CHAT])
+        outcome = r.get("apply")
         if not (isinstance(outcome, PatchOutcome) and outcome.applied):
             return False, "Korrektur nicht angewendet"
         return True, ""
@@ -1094,12 +1136,19 @@ class Orchestrator:
                                        "Ich höre hier auf – bitte entscheide, wie es weitergeht.")
                     break
                 attempt += 1
-                fixed, why = self._repair(state, agents, attempt, verification.text_en,
-                                          self._change_evidence() + [self._verification_evidence(verification)])
+                # Tests/Build rot: der Debugger sucht die Ursache, der Coder korrigiert.
+                base = self._change_evidence() + [self._verification_evidence(verification)]
+                diagnosis, read, why = self._diagnose(state, agents, attempt, verification.text_en, base)
+                if diagnosis is None:
+                    verdict = why
+                    break
+                fixed, why = self._fix(state, agents, attempt, verification.text_en, diagnosis,
+                                       base + [Evidence(f"G{attempt}", f"diagnosis {attempt} by the Debugger",
+                                                        diagnosis["diagnosis"], pinned=True)] + read, acceptance)
                 if not fixed:
                     verdict = why
                     break
-                verification = self._run_verification(state, "Debugger", f"V{attempt + 1}")
+                verification = self._run_verification(state, "Tester", f"V{attempt + 1}")
                 continue
             # 2. Review mit echtem Testbericht.
             text = (f"## User goal (German)\n{state.goal}\n\n## Acceptance criteria\n"
@@ -1144,12 +1193,13 @@ class Orchestrator:
             problem = "Review findings:\n" + "\n".join(
                 f"- [{f['severity']}] {f.get('file', '?')}:{f.get('line', '?')}: {f['finding']} Evidence: {f.get('evidence', '')}"
                 for f in findings)
-            fixed, why = self._repair(state, agents, attempt, problem,
-                                      self._change_evidence() + [self._verification_evidence(verification)])
+            # Befunde des Reviewers sind schon konkret: der Coder korrigiert direkt (kein Debugger).
+            fixed, why = self._fix(state, agents, attempt, problem, None,
+                                   self._change_evidence() + [self._verification_evidence(verification)], acceptance)
             if not fixed:
                 verdict = why
                 break
-            verification = self._run_verification(state, "Debugger", f"V{attempt + 1}")
+            verification = self._run_verification(state, "Tester", f"V{attempt + 1}")
         self._summary(state, tasks, verdict, verification, attempt)
 
     def _run_verification(self, state: GoalState, role: str, task_id: str) -> Verification:

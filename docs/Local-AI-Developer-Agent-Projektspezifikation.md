@@ -48,7 +48,7 @@ Das MVP bearbeitet Repositories in C#, Python, C++, HDevelop, PowerShell und Bat
 1. Nutzer legt Projekt an und wählt erlaubte Ordner sowie Rechte.
 2. Die UI zeigt alle fünf Rollen. Der Planner erstellt aus bereits mitgeteilten Informationen einen Plan.
 3. Benötigt ein Agent Repositorydaten, erzeugt er beispielsweise einen einzelnen `File.Read`-Vorschlag. Bis zur Freigabe wird nichts gelesen.
-4. Nach genehmigtem Lesen entstehen ein Aufgabengraph und Änderungsvorschläge. Coder und Tester können unabhängige Module bzw. Testfälle entwerfen. Reviewer prüft abgeschlossene Diffs; Debugger analysiert vorhandene Fehlerdaten.
+4. Nach genehmigtem Lesen entstehen ein Aufgabengraph und Änderungsvorschläge. Coder und Tester können unabhängige Module bzw. Testfälle entwerfen. Reviewer prüft abgeschlossene Diffs, seine Befunde korrigiert der Coder; Debugger analysiert vorhandene Fehlerdaten und übergibt die Diagnose dem Coder.
 5. Jeder Schreib-, Build- oder Testaufruf erhält eine eigene Freigabekarte. Ein Build darf intern zahlreiche Dateien berühren; diese transitive Wirkung wird auf der Karte benannt und bleibt durch die Sandbox begrenzt.
 6. Ausführung erfolgt in einer isolierten Arbeitskopie. Ergebnisse und Logs werden als untrusted Daten zurückgegeben.
 7. Der Nutzer prüft Diff, Tests und Review. Die Übernahme in den ursprünglichen Projektordner ist ein eigener genehmigter Tool-Aufruf.
@@ -147,9 +147,9 @@ Alle Rollen werden beim Anlegen eines Runs instanziiert. „Vorhanden“ bedeute
 | Rolle | Eingang | Ergebnis | Grenzen |
 |---|---|---|---|
 | Planner | Nutzerziel, genehmigte Evidenz | DAG, Abhängigkeiten, Akzeptanzfälle | genehmigt keine eigenen Aktionen |
-| Coder | eingegrenzte Aufgabe, Basis-Snapshot | Patch-Vorschlag, Begründung | schreibt nur über Tool Broker |
+| Coder | eingegrenzte Aufgabe, Basis-Snapshot; Diagnose des Debuggers bzw. Befunde des Reviewers | Patch-Vorschlag, Begründung | schreibt nur über Tool Broker; einzige Rolle, die Produktivcode ändert |
 | Tester | Anforderungen, stabiler Snapshot | Testplan, Testpatch, Testbericht | kennzeichnet nicht ausgeführte Tests |
-| Debugger | genehmigte Fehlerlogs, Repro | Hypothese, minimaler Fix, Regressionstest | keine unbegrenzten Reparaturschleifen |
+| Debugger | genehmigte Fehlerlogs, Repro (nur bei fehlgeschlagenem Build/Test bzw. OS-Debugging) | Hypothese, Diagnose für den Coder (Datei, Zeile, Ursache, was zu ändern ist) | ändert keinen Code; keine unbegrenzten Reparaturschleifen |
 | Reviewer | Diff, Anforderungen, Testbericht | priorisierte Befunde mit Evidenz | darf Review nicht als Nutzerfreigabe ausgeben |
 
 DAG-Knoten enthalten Eingabe-Snapshot, Lesemenge, Schreibmenge und Abhängigkeiten. Schreibaufgaben auf denselben Pfad werden serialisiert. Unbekannte Schreibmengen erhalten einen exklusiven Workspace-Lock. Tests laufen nur auf unveränderlichen Snapshots. Eine Dateiänderung invalidiert betroffene Test- und Reviewergebnisse.
@@ -167,6 +167,7 @@ flowchart LR
   B -->|Fehler| D[Debugger]
   D --> C
   B -->|grün| R[Reviewer]
+  R -->|Befunde| C
   R --> F[Nutzer prüft und genehmigt Übernahme]
 ```
 

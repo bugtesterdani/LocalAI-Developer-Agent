@@ -45,10 +45,12 @@ ANSI-Zeichen entfernt, Bidi- und unsichtbare Zeichen sichtbar markiert, Länge b
    `Toolchain.Test`). Der Plan erscheint im Chat.
 5. **Lesen und Ändern:** Coder und Tester lesen gezielt Dateien (`File.Read`, `File.ReadMany`) und schlagen Patches
    vor (`Patch.Apply`). Jeder Vorschlag ist eine eigene Freigabekarte.
-6. **Prüfen:** Build und Tests laufen in der VM (`Toolchain.Build`, `Toolchain.Test`). Bei Fehlern analysiert der
-   Debugger die echten Fehlermeldungen und schlägt Korrekturen vor – höchstens `maxRepairAttempts` Runden.
-7. **Review und Zusammenfassung:** Der Reviewer prüft den Diff gegen Ziel und Testbericht. Ein Review ist **keine**
-   Freigabe – die Entscheidung bleibt bei dir.
+6. **Prüfen:** Build und Tests laufen in der VM (`Toolchain.Build`, `Toolchain.Test`). Bei Fehlern sucht der
+   Debugger anhand der echten Fehlermeldungen die Ursache („Diagnose“ im Chat, ohne Codeänderung), der Coder korrigiert
+   danach („Korrektur“), dann wird erneut getestet – höchstens `maxRepairAttempts` Runden.
+7. **Review und Zusammenfassung:** Der Reviewer prüft den Diff gegen Ziel und Testbericht. Wesentliche Befunde korrigiert
+   der Coder direkt (ohne Debugger), danach erneut Test und Review. Ein Review ist **keine** Freigabe – die Entscheidung
+   bleibt bei dir.
 8. **Übernahme:** Danach wird die Übernahme in deinen Projektordner angeboten (siehe unten).
 
 Die Agenten antworten auf Deutsch. Fragt ein Agent zurück („wartet auf dich“), antwortest du im Chat.

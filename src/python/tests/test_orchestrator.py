@@ -120,6 +120,25 @@ def test_patches_brauchen_dateikoepfe_und_debugger_darf_passen():
     assert protocol.validate_result("Debugger", {"message_de": "nicht per Code lösbar", "hypothesis": "h", "fix_patch": ""})
 
 
+def test_debugger_schreibt_keinen_code_sondern_eine_diagnose():
+    """Der Debugger diagnostiziert nur; schreibt er doch Edit-Blöcke, werden sie nie angewendet, sondern als Vorschlag
+    an den Coder weitergegeben."""
+    text = ("src/calc.py\n<<<<<<< SEARCH\n    return a - b\n=======\n    return a + b\n>>>>>>> REPLACE\n"
+            '```json\n{"action": "finish", "result": {"message_de": "Vorzeichen falsch", "hypothesis": "minus statt plus", '
+            '"diagnosis": ["src/calc.py:2 subtracts", "use +"], "files": ["src/calc.py"]}}\n```')
+    action = protocol.parse(text)
+    protocol.resolve_patch("Debugger", action, ["src/calc.py"], lambda p: None)
+    result = protocol.validate_result("Debugger", action.result)
+    assert "patch" not in result and "fix_patch" not in result
+    assert "+    return a + b" in result["suggestion"]
+    assert result["diagnosis"] == "- src/calc.py:2 subtracts\n- use +" and result["files"] == ["src/calc.py"] and result["fixable"]
+    only_blocks = protocol.parse("src/calc.py\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n")
+    with pytest.raises(protocol.ProtocolError, match="only edit blocks"):
+        protocol.validate_result("Debugger", only_blocks.result)
+    minimal = protocol.validate_result("Debugger", {"message_de": "x", "hypothesis": "h", "fixable": False})
+    assert minimal["diagnosis"] == "h" and minimal["fixable"] is False
+
+
 def test_unverpacktes_ergebnis_kleiner_modelle_wird_angenommen():
     # So antwortete qwen2.5-coder:7b im echten Lauf: Ergebnis direkt, ohne {"action": "finish", "result": …}.
     text = '```json\n{"message_de": "Plan", "acceptance": ["x"], "tasks": [{"id": "T1", "role": "Coder", "title": "a", ' \
@@ -604,8 +623,14 @@ def test_run_mit_fuenf_rollen_parallel_und_reparaturschleife(ollama, tmp_path):
     t1 = [e for e in broker.of("Coder") if e.task_id == "T1"]
     t2 = [e for e in broker.of("Tester") if e.task_id == "T2"]
     assert t1 and t2 and t2[0].at < t1[-1].at and t1[0].at < t2[-1].at
-    # Testlauf 1 schlägt fehl → Debugger repariert (Patch angewendet) → Testlauf 2 grün → Review ohne Befund.
-    assert "angewendet" in broker.chats("Debugger")[0]
+    # Testlauf 1 schlägt fehl → Debugger diagnostiziert (ohne Patch) → Coder korrigiert (angewendet) → Testlauf 2 grün
+    # → Review ohne Befund.
+    assert broker.chats("Debugger")[0].startswith("Diagnose 1:") and "Für den Coder:" in broker.chats("Debugger")[0]
+    assert any(c.startswith("Korrektur 1:") and "angewendet" in c for c in broker.chats("Coder"))
+    assert not [p for p in broker.proposals.values() if p.tool == "Patch.Apply" and p.agent.value == "Debugger"]
+    coder_fix = [r["messages"][-1]["content"] for r in ollama.requests
+                 if "Coder agent" in r["messages"][0]["content"] and "fix (repair attempt 1)" in r["messages"][-1]["content"]]
+    assert coder_fix and "## Diagnosis by the Debugger" in coder_fix[0] and "treats None like empty input" in coder_fix[0]
     review_chats = broker.chats("Reviewer")
     assert len(review_chats) == 1 and "keine Freigabe" in review_chats[0]
     orchestrator_chats = broker.chats("Orchestrator")
@@ -752,7 +777,10 @@ def test_patch_passt_nicht_agent_korrigiert(ollama, tmp_path):
     broker.send(OrchestratorCommandKind.Chat, "Ziel")
     wait_for(lambda: finished(broker), timeout=60)
     patches = [p for p in broker.proposals.values() if p.tool == "Patch.Apply"]
-    assert len(patches) == 4, "ein Fehlversuch + Coder + Tester + Debugger (nach Review-Befund)"
+    assert len(patches) == 4, "ein Fehlversuch + Coder + Tester + Coder-Korrektur (nach Review-Befund)"
+    assert patches[-1].agent.value == "Coder" and patches[-1].task_id == "K1"
+    assert not [r for r in ollama.requests if "Debugger agent" in r["messages"][0]["content"]], \
+        "Review-Befunde korrigiert der Coder direkt – der Debugger kommt nur bei fehlgeschlagenen Tests"
     assert any("Agent korrigiert" in (e.text or "") for e in broker.events if e.kind == ActivityKind.Warning)
     prompts = [r["messages"][-1]["content"] for r in ollama.requests]
     assert any("was NOT applied" in c and "Hunk 1 passt nicht" in c for c in prompts)
@@ -975,7 +1003,7 @@ def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
             return ('```json\n{"action": "finish", "result": {"message_de": "Plan", "acceptance": ["teilen(1, 0) wirft ValueError"], '
                     '"tasks": [{"id": "T1", "role": "Coder", "title": "teilen", "description": "add teilen", '
                     '"reads": ["src/calc.py"], "writes": ["src/calc.py"], "depends_on": []}]}}\n```'), ""
-        if role == "Coder":
+        if role == "Coder" and "fix (repair attempt" not in user:
             calls["Coder"] += 1
             if calls["Coder"] == 1:
                 return '```json\n{"action": "read", "files": [{"path": "src/calc.py"}]}\n```', ""
@@ -996,7 +1024,8 @@ def test_coder_liest_nicht_doppelt_und_liefert_bloecke(ollama, tmp_path):
     wait_for(lambda: finished(broker), timeout=60)
     by_agent = [(p.agent.value, p.tool) for p in broker.proposals.values()]
     assert ("Coder", "File.Read") not in by_agent, "Datei lag schon vor – kein zweiter Lesevorschlag"
-    patches = {p.agent.value: p.arguments["patch"] for p in broker.proposals.values() if p.tool == "Patch.Apply"}
+    patches = {p.agent.value: p.arguments["patch"] for p in broker.proposals.values()
+               if p.tool == "Patch.Apply" and p.task_id in ("T1", "T2")}
     assert patches["Coder"].startswith("--- a/src/calc.py\n+++ b/src/calc.py\n@@ -2,1 +2,7 @@\n     return a + b\n+\n")
     assert patches["Tester"].startswith("--- /dev/null\n+++ b/tests/test_teilen.py\n")
     assert any("ergänzt: T2 · Tester" in c for c in broker.chats("Planner"))
@@ -1083,7 +1112,7 @@ def test_agent_sieht_eigene_notizen_der_vorigen_schritte(ollama, tmp_path):
     def responder(body):
         system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
         role = re.search(r"You are the (\w+) agent", system)[1]
-        if role != "Coder":
+        if role != "Coder" or "fix (repair attempt" in user:
             return scripted_answer(body)
         steps["Coder"] += 1
         seen.append(user)
@@ -1581,7 +1610,7 @@ def test_protokoll_fetch_aktion():
 def _coder_fetches(url: str, seen: list[str]):
     def responder(body):
         system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
-        if "Coder agent" in system:
+        if "Coder agent" in system and "fix (repair attempt" not in user:
             seen.append(user)
             if "fetch https://" not in user:
                 return ('I need the API documentation.\n```json\n'

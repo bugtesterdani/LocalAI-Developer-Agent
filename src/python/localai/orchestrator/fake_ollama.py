@@ -56,6 +56,11 @@ def scripted_answer(body: dict[str, Any]) -> tuple[str, str]:
                  "reads": [first], "writes": [first], "depends_on": []},
                 {"id": "T2", "role": "Tester", "title": "Grenzfälle testen", "description": "Write edge case tests.",
                  "reads": [first], "writes": [tests], "depends_on": []}]}}, "The plan has two independent tasks."), thinking
+    if role == "Coder" and "fix (repair attempt" in user:
+        return _fence({"action": "finish", "result": {
+            "message_de": "None wird jetzt wie eine leere Eingabe behandelt.", "files": [first],
+            "patch": f"--- a/{first}\n+++ b/{first}\n@@ -0,0 +1 @@\n+# handle None\n",
+            "rationale": "Follows the diagnosis."}}, "Fixing as diagnosed."), thinking
     if role == "Coder":
         if not has_read:
             return _fence({"action": "read", "files": [{"path": first}], "reason": "file to change"}, "Reading first."), thinking
@@ -81,9 +86,9 @@ def scripted_answer(body: dict[str, Any]) -> tuple[str, str]:
                           "evidence": "guard only checks empty string"}]}}, "One finding."), thinking
     if role == "Debugger":
         return _fence({"action": "finish", "result": {
-            "message_de": "None wird jetzt wie eine leere Eingabe behandelt.", "hypothesis": "Missing None check.",
-            "fix_patch": f"--- a/{first}\n+++ b/{first}\n@@ -0,0 +1 @@\n+# handle None\n",
-            "regression_test": "test_none_input"}}, "Minimal fix."), thinking
+            "message_de": "None wird nicht abgefangen.", "hypothesis": "Missing None check.",
+            "diagnosis": f"- {first}:1 add a guard that treats None like empty input", "files": [first],
+            "fixable": True}}, "Root cause found."), thinking
     return _fence({"action": "finish", "result": {"message_de": "?"}}, ""), thinking
 
 

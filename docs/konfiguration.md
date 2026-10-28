@@ -239,7 +239,7 @@ diese Hardware und diesen Modell-Digest **kalibriert** ist (`requireCalibration:
 | `maxPatchRetries` | `3` | Korrekturen, wenn ein Patch nicht passt |
 | `maxDenialsPerTask` | `3` | abgelehnte Vorschläge, danach fragt der Agent nach; `0` = unbegrenzt |
 | `maxInvalidAnswersPerTask` | `0` | Antworten im falschen Format; `0` = nur Schrittlimit |
-| `maxRepairAttempts` | `3` | Debugger-Durchläufe |
+| `maxRepairAttempts` | `3` | Korrekturrunden (Testfehler: Diagnose des Debuggers + Korrektur des Coders; Review-Befunde: Korrektur des Coders) |
 | `maxActiveMinutes` | `30` | aktive Laufzeit ohne neue Nutzerinteraktion (Warten auf Freigaben zählt nicht) |
 | `maxSandboxJobs` | `2` | gleichzeitige Sandbox-Jobs |
 | `maxGpuRequests` | `1` | gleichzeitige Modellanfragen |
