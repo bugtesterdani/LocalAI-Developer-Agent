@@ -762,6 +762,21 @@ public static class ToolchainUpdatePayload
         return result;
     }
 
+    /// <summary>Registrierungsstand je Toolchain: Digest und Zeitpunkt – ändert sich auch bei erneuter Registrierung mit
+    /// gleichem Inhalt (danach wird ein gescheitertes Nachinstallieren erneut versucht).</summary>
+    public static IReadOnlyDictionary<string, string> Revisions(IReadOnlyList<ToolchainRegistration> registrations, IReadOnlyList<string> names)
+    {
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in names)
+        {
+            if (registrations.FirstOrDefault(r => r.Name == name) is { } r)
+            {
+                result[name] = $"{r.Digest}|{r.RegisteredAt}";
+            }
+        }
+        return result;
+    }
+
     /// <summary>
     /// Stellt die Toolchains wie beim Aufbau bereit (Hashes gegen die Registrierung geprüft, pinned.json) und packt sie als
     /// <c>toolchain-src/&lt;name&gt;/…</c> ohne Kompression (große Archive, Geschwindigkeit) in <paramref name="zipPath"/>.

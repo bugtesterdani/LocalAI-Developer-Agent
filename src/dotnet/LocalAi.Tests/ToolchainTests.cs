@@ -92,6 +92,9 @@ public sealed class ToolchainTests : IDisposable
         registry.Register(dir, info.Digest, TestContext.Current.CancellationToken);
         Assert.Equal(new Dictionary<string, string> { ["demo"] = info.Digest },
             ToolchainUpdatePayload.Digests(registry.Registrations, ["demo", "fehlt"]));
+        var registration = Assert.Single(registry.Registrations);
+        Assert.Equal($"{info.Digest}|{registration.RegisteredAt}",
+            ToolchainUpdatePayload.Revisions(registry.Registrations, ["demo"])["demo"]);
 
         var zip = Path.Combine(_dir, "update.zip");
         ToolchainUpdatePayload.Build(registry, ["demo"], zip);

@@ -563,12 +563,14 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private readonly Func<string, Task>? _buildUpdate;
     private readonly Func<string>? _systemFingerprint;
     private readonly Func<IReadOnlyDictionary<string, string>>? _toolchainDigests;
+    private readonly Func<IReadOnlyDictionary<string, string>>? _toolchainRevisions;
     private readonly Func<IReadOnlyList<string>, string, Task>? _buildToolchains;
     private readonly SandboxReuseStore _reuse;
     private string? _currentSystem;
     // Installierte Toolchains (Name → Registrierungs-Digest); null = unbekannt (dann kein Nachinstallieren).
     private Dictionary<string, string>? _installedToolchains;
-    // Zuletzt gescheiterte Nachinstallation je Toolchain (Digest): nicht bei jedem Job erneut versuchen.
+    // Zuletzt gescheiterte Nachinstallation im Gast je Toolchain (Registrierungsstand: Digest und Zeitpunkt): nicht bei jedem
+    // Job erneut versuchen – erst nach erneuter Registrierung (auch mit gleichem Inhalt).
     private readonly Dictionary<string, string> _failedToolchains = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _toolchainProblems = new(StringComparer.Ordinal);
     private string? _currentFingerprint;
@@ -625,11 +627,14 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     /// <param name="systemFingerprint">Grundlage ohne Toolchains – stimmt sie, werden geänderte Toolchains nachinstalliert.</param>
     /// <param name="toolchainDigests">Aktuelle Registrierung der Toolchains dieser VM (Name → Digest).</param>
     /// <param name="buildToolchains">Schreibt die bereitgestellten Toolchains (Namen) als ZIP an den übergebenen Pfad.</param>
+    /// <param name="toolchainRevisions">Registrierungsstand je Toolchain (ändert sich bei jeder Registrierung); Standard: Digest.</param>
     public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest, IReadOnlyList<string>? expectedToolchains = null,
         SandboxSession? session = null, Func<string>? fingerprint = null, Func<string>? codeFingerprint = null,
         Func<string, Task>? buildUpdate = null, Func<string>? systemFingerprint = null,
-        Func<IReadOnlyDictionary<string, string>>? toolchainDigests = null, Func<IReadOnlyList<string>, string, Task>? buildToolchains = null)
+        Func<IReadOnlyDictionary<string, string>>? toolchainDigests = null, Func<IReadOnlyList<string>, string, Task>? buildToolchains = null,
+        Func<IReadOnlyDictionary<string, string>>? toolchainRevisions = null)
     {
+        _toolchainRevisions = toolchainRevisions;
         _systemFingerprint = systemFingerprint;
         _toolchainDigests = toolchainDigests;
         _buildToolchains = buildToolchains;
@@ -1644,11 +1649,15 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             return [];
         }
         var current = _toolchainDigests!();
+        var revisions = Revisions(current);
         return current
             .Where(kv => (!_installedToolchains.TryGetValue(kv.Key, out var installed) || installed != kv.Value)
-                         && !(_failedToolchains.TryGetValue(kv.Key, out var failed) && failed == kv.Value))
+                         && !(_failedToolchains.TryGetValue(kv.Key, out var failed) && failed == revisions.GetValueOrDefault(kv.Key)))
             .Select(kv => kv.Key).Order(StringComparer.Ordinal).ToList();
     }
+
+    private IReadOnlyDictionary<string, string> Revisions(IReadOnlyDictionary<string, string> digests) =>
+        _toolchainRevisions?.Invoke() ?? digests;
 
     /// <summary>
     /// Toolchain-Update: signierter Job <see cref="ToolchainsTool"/> mit den bereitgestellten Toolchains (Hashes wie beim
@@ -1658,6 +1667,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private async Task<string?> UpdateToolchainsLockedAsync(IReadOnlyList<string> names, CancellationToken ct)
     {
         var digests = _toolchainDigests!();
+        var revisions = Revisions(digests);
         var zip = Path.Combine(WorkDirectory, "toolchain-update.zip");
         var previous = Status;
         var list = string.Join(", ", names);
@@ -1705,7 +1715,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 else
                 {
                     installed.Remove(name); // alte Installation ist entfernt bzw. unvollständig
-                    _failedToolchains[name] = digests[name];
+                    _failedToolchains[name] = revisions.GetValueOrDefault(name, digests[name]);
                     var why = target?.Message ?? result.TargetResults.FirstOrDefault()?.Message ?? "kein Ergebnis";
                     problems.Add(why);
                     _toolchainProblems[name] = $"Toolchain {name} konnte in der VM nicht nachinstalliert werden: {GuestReport.Clip(why, 400)} – " +
@@ -1732,7 +1742,8 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         {
             foreach (var name in names)
             {
-                _failedToolchains[name] = digests.GetValueOrDefault(name, "");
+                // Fehler auf dem Host (Bereitstellen, Kopieren) nicht merken: beim nächsten Job erneut versuchen – z. B.
+                // nachdem eine veränderte Datei wiederhergestellt wurde.
                 _toolchainProblems[name] = $"Toolchain {name} nicht bereitgestellt: {GuestReport.Clip(ex.Message, 400)}";
             }
             if (Status.State == SandboxState.Ready)

@@ -379,7 +379,8 @@ static SandboxParts CreateSandbox(
                     // Toolchain-Update: Grundlage ohne Toolchains, aktuelle Registrierung, Bereitstellung als ZIP.
                     () => SandboxFingerprint.ComputeBase(vmSettings, Sources(), [], []),
                     () => ToolchainUpdatePayload.Digests(toolchains!.Registrations, guestToolchains),
-                    (names, zip) => Task.Run(() => ToolchainUpdatePayload.Build(toolchains!, names, zip)));
+                    (names, zip) => Task.Run(() => ToolchainUpdatePayload.Build(toolchains!, names, zip)),
+                    () => ToolchainUpdatePayload.Revisions(toolchains!.Registrations, guestToolchains));
                 var home = guest == plan.Home;
                 adapters[guest] = new SandboxToolAdapter(session, vm, context, registry,
                     Path.Combine(options.DataDirectory, linux ? "sandbox-scratch-linux" : "sandbox-scratch"), SystemClock.Instance)

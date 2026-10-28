@@ -137,7 +137,8 @@ public sealed class HyperVTests : IAsyncLifetime
 
     private async Task<HyperVSandbox> StartReusableAsync(HyperVSettings settings, SimulatedHost host, SandboxSession session, string fingerprint,
         string? code = null, Func<string, Task>? buildUpdate = null, string? system = null,
-        Func<IReadOnlyDictionary<string, string>>? toolchainDigests = null, Func<IReadOnlyList<string>, string, Task>? buildToolchains = null)
+        Func<IReadOnlyDictionary<string, string>>? toolchainDigests = null, Func<IReadOnlyList<string>, string, Task>? buildToolchains = null,
+        Func<IReadOnlyDictionary<string, string>>? toolchainRevisions = null)
     {
         var vm = new HyperVSandbox(settings, host, guestDir =>
         {
@@ -145,7 +146,8 @@ public sealed class HyperVTests : IAsyncLifetime
             File.WriteAllText(Path.Combine(root, "session.key"), Convert.ToHexStringLower(session.Key));
             return Task.CompletedTask;
         }, session: session, fingerprint: () => fingerprint, codeFingerprint: code is null ? null : () => code, buildUpdate: buildUpdate,
-            systemFingerprint: system is null ? null : () => system, toolchainDigests: toolchainDigests, buildToolchains: buildToolchains);
+            systemFingerprint: system is null ? null : () => system, toolchainDigests: toolchainDigests, buildToolchains: buildToolchains,
+            toolchainRevisions: toolchainRevisions);
         vm.Start();
         var deadline = DateTime.UtcNow.AddSeconds(90);
         while (vm.Status.State is not (SandboxState.Ready or SandboxState.Locked or SandboxState.Stopped) && DateTime.UtcNow < deadline)
@@ -306,11 +308,19 @@ public sealed class HyperVTests : IAsyncLifetime
         _cleanup.Add(host);
         var root = Project();
         var digest = "d1";
+        var registered = "r1";
         var fail = false;
+        var hostFailures = 0;
         var updates = new List<string>();
         IReadOnlyDictionary<string, string> Digests() => new Dictionary<string, string> { ["demo"] = digest };
+        IReadOnlyDictionary<string, string> Revisions() => new Dictionary<string, string> { ["demo"] = digest + "|" + registered };
         Task Build(IReadOnlyList<string> names, string zip)
         {
+            if (hostFailures > 0)
+            {
+                hostFailures--;
+                throw new ToolchainException("Toolchain 'demo': Hash weicht ab: a.txt");
+            }
             updates.Add(string.Join(",", names) + "@" + digest);
             using var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create);
             void Entry(string name, string text)
@@ -329,7 +339,8 @@ public sealed class HyperVTests : IAsyncLifetime
         var installed = Path.Combine(host.GuestScriptsDir, "installed", "demo.json");
 
         var session = new SandboxSession("s-tc");
-        var vm1 = await StartReusableAsync(settings, host, session, "fp-d1", system: "system-1", toolchainDigests: Digests, buildToolchains: Build);
+        var vm1 = await StartReusableAsync(settings, host, session, "fp-d1", system: "system-1", toolchainDigests: Digests, buildToolchains: Build,
+            toolchainRevisions: Revisions);
         Assert.Equal(SandboxState.Ready, vm1.Status.State);
         Assert.Empty(vm1.PendingToolchains());
 
@@ -350,7 +361,8 @@ public sealed class HyperVTests : IAsyncLifetime
         // VM wird fortgesetzt, Toolchain beim ersten Job nachinstalliert.
         digest = "d3";
         var resumed = HyperVSandbox.LoadReusableSession(settings)!;
-        var vm2 = await StartReusableAsync(settings, host, resumed, "fp-d3", system: "system-1", toolchainDigests: Digests, buildToolchains: Build);
+        var vm2 = await StartReusableAsync(settings, host, resumed, "fp-d3", system: "system-1", toolchainDigests: Digests, buildToolchains: Build,
+            toolchainRevisions: Revisions);
         Assert.True(vm2.Status.State == SandboxState.Stopped, vm2.Status.Text);
         Assert.Equal(1, host.Builds);
         Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm2, resumed, root, "t3")).Status);
@@ -364,11 +376,29 @@ public sealed class HyperVTests : IAsyncLifetime
         Assert.Contains("Nachinstallieren fehlgeschlagen", vm2.Status.Text, StringComparison.Ordinal);
         Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm2, resumed, root, "t5")).Status);
         Assert.Equal(3, updates.Count);
+
+        // Review: erneut registriert (gleicher Inhalt, neuer Zeitpunkt) → neuer Versuch, diesmal erfolgreich.
+        registered = "r2";
+        fail = false;
+        Assert.Equal(["demo"], vm2.PendingToolchains());
+        Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm2, resumed, root, "t6")).Status);
+        Assert.Equal(4, updates.Count);
+        Assert.Contains("nachinstalliert", vm2.Status.Text, StringComparison.Ordinal);
+
+        // Fehler auf dem Host (z. B. Datei nach der Registrierung verändert, dann wiederhergestellt): nächster Job versucht es erneut.
+        digest = "d5";
+        hostFailures = 1;
+        // Snapshot-Job: Bereitstellen scheitert (nicht gemerkt); Lese-Job direkt danach versucht es erneut – mit Erfolg.
+        Assert.Equal(ResultStatus.Succeeded, (await ReadOnceAsync(vm2, resumed, root, "t7")).Status);
+        Assert.Equal(0, hostFailures);
+        Assert.Equal("demo@d5", updates[^1]);
+        Assert.Empty(vm2.PendingToolchains());
         await vm2.DisposeAsync();
 
         // Grundlage geändert (z. B. anderes Windows-Abbild): Neuaufbau wie bisher.
         var rebuilt = HyperVSandbox.LoadReusableSession(settings)!;
-        var vm3 = await StartReusableAsync(settings, host, rebuilt, "fp-x", system: "system-2", toolchainDigests: Digests, buildToolchains: Build);
+        var vm3 = await StartReusableAsync(settings, host, rebuilt, "fp-x", system: "system-2", toolchainDigests: Digests, buildToolchains: Build,
+            toolchainRevisions: Revisions);
         _cleanup.Add(vm3);
         Assert.Equal(2, host.Builds);
     }
