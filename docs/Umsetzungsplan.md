@@ -229,6 +229,12 @@ Patch erneut vor. Nicht angewendete Änderungen werden am Ende als Entwurf im Da
 Denkmodell schrieb eine ganze Projektdatei schon in der Denkphase und wurde nach 32.768 Token abgeschnitten. Neue
 Profiloption `outputUpToContext`: Ausgabe darf den Rest des Kontexts nach der Eingabe nutzen.
 
+**Mehrere Aktionen in einer Antwort (Stand 28.10.2026):** Schreibt ein Modell mehrere Aktionen (z. B. list und zwei read)
+in eine Antwort, werden jetzt alle der Reihe nach vorgeschlagen, jede mit eigener Freigabe; aufeinanderfolgende
+Leseaktionen werden zu einer Sammelfreigabe mit Abwahl je Datei zusammengefasst (höchstens 8 Dateien, 6 Aktionen). Ein
+„finish“ daneben wird nicht ausgeführt – das Modell schließt nach den Ergebnissen ab. Läuft ein Vorschlag ab, werden die
+übrigen nicht mehr vorgeschlagen.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

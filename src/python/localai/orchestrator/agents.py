@@ -51,6 +51,21 @@ _LISTING = re.compile(r"File\.List (.+) depth=(\d+)")
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
+def _merge_reads(actions: list[protocol.Action]) -> list[protocol.Action]:
+    """Aufeinanderfolgende Leseaktionen einer Antwort → eine Sammelfreigabe (jede Datei einzeln abwählbar)."""
+    merged: list[protocol.Action] = []
+    for action in actions:
+        last = merged[-1] if merged else None
+        if (action.kind == "read" and last is not None and last.kind == "read"
+                and len(last.files) + len(action.files) <= protocol.MAX_READ_FILES):
+            paths = {(f.path, f.start, f.end) for f in last.files}
+            last.files += [f for f in action.files if (f.path, f.start, f.end) not in paths]
+            last.reason = "; ".join(r for r in (last.reason, action.reason) if r)
+            continue
+        merged.append(action)
+    return merged
+
+
 class AgentFailed(Exception):
     """Aufgabe endgültig gescheitert (Fehler des Modells/Ollama)."""
 
@@ -241,42 +256,18 @@ class Agent:
                 if self.limits.max_invalid_answers and invalid >= self.limits.max_invalid_answers:
                     raise LimitReached(f"{invalid} unbrauchbare Antworten für Aufgabe {task_id} (limits.maxInvalidAnswersPerTask)")
                 continue
-            if action.kind == "read":
-                known = self._known_reads(action, evidence, dropped)
-                if known:
-                    action.files = [f for f in action.files if f.path not in known]
-                    note = (f"read {', '.join(sorted(known))}: not read again – the current content (same snapshot) is "
-                            f"already in the evidence ({', '.join(known[p] for p in sorted(known))}). Use it.")
-                    if not action.files:
-                        self.reporter.state(role, AgentState.Generating, f"{', '.join(sorted(known))} liegt schon vor – "
-                                            "nicht erneut gelesen", task_id)
-                        history.orchestrator(step, f"{note} Continue with your task now.")
-                        continue
-                    history.orchestrator(step, note)
-            if action.kind == "list" and (known_list := self._known_listing(action, evidence, dropped)):
-                self.reporter.state(role, AgentState.Generating, f"Auflistung {action.path} liegt schon vor – nicht erneut "
-                                    "angefragt", task_id)
-                history.orchestrator(step, f"list {action.path} depth {action.depth}: not requested again – the same listing "
-                                     f"(same snapshot) is already in the evidence ({known_list}). Use it and continue with your task.")
-                continue
-            outcome = self.bridge.execute(role, task_id, action, cancel)
-            if outcome.expired:
-                # Niemand entscheidet: nicht weiter vorschlagen (jeder Vorschlag wartet sonst wieder bis zum Ablauf),
-                # sondern warten, bis der Nutzer zurück ist.
-                self.reporter.state(role, AgentState.WaitingUser, "Vorschlag abgelaufen – wartet auf dich", task_id)
-                self.reporter.chat("Orchestrator", f"{role}: Ein Vorschlag ist abgelaufen, ohne dass du entschieden hast. Ich "
-                                   "warte, bis du wieder da bist – schreib eine Nachricht (z. B. „weiter“), dann geht es weiter.")
-                self.clock.wait_for_user(cancel)
-                self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
-                history.orchestrator(step, f"{outcome.summary}. The user was away and is back now; propose it again only if "
-                                     "you still need it.")
-                continue
-            if outcome.denied:
-                denials += 1
-                if self.limits.max_denials_per_task and denials >= self.limits.max_denials_per_task:
-                    raise LimitReached(f"{denials} Vorschläge für Aufgabe {task_id} von dir abgelehnt (limits.maxDenialsPerTask)")
-            evidence.extend(outcome.evidence)
-            history.orchestrator(step, outcome.summary)
+            if action.ignored_finish:
+                history.orchestrator(step, "your finish was not used because the same answer requested other actions; "
+                                     "finish again after you have seen their results.")
+            for act in _merge_reads([action, *action.more]):
+                done = self._perform(step, act, evidence, dropped, history, cancel, task_id)
+                if done == "denied":
+                    denials += 1
+                    if self.limits.max_denials_per_task and denials >= self.limits.max_denials_per_task:
+                        raise LimitReached(f"{denials} Vorschläge für Aufgabe {task_id} von dir abgelehnt "
+                                           "(limits.maxDenialsPerTask)")
+                if done == "expired":
+                    break  # der Nutzer war weg: übrige Aktionen nicht mehr vorschlagen, das Modell entscheidet neu
             self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: weiter nach Schritt {step}", task_id)
         raise LimitReached(f"{max_steps} Modellschritte für Aufgabe {task_id} erreicht")
 
@@ -375,6 +366,44 @@ class Agent:
         if not self.profile.output_up_to_context:
             return self.budget.output
         return max(self.budget.output, self.profile.context_tokens - prompt_tokens - self.budget.reserve)
+
+    def _perform(self, step: int, action: protocol.Action, evidence: list[Evidence], dropped: set[str],
+                 history: StepHistory, cancel: CancelToken, task_id: str) -> str:
+        """Eine Aktion (Lesen, Auflisten, Suchen, …) mit eigener Freigabe. Ergebnis: done | skipped | denied | expired."""
+        role = self.role
+        if action.kind == "read":
+            known = self._known_reads(action, evidence, dropped)
+            if known:
+                action.files = [f for f in action.files if f.path not in known]
+                note = (f"read {', '.join(sorted(known))}: not read again – the current content (same snapshot) is "
+                        f"already in the evidence ({', '.join(known[p] for p in sorted(known))}). Use it.")
+                if not action.files:
+                    self.reporter.state(role, AgentState.Generating, f"{', '.join(sorted(known))} liegt schon vor – "
+                                        "nicht erneut gelesen", task_id)
+                    history.orchestrator(step, f"{note} Continue with your task now.")
+                    return "skipped"
+                history.orchestrator(step, note)
+        if action.kind == "list" and (known_list := self._known_listing(action, evidence, dropped)):
+            self.reporter.state(role, AgentState.Generating, f"Auflistung {action.path} liegt schon vor – nicht erneut "
+                                "angefragt", task_id)
+            history.orchestrator(step, f"list {action.path} depth {action.depth}: not requested again – the same listing "
+                                 f"(same snapshot) is already in the evidence ({known_list}). Use it and continue with your task.")
+            return "skipped"
+        outcome = self.bridge.execute(role, task_id, action, cancel)
+        if outcome.expired:
+            # Niemand entscheidet: nicht weiter vorschlagen (jeder Vorschlag wartet sonst wieder bis zum Ablauf),
+            # sondern warten, bis der Nutzer zurück ist.
+            self.reporter.state(role, AgentState.WaitingUser, "Vorschlag abgelaufen – wartet auf dich", task_id)
+            self.reporter.chat("Orchestrator", f"{role}: Ein Vorschlag ist abgelaufen, ohne dass du entschieden hast. Ich "
+                               "warte, bis du wieder da bist – schreib eine Nachricht (z. B. „weiter“), dann geht es weiter.")
+            self.clock.wait_for_user(cancel)
+            self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
+            history.orchestrator(step, f"{outcome.summary}. The user was away and is back now; propose it again only if "
+                                 "you still need it.")
+            return "expired"
+        evidence.extend(outcome.evidence)
+        history.orchestrator(step, outcome.summary)
+        return "denied" if outcome.denied else "done"
 
     def _current_snapshot(self) -> str:
         return getattr(self.bridge, "snapshot_id", None) or ""

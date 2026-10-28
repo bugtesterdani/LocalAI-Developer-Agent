@@ -1473,6 +1473,72 @@ def test_edit_block_ohne_pfad_nutzt_den_pfad_des_vorigen_blocks():
         protocol.resolve_patch("Coder", lone, ["a.py", "b.py"], lambda p: None)
 
 
+def test_mehrere_aktionen_in_einer_antwort():
+    """Echter Lauf: list + zwei read in einer Antwort – nur die letzte wurde ausgeführt. Jetzt alle, Leseaktionen als
+    eine Sammelfreigabe (Dateien einzeln abwählbar), finish daneben wird nicht ausgeführt."""
+    text = ('Ich schaue mir die CSV-Dateien an.\n\n{"action": "list", "path": ".", "depth": 3}\n'
+            '{"action": "read", "files": [{"path": "Exports/Export 1.csv", "start": 1, "end": 50}], "reason": "Struktur 1"}\n'
+            '{"action": "read", "files": [{"path": "Exports/Export 2.csv", "start": 1, "end": 50}], "reason": "Struktur 2"}\n'
+            '{"action": "finish", "result": {"message_de": "zu früh"}}')
+    action = protocol.parse(text)
+    assert action.kind == "list" and [a.kind for a in action.more] == ["read", "read"] and action.ignored_finish
+    assert action.reasoning == "Ich schaue mir die CSV-Dateien an."
+    from localai.orchestrator.agents import _merge_reads
+    merged = _merge_reads([action, *action.more])
+    assert [a.kind for a in merged] == ["list", "read"]
+    assert [f.path for f in merged[1].files] == ["Exports/Export 1.csv", "Exports/Export 2.csv"]
+    assert merged[1].reason == "Struktur 1; Struktur 2"
+    # Eine einzelne Aktion und verschachtelte Objekte bleiben wie bisher.
+    single = protocol.parse('```json\n{"action": "read", "files": [{"path": "a.py"}, {"path": "b.py"}]}\n```')
+    assert single.kind == "read" and not single.more and len(single.files) == 2
+    two_finish = protocol.parse('{"action": "finish", "result": {"message_de": "a"}}\n'
+                                '{"action": "finish", "result": {"message_de": "b"}}')
+    assert two_finish.kind == "finish" and two_finish.result["message_de"] == "b"
+    # Review: JSON in einem Diff bzw. Codeblock ist Dateiinhalt, keine Aktion.
+    with_diff = ('```diff\n--- a/cfg.json\n+++ b/cfg.json\n@@ -1 +1 @@\n-{"action": "old"}\n+{"action": "new"}\n```\n'
+                 '```json\n{"action": "finish", "result": {"message_de": "geändert"}}\n```')
+    action = protocol.parse(with_diff)
+    assert action.kind == "finish" and not action.more and "+{\"action\": \"new\"}" in action.diff_block
+    # Review: verschachtelte Aktion in einem Beispiel-Objekt zählt nicht.
+    nested = ('Beispiel: {"config": {"action": "read", "files": [{"path": "example.json"}]}}\n'
+              '{"action": "finish", "result": {"message_de": "fertig"}}')
+    action = protocol.parse(nested)
+    assert action.kind == "finish" and not action.ignored_finish and action.result["message_de"] == "fertig"
+
+
+def test_mehrere_aktionen_werden_nacheinander_vorgeschlagen(ollama, tmp_path):
+    steps = {"Coder": 0}
+    seen = []
+
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        role = re.search(r"You are the (\w+) agent", system)[1]
+        if role == "Coder":
+            steps["Coder"] += 1
+            seen.append(user)
+            if steps["Coder"] == 1:
+                return ('{"action": "search", "query": "add", "path": "src"}\n'
+                        '{"action": "read", "files": [{"path": "src/calc.py"}]}\n'
+                        '{"action": "read", "files": [{"path": "tests/test_calc.py"}]}'), ""
+            return ("src/calc.py\n<<<<<<< SEARCH\n    return a + b\n=======\n    return b + a\n>>>>>>> REPLACE\n"
+                    '```json\n{"action": "finish", "result": {"message_de": "fertig"}}\n```'), ""
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(test_runs=[], toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ändere add.")
+    wait_for(lambda: finished(broker), timeout=60)
+    orch.stop()
+    thread.join(5)
+    coder = [p for p in broker.proposals.values() if p.agent.value == "Coder" and p.tool.startswith(("File.", "Repo."))]
+    tools = [p.tool for p in coder]
+    assert any(t.startswith(("File.Search", "Repo.")) for t in tools), tools
+    reads = [p for p in coder if p.tool.startswith("File.Read")]
+    assert len(reads) == 1 and sorted(t.path for t in reads[0].targets) == ["src/calc.py", "tests/test_calc.py"]
+    assert "Step 1: search" in seen[1] or "search 'add'" in seen[1]
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
