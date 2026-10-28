@@ -686,7 +686,7 @@ public static class GuestPayloadBuilder
         File.Copy(Path.Combine(sources.GuestScripts, "SetupComplete.cmd"), Path.Combine(guestDirectory, "SetupComplete.cmd"));
     }
 
-    public static readonly string[] GuestScriptFiles = ["provision.ps1", "LocalAiGuest.psm1", "update.ps1"];
+    public static readonly string[] GuestScriptFiles = ["provision.ps1", "LocalAiGuest.psm1", "update.ps1", "toolchain-update.ps1"];
 
     /// <param name="inbound">Weg der Jobs in die VM: "CopyVMFile" oder "Disk" (Eingangs-Laufwerk, Worker mit --inbound-disk).</param>
     public static string GuestConfigJson(long transferDiskBytes, IReadOnlyList<string>? toolchains, bool lowIntegrityTools, string inbound = "CopyVMFile") =>

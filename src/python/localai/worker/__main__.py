@@ -32,9 +32,17 @@ from dataclasses import dataclass
 
 from localai.contracts import ResultEnvelope
 from localai.worker.execution import Executor, ToolchainCatalog
-from localai.worker.jobs import JobRejected, WorkerState, verify_job, verify_payload
+from localai.worker.jobs import (
+    MAX_PAYLOAD_BYTES,
+    JobRejected,
+    WorkerState,
+    verify_job,
+    verify_payload,
+)
 from localai.worker.repoindex import RepoIndexer
 from localai.worker.snapshot import SnapshotStore
+from localai.worker.toolchain_update import MAX_PAYLOAD_BYTES as TOOLCHAIN_PAYLOAD_BYTES
+from localai.worker.toolchain_update import TOOLCHAINS_TOOL, apply_toolchains
 from localai.worker.tools import ToolRunner
 from localai.worker.transfer import Signal, TransferDisk, TransferError, TransferKind
 from localai.worker.update import RESTART_EXIT_CODE, UPDATE_TOOL, apply_update
@@ -92,6 +100,8 @@ class UpdateTarget:
 
     guest_root: pathlib.Path
     package_dir: pathlib.Path
+    # Toolchain-Update: Befehl, der die entpackten Toolchains installiert (None = toolchain-update.ps1 im Windows-Gast)
+    toolchain_installer: list[str] | None = None
 
 
 def process_one(job_file: pathlib.Path, sink, key: bytes, state: WorkerState, runner: ToolRunner,
@@ -103,7 +113,9 @@ def process_one(job_file: pathlib.Path, sink, key: bytes, state: WorkerState, ru
     ready = job_file.with_name(stem + ".ready")
     try:
         job = verify_job(job_file.read_bytes(), key, state)
-        verify_payload(payload if payload.exists() else None, job.payload_sha256)
+        # Toolchains sind groß (Build-Tools, Offline-Pakete); nur der signierte Host-Job darf so viel schicken.
+        limit = TOOLCHAIN_PAYLOAD_BYTES if job.proposal.tool == TOOLCHAINS_TOOL and update is not None else MAX_PAYLOAD_BYTES
+        verify_payload(payload if payload.exists() else None, job.payload_sha256, limit)
     except JobRejected as err:
         sink.rejected(job_file.name, _sequence_of(job_file.name), str(err))
         print(f"[Worker] abgelehnt: {job_file.name}: {err}", flush=True)
@@ -114,6 +126,8 @@ def process_one(job_file: pathlib.Path, sink, key: bytes, state: WorkerState, ru
             else:
                 result = apply_update(job, payload if payload.exists() else None, update.guest_root, update.package_dir)
                 restart = result.status.value == "Succeeded"
+        elif job.proposal.tool == TOOLCHAINS_TOOL and update is not None:
+            result = apply_toolchains(job, payload if payload.exists() else None, update.guest_root, update.toolchain_installer)
         else:
             result = runner.run(job, payload if payload.exists() else None)
         sink.result(ResultEnvelope(job_id=job.job_id, sequence=job.sequence, result=result))
@@ -180,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guest-root", type=pathlib.Path,
                         help="Gast-Update: Ordner für Gastskripte (Standard: übergeordneter Ordner von --work)")
     parser.add_argument("--package-dir", type=pathlib.Path, help="Gast-Update: installiertes Paket localai (nur Tests)")
+    parser.add_argument("--toolchain-installer", type=pathlib.Path,
+                        help="nur Tests: Python-Skript für das Toolchain-Update statt toolchain-update.ps1 im Windows-Gast")
     parser.add_argument("--tools-user", help="Linux-Gast: Werkzeugprozesse als dieser Benutzer, ohne Netz (z. B. localai-tools)")
     parser.add_argument("--jobs-root", type=pathlib.Path, help="Arbeitsordner der Toolchain-Jobs (Standard: <work>/jobs)")
     parser.add_argument("--osdebug", action="store_true", help="OsDebug.* (QEMU) freischalten – Linux-Gast bzw. dev-local")
@@ -228,7 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     if transfer is not None:
         # Gast-Update nur im VM-Modus (Transfer-Laufwerk); im Entwicklungsmodus ersetzt der Worker nie Code.
         update = UpdateTarget(args.guest_root or args.work.resolve().parent,
-                              args.package_dir or pathlib.Path(localai.__file__).resolve().parent)
+                              args.package_dir or pathlib.Path(localai.__file__).resolve().parent,
+                              [sys.executable, str(args.toolchain_installer)] if args.toolchain_installer else None)
     osdebug = None
     if args.osdebug:
         from localai.worker.osdebug import OsDebugManager

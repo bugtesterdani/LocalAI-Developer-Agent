@@ -83,14 +83,14 @@ def verify_job(raw: bytes, key: bytes, state: WorkerState, now: dt.datetime | No
     return job
 
 
-def verify_payload(path: pathlib.Path | None, expected_sha256: str | None) -> None:
+def verify_payload(path: pathlib.Path | None, expected_sha256: str | None, max_bytes: int = MAX_PAYLOAD_BYTES) -> None:
     if expected_sha256 is None:
         if path is not None and path.exists():
             raise JobRejected("Unerwartete Nutzlast")
         return
     if path is None or not path.exists():
         raise JobRejected("Nutzlast fehlt")
-    if path.stat().st_size > MAX_PAYLOAD_BYTES:
+    if path.stat().st_size > max_bytes:
         raise JobRejected("Nutzlast zu groß")
     digest = hashlib.sha256()
     with path.open("rb") as f:

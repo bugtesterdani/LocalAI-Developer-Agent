@@ -28,7 +28,8 @@ from localai.pathrules import PathRuleError, normalize_relative
 UPDATE_TOOL = "Sandbox.Update"
 RESTART_EXIT_CODE = 75
 GUEST_FILES = {"guest/provision.ps1": "provision.ps1", "guest/LocalAiGuest.psm1": "LocalAiGuest.psm1",
-               "guest/update.ps1": "update.ps1", "guest/provision.sh": "provision.sh", "guest-config.json": "guest-config.json"}
+               "guest/update.ps1": "update.ps1", "guest/toolchain-update.ps1": "toolchain-update.ps1",
+               "guest/provision.sh": "provision.sh", "guest-config.json": "guest-config.json"}
 MAX_FILES = 2000
 MAX_BYTES = 64 * 1024 * 1024
 

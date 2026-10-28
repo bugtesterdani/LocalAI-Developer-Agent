@@ -167,6 +167,7 @@ Copy-VMFile -Name <VM> -SourcePath $env:TEMP\t.txt -DestinationPath C:\t.txt -Cr
 |---|---|
 | „Profil nicht kalibriert“ im Chat | Kalibrierung fehlt für diese Hardware oder diesen Modell-Digest → [kalibrieren](konfiguration.md#calibration) |
 | „Hash weicht ab“ / „Ordner der registrierten Toolchain nicht gefunden“ | Toolchain-Ordner verändert oder Registrierung von einem anderen Rechner → TOOLCHAINS prüfen und neu registrieren |
+| „Toolchain … konnte in der VM nicht nachinstalliert werden“ | Neu registrierte Toolchain scheitert beim Installieren, Prüfbefehl oder Selbsttest in der VM (Grund steht dabei) → Toolchain-Ordner korrigieren, erneut registrieren; der nächste Job versucht es wieder. Hilft das nicht: **VM neu aufbauen** |
 | VM-Aufbau „gesperrt: Administratorrechte … abgelehnt“ | UAC bestätigen; Mitglied der Gruppe „Hyper-V-Administratoren“, danach neu anmelden |
 | „Edition nicht im Abbild gefunden“ | `imageName` passt nicht zum ISO; die Meldung nennt die vorhandenen Editionen |
 | VM wird bei jedem Start neu aufgebaut | `reuseVm` nicht `true`, andere Toolchains als beim letzten Aufbau, oder die letzte Sitzung endete nicht sauber |

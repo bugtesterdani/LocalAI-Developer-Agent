@@ -229,6 +229,15 @@ Patch erneut vor. Nicht angewendete Änderungen werden am Ende als Entwurf im Da
 Denkmodell schrieb eine ganze Projektdatei schon in der Denkphase und wurde nach 32.768 Token abgeschnitten. Neue
 Profiloption `outputUpToContext`: Ausgabe darf den Rest des Kontexts nach der Eingabe nutzen.
 
+**Toolchains ohne Neuaufbau nachinstallieren (Stand 28.10.2026):** Wird eine Toolchain geändert und neu registriert
+(z. B. fehlende Offline-Pakete ergänzt), installiert der Host sie in der laufenden Windows-VM neu, statt Windows neu
+aufzubauen: vor dem nächsten Job ein signierter Job `Sandbox.Toolchains` mit den wie beim Aufbau bereitgestellten
+Toolchains (Hashes, `pinned.json`); im Gast entfernt `toolchain-update.ps1` die alte Installation und ruft
+`Install-Toolchain` (Prüfbefehl, Selbsttest) und `Publish-ToolchainForJobs` auf. Mit `reuseVm` wird eine VM auch dann
+fortgesetzt, wenn sich nur Toolchains geändert haben (`sandbox-state.json`: `systemFingerprint`, `toolchains`). Scheitert
+die Installation, laufen andere Jobs weiter; Jobs dieser Toolchain bekommen den Grund, erneuter Versuch nach erneuter
+Registrierung. Linux-Gast: weiterhin Neuaufbau.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

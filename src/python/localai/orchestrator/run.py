@@ -1084,7 +1084,8 @@ class Orchestrator:
             if verification.ran and not verification.ok and verification.procurement:
                 verdict = "angehalten: Offlinepakete fehlen"
                 self.reporter.chat("Orchestrator", "Build/Tests scheitern an fehlenden Offlinepaketen – das kann kein Agent durch "
-                                   "Codeänderungen beheben. Bitte beschaffen und die Toolchain neu registrieren, dann „fortsetzen“ "
+                                   "Codeänderungen beheben. Bitte beschaffen und die Toolchain neu registrieren, dann „fortsetzen“ (die "
+                                   "Toolchain wird in der laufenden VM nachinstalliert, kein Neuaufbau) "
                                    "oder das Ziel erneut senden:\n- " + "\n- ".join(verification.procurement))
                 break
             if verification.ran and not verification.ok:

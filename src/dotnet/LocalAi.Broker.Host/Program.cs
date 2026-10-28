@@ -375,7 +375,11 @@ static SandboxParts CreateSandbox(
                     () => SandboxFingerprint.ComputeBase(vmSettings, Sources(), toolchains!.Registrations, guestToolchains),
                     () => SandboxFingerprint.ComputeCode(vmSettings, Sources()),
                     zip => Task.Run(() => GuestPayloadBuilder.BuildUpdate(zip, Sources(), vmSettings.TransferDiskBytes, guestToolchains,
-                        vmSettings.LowIntegrityTools, guest, vmSettings.Hypervisor, vmSettings.Inbound)));
+                        vmSettings.LowIntegrityTools, guest, vmSettings.Hypervisor, vmSettings.Inbound)),
+                    // Toolchain-Update: Grundlage ohne Toolchains, aktuelle Registrierung, Bereitstellung als ZIP.
+                    () => SandboxFingerprint.ComputeBase(vmSettings, Sources(), [], []),
+                    () => ToolchainUpdatePayload.Digests(toolchains!.Registrations, guestToolchains),
+                    (names, zip) => Task.Run(() => ToolchainUpdatePayload.Build(toolchains!, names, zip)));
                 var home = guest == plan.Home;
                 adapters[guest] = new SandboxToolAdapter(session, vm, context, registry,
                     Path.Combine(options.DataDirectory, linux ? "sandbox-scratch-linux" : "sandbox-scratch"), SystemClock.Instance)

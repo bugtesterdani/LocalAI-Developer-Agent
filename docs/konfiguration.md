@@ -85,7 +85,7 @@ Alle drei Abschnitte haben dieselben Felder; einige gelten nur für bestimmte G�
 | `pauseOnNoAnswer` | `true` | bleibt eine Antwort aus: VM anhalten statt sperren; die Oberfläche bietet „VM weiter verwenden“ oder „VM neu aufbauen“. Netzwerkkarten und ungültige Rückgaben sperren immer |
 | `idleMinutes` | `30` | nach so vielen Minuten ohne Job anhalten, beim nächsten Job neu starten; `0` = nie |
 | `stopAction` | `ShutDown` | wie angehalten wird: `ShutDown` oder `Save` (nur Hyper-V) |
-| `reuseVm` | `false` | VM beim Programmende behalten und beim nächsten Start fortsetzen, wenn Abbild, Einstellungen, Worker und Toolchains unverändert sind. Abweichung von R17 auf ausdrücklichen Wunsch |
+| `reuseVm` | `false` | VM beim Programmende behalten und beim nächsten Start fortsetzen, wenn Abbild, Einstellungen und Python-Laufzeit unverändert sind (geänderter Worker-Code wird per Gast-Update übernommen, geänderte Toolchains werden im Windows-Gast nachinstalliert). Abweichung von R17 auf ausdrücklichen Wunsch |
 | `keepVmOnExit` | `false` | VM am Sitzungsende nicht löschen – nur zur Fehlersuche |
 | `lowIntegrityTools` | `true` | Werkzeugprozesse im Windows-Gast mit eingeschränktem Token und niedriger Integrität (SEC-21). **Nur zur Fehlersuche** abschalten |
 | `nestedVirtualization` | `false` | nur Linux: CPU-Virtualisierung an die VM weiterreichen, damit QEMU für OS-Debugging (M9) KVM nutzen kann |

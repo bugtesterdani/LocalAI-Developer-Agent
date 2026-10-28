@@ -172,14 +172,15 @@ Auf Wunsch: Wird nur die Software neu gestartet, muss die VM nicht neu aufgebaut
 Verhalten:
 - Beim Beenden der Oberfläche wird eine **bereite** VM gespeichert (Hyper-V „Gespeichert“) statt gelöscht. Sitzungsschlüssel und Sequenz liegen in `sandbox-state.json` im VM-Ordner (Schlüssel mit Windows-DPAPI an dein Konto gebunden).
 - Beim nächsten Start wird sie fortgesetzt, wenn der **Fingerabdruck** passt: Windows-Abbild (Pfad, Größe, Datum), VM-Einstellungen, Python-Laufzeit, Worker-Code, Gastskripte und die Registrierungen der Projekt-Toolchains. Änderungen am Orchestrator oder an der Oberfläche zählen nicht.
-- Neu aufgebaut wird, wenn sich etwas davon geändert hat, die VM fehlt, eine Netzwerkkarte hat, nicht innerhalb von 5 Minuten antwortet, oder die letzte Sitzung gesperrt bzw. abgestürzt ist.
+- Neu aufgebaut wird, wenn sich etwas davon (außer den Toolchains, siehe unten) geändert hat, die VM fehlt, eine Netzwerkkarte hat, nicht innerhalb von 5 Minuten antwortet, oder die letzte Sitzung gesperrt bzw. abgestürzt ist.
 - Knopf **VM neu aufbauen** in der Kopfzeile erzwingt jederzeit einen Neuaufbau (mit Rückfrage).
 
 Sicherheitshinweis: Das weicht bewusst von „Neuinstallation je Sitzung“ (R17) ab. Daten früherer Snapshots bleiben in der VM, und eine während einer Sitzung veränderte VM lebt weiter. Bei Zweifeln deshalb **VM neu aufbauen**.
 
 - [ ] Mit `reuseVm: true` starten, warten bis „bereit“, Oberfläche schließen → in Hyper-V-Manager Zustand „Gespeichert“.
 - [ ] Erneut starten → nach Sekunden „Offline-VM bereit – wiederverwendet (aufgebaut TT.MM. HH:mm)“; Snapshot und Lesen funktionieren.
-- [ ] Toolchain neu registrieren (oder `memoryMB` ändern) → beim nächsten Start Neuaufbau.
+- [ ] `memoryMB` ändern → beim nächsten Start Neuaufbau.
+- [ ] Toolchain ändern und neu registrieren (Windows-Gast) → kein Neuaufbau: vor dem nächsten Job steht „Toolchains werden in der VM nachinstalliert: <name>“, danach „Toolchains nachinstalliert …“.
 - [ ] **VM neu aufbauen** → Rückfrage, danach Aufbau mit Fortschritt in der Kopfzeile.
 - [ ] Oberfläche während des Aufbaus schließen bzw. Not-Aus mit gesperrter VM → beim nächsten Start Neuaufbau.
 
