@@ -571,10 +571,15 @@ def edits_to_diff(blocks: list[EditBlock], known_files: list[str] | None = None,
     files = [f for f in (known_files or []) if f]
     order: list[str] = []
     per_file: dict[str, list[EditBlock]] = {}
+    previous: str | None = None
     for block in blocks:
-        path = block.path or (files[0] if len(set(files)) == 1 else None)
+        # Ohne Pfadzeile: derselbe Pfad wie beim Block davor (kleine Modelle nennen ihn oft nur beim ersten Block);
+        # beim ersten Block nur, wenn die Aufgabe genau eine Datei ändern darf.
+        path = block.path or previous or (files[0] if len(set(files)) == 1 else None)
         if not path:
-            raise ProtocolError("Put the file path on its own line directly before <<<<<<< SEARCH.")
+            raise ProtocolError("Put the file path on its own line directly before <<<<<<< SEARCH (at least before the "
+                                "first block; following blocks without a path line use the same file).")
+        previous = path
         if path not in per_file:
             per_file[path] = []
             order.append(path)
