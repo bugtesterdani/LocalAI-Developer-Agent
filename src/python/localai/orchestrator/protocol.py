@@ -58,6 +58,10 @@ class Action:
     edits: list[EditBlock] = field(default_factory=list)  # SEARCH/REPLACE-Blöcke vor dem JSON
     diff_block: str = ""  # ```diff-Block außerhalb des JSON (Ersatz, wenn das Patchfeld fehlt)
     debug: dict[str, Any] = field(default_factory=dict)  # M9: Befehl und Parameter der Debug-Sitzung
+    # Weitere Aktionen derselben Antwort (der Reihe nach, jede mit eigener Freigabe); „finish“ zusammen mit anderen
+    # Aktionen wird nicht ausgeführt (ignored_finish), das Modell schließt nach den Ergebnissen erneut ab.
+    more: list[Action] = field(default_factory=list)
+    ignored_finish: bool = False
 
 
 @dataclass
@@ -327,8 +331,45 @@ def _without_edit_blocks(text: str) -> str:
     return "\n".join(lines)
 
 
+MAX_ACTIONS = 6
+
+
+def _action_objects(text: str) -> list[tuple[int, dict[str, Any]]]:
+    """Alle Aktions-Objekte auf oberster Ebene (Position, Daten) – verschachtelte zählen nicht, nur Objekte mit
+    "action" oder Ergebnisfeldern."""
+    found: list[tuple[int, dict[str, Any]]] = []
+    end = -1
+    for m in _JSON_START.finditer(text):
+        if m.start() <= end:
+            continue
+        close = _balanced_end(text, m.start())
+        if close is None:
+            continue
+        try:
+            data = loads_lenient(text[m.start():close + 1])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(data, dict) and ("action" in data or RESULT_KEYS & set(data)):
+            found.append((m.start(), data))
+            end = close
+    return found
+
+
 def parse(text: str) -> Action:
     visible = _without_edit_blocks(text)
+    objects = _action_objects(visible)
+    if len(objects) > 1:
+        # Mehrere Aktionen in einer Antwort: alle ausführen statt nur der letzten.
+        reasoning = visible[:objects[0][0]]
+        reasoning = "\n".join(line for line in reasoning.split("\n") if not _FENCE_LINE.match(line)).strip()
+        actions = [_action(data, reasoning) for _, data in objects[:MAX_ACTIONS]]
+        work = [a for a in actions if a.kind != "finish"]
+        if work:
+            first = work[0]
+            first.more = work[1:]
+            first.ignored_finish = len(work) < len(actions)
+            return first
+        # Nur Abschlüsse: der letzte zählt (wie bisher).
     try:
         raw, reasoning = _last_json_object(visible)
     except ProtocolError:
