@@ -1494,6 +1494,16 @@ def test_mehrere_aktionen_in_einer_antwort():
     two_finish = protocol.parse('{"action": "finish", "result": {"message_de": "a"}}\n'
                                 '{"action": "finish", "result": {"message_de": "b"}}')
     assert two_finish.kind == "finish" and two_finish.result["message_de"] == "b"
+    # Review: JSON in einem Diff bzw. Codeblock ist Dateiinhalt, keine Aktion.
+    with_diff = ('```diff\n--- a/cfg.json\n+++ b/cfg.json\n@@ -1 +1 @@\n-{"action": "old"}\n+{"action": "new"}\n```\n'
+                 '```json\n{"action": "finish", "result": {"message_de": "geändert"}}\n```')
+    action = protocol.parse(with_diff)
+    assert action.kind == "finish" and not action.more and "+{\"action\": \"new\"}" in action.diff_block
+    # Review: verschachtelte Aktion in einem Beispiel-Objekt zählt nicht.
+    nested = ('Beispiel: {"config": {"action": "read", "files": [{"path": "example.json"}]}}\n'
+              '{"action": "finish", "result": {"message_de": "fertig"}}')
+    action = protocol.parse(nested)
+    assert action.kind == "finish" and not action.ignored_finish and action.result["message_de"] == "fertig"
 
 
 def test_mehrere_aktionen_werden_nacheinander_vorgeschlagen(ollama, tmp_path):

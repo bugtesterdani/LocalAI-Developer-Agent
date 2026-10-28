@@ -338,6 +338,11 @@ def _action_objects(text: str) -> list[tuple[int, dict[str, Any]]]:
     """Alle Aktions-Objekte auf oberster Ebene (Position, Daten) – verschachtelte zählen nicht, nur Objekte mit
     "action" oder Ergebnisfeldern."""
     found: list[tuple[int, dict[str, Any]]] = []
+    # Inhalt von Codeblöcken außer ```json (z. B. ein Diff mit {"action": …} in einer Datei) zählt nie als Aktion;
+    # gleich lang ersetzt, damit Positionen stimmen.
+    for fence in fences(text):
+        if fence.lang not in ("json", ""):
+            text = text[:fence.start] + re.sub(r"[^\n]", " ", text[fence.start:fence.end]) + text[fence.end:]
     end = -1
     for m in _JSON_START.finditer(text):
         if m.start() <= end:
@@ -345,13 +350,14 @@ def _action_objects(text: str) -> list[tuple[int, dict[str, Any]]]:
         close = _balanced_end(text, m.start())
         if close is None:
             continue
+        # Jedes Objekt auf oberster Ebene umschließt seine inneren – auch wenn es selbst keine Aktion ist (Beispiel-JSON).
+        end = close
         try:
             data = loads_lenient(text[m.start():close + 1])
         except (json.JSONDecodeError, ValueError):
             continue
         if isinstance(data, dict) and ("action" in data or RESULT_KEYS & set(data)):
             found.append((m.start(), data))
-            end = close
     return found
 
 
