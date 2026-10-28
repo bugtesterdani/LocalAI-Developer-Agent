@@ -11,7 +11,9 @@ namespace LocalAi.Sandbox;
 /// (Kennung, Schlüssel, letzte Sequenz) und das angehängte Transfer-Laufwerk. Nur eine „saubere“ VM
 /// (bei Programmende bereit, nie gesperrt) wird wiederverwendet. <c>fingerprint</c> ist die Grundlage (Abbild,
 /// Einstellungen, Laufzeit, Toolchains), <c>codeFingerprint</c> der Worker-Code und die Gastskripte;
-/// <c>guestUpdate</c> ≥ 1 heißt, der Gast kann Code-Updates ohne Neuaufbau übernehmen.
+/// <c>guestUpdate</c> ≥ 1 heißt, der Gast kann Code-Updates ohne Neuaufbau übernehmen. <c>systemFingerprint</c> ist die
+/// Grundlage ohne Toolchains, <c>toolchains</c> die installierten Toolchains (Name → Registrierungs-Digest): weicht nur
+/// eine Toolchain ab, wird sie in der laufenden VM nachinstalliert statt Windows neu aufzubauen.
 /// </summary>
 public sealed record SandboxReuseState(
     [property: JsonPropertyName("schemaVersion")] int SchemaVersion,
@@ -25,7 +27,9 @@ public sealed record SandboxReuseState(
     [property: JsonPropertyName("builtAt")] DateTimeOffset BuiltAt,
     [property: JsonPropertyName("clean")] bool Clean,
     [property: JsonPropertyName("codeFingerprint")] string? CodeFingerprint = null,
-    [property: JsonPropertyName("guestUpdate")] int GuestUpdate = 0);
+    [property: JsonPropertyName("guestUpdate")] int GuestUpdate = 0,
+    [property: JsonPropertyName("systemFingerprint")] string? SystemFingerprint = null,
+    [property: JsonPropertyName("toolchains")] IReadOnlyDictionary<string, string>? Toolchains = null);
 
 public sealed class SandboxReuseStore(string vmDirectory)
 {

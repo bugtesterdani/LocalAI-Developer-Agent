@@ -561,7 +561,18 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private readonly Func<string>? _fingerprint;
     private readonly Func<string>? _codeFingerprint;
     private readonly Func<string, Task>? _buildUpdate;
+    private readonly Func<string>? _systemFingerprint;
+    private readonly Func<IReadOnlyDictionary<string, string>>? _toolchainDigests;
+    private readonly Func<IReadOnlyDictionary<string, string>>? _toolchainRevisions;
+    private readonly Func<IReadOnlyList<string>, string, Task>? _buildToolchains;
     private readonly SandboxReuseStore _reuse;
+    private string? _currentSystem;
+    // Installierte Toolchains (Name → Registrierungs-Digest); null = unbekannt (dann kein Nachinstallieren).
+    private Dictionary<string, string>? _installedToolchains;
+    // Zuletzt gescheiterte Nachinstallation im Gast je Toolchain (Registrierungsstand: Digest und Zeitpunkt): nicht bei jedem
+    // Job erneut versuchen – erst nach erneuter Registrierung (auch mit gleichem Inhalt).
+    private readonly Dictionary<string, string> _failedToolchains = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _toolchainProblems = new(StringComparer.Ordinal);
     private string? _currentFingerprint;
     private string? _currentCode;
     private int _guestUpdate;
@@ -576,6 +587,9 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
 
     /// <summary>Internes Werkzeug des Hosts für das Gast-Update; nie über den Broker erreichbar.</summary>
     public const string UpdateTool = "Sandbox.Update";
+
+    /// <summary>Internes Werkzeug des Hosts: geänderte Toolchains in der laufenden VM neu installieren.</summary>
+    public const string ToolchainsTool = "Sandbox.Toolchains";
     private DateTimeOffset _builtAt;
     private CancellationTokenSource? _lifecycleCts;
     private bool _forceRebuild;
@@ -610,10 +624,20 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     /// <param name="fingerprint">Fingerabdruck der Grundlage (Abbild, Einstellungen, Laufzeit, Toolchains) – nötig für die Wiederverwendung.</param>
     /// <param name="codeFingerprint">Fingerabdruck von Worker-Code und Gastskripten; weicht nur er ab, wird die VM per Gast-Update aktualisiert.</param>
     /// <param name="buildUpdate">Schreibt die Nutzlast eines Gast-Updates (ZIP) an den übergebenen Pfad.</param>
+    /// <param name="systemFingerprint">Grundlage ohne Toolchains – stimmt sie, werden geänderte Toolchains nachinstalliert.</param>
+    /// <param name="toolchainDigests">Aktuelle Registrierung der Toolchains dieser VM (Name → Digest).</param>
+    /// <param name="buildToolchains">Schreibt die bereitgestellten Toolchains (Namen) als ZIP an den übergebenen Pfad.</param>
+    /// <param name="toolchainRevisions">Registrierungsstand je Toolchain (ändert sich bei jeder Registrierung); Standard: Digest.</param>
     public HyperVSandbox(HyperVSettings settings, IHyperVHost host, Func<string, Task> prepareGuest, IReadOnlyList<string>? expectedToolchains = null,
         SandboxSession? session = null, Func<string>? fingerprint = null, Func<string>? codeFingerprint = null,
-        Func<string, Task>? buildUpdate = null)
+        Func<string, Task>? buildUpdate = null, Func<string>? systemFingerprint = null,
+        Func<IReadOnlyDictionary<string, string>>? toolchainDigests = null, Func<IReadOnlyList<string>, string, Task>? buildToolchains = null,
+        Func<IReadOnlyDictionary<string, string>>? toolchainRevisions = null)
     {
+        _toolchainRevisions = toolchainRevisions;
+        _systemFingerprint = systemFingerprint;
+        _toolchainDigests = toolchainDigests;
+        _buildToolchains = buildToolchains;
         _codeFingerprint = codeFingerprint;
         _buildUpdate = buildUpdate;
         _expectedToolchains = expectedToolchains ?? [];
@@ -829,14 +853,25 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     public async Task<string?> EnsureStartedAsync(CancellationToken cancellationToken)
     {
         Touch();
-        if (Status.State != SandboxState.Stopped)
+        if (Status.State != SandboxState.Stopped && PendingToolchains().Count == 0)
         {
             return null;
         }
         await _exchange.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return Status.State == SandboxState.Stopped ? await StartOnDemandAsync(cancellationToken).ConfigureAwait(false) : null;
+            if (Status.State == SandboxState.Stopped && await StartOnDemandAsync(cancellationToken).ConfigureAwait(false) is { } problem)
+            {
+                return problem;
+            }
+            // Toolchain neu registriert (z. B. fehlende Offline-Pakete ergänzt): vor dem nächsten Job in der VM nachinstallieren –
+            // vor dem Erzeugen des Jobs, damit dessen Sequenz und Gültigkeit danach kommen. Scheitert es, laufen andere
+            // Jobs weiter; Jobs dieser Toolchain bekommen den Grund (siehe ExchangeAsync).
+            if (Status.IsReady && PendingToolchains() is { Count: > 0 } pending)
+            {
+                await UpdateToolchainsLockedAsync(pending, cancellationToken).ConfigureAwait(false);
+            }
+            return Status.IsUsable ? null : Status.Text;
         }
         finally
         {
@@ -916,7 +951,9 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         try
         {
             _reuse.Save(new SandboxReuseState(1, _currentFingerprint, _session!.SessionId, "", "", _session.LastSequence, _currentDisk,
-                Volatile.Read(ref _diskCounter), _builtAt, clean, _currentCode, _guestUpdate), _session.Key);
+                Volatile.Read(ref _diskCounter), _builtAt, clean, _currentCode, _guestUpdate, _currentSystem,
+                _installedToolchains is null ? null : new SortedDictionary<string, string>(_installedToolchains, StringComparer.Ordinal)),
+                _session.Key);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         {
@@ -927,7 +964,15 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
     private async Task<bool> TryResumeAsync(CancellationToken ct)
     {
         var loaded = _reuse.Load();
-        if (loaded is not { } l || !l.State.Clean || l.State.Fingerprint != _currentFingerprint)
+        if (loaded is not { } l || !l.State.Clean)
+        {
+            return false;
+        }
+        // Nur Toolchains geändert (Grundlage ohne Toolchains gleich): fortsetzen, die Toolchains werden vor dem nächsten
+        // Job nachinstalliert (Windows-Gast).
+        var toolchainsOnly = l.State.Fingerprint != _currentFingerprint && CanUpdateToolchains && _currentSystem is not null
+                             && l.State.SystemFingerprint == _currentSystem && l.State.Toolchains is not null;
+        if (l.State.Fingerprint != _currentFingerprint && !toolchainsOnly)
         {
             return false;
         }
@@ -951,6 +996,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         Volatile.Write(ref _diskCounter, l.State.DiskCounter);
         _builtAt = l.State.BuiltAt;
         _guestUpdate = l.State.GuestUpdate;
+        _installedToolchains = l.State.Toolchains is null ? null : new Dictionary<string, string>(l.State.Toolchains, StringComparer.Ordinal);
         Directory.CreateDirectory(WorkDirectory);
         if (codeMatches && info.State is "Off" or "Saved")
         {
@@ -1207,6 +1253,7 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             {
                 _currentFingerprint = _fingerprint!();
                 _currentCode = _codeFingerprint?.Invoke();
+                _currentSystem = _systemFingerprint?.Invoke();
                 if (!_forceRebuild && await TryResumeAsync(ct).ConfigureAwait(false))
                 {
                     return;
@@ -1221,7 +1268,12 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                 FileTools.DeleteTree(WorkDirectory);
             }
             Directory.CreateDirectory(guestDir);
+            // Stand der Toolchains, die gleich bereitgestellt werden (Bereitstellen prüft gegen genau diese Registrierung).
+            var staging = _toolchainDigests?.Invoke();
             await _prepareGuest(guestDir).ConfigureAwait(false);
+            _installedToolchains = staging is null ? null : new Dictionary<string, string>(staging, StringComparer.Ordinal);
+            _failedToolchains.Clear();
+            _toolchainProblems.Clear();
 
             var requestFile = Path.Combine(WorkDirectory, "build-request.json");
             var statusFile = Path.Combine(WorkDirectory, "build-status.log");
@@ -1406,10 +1458,6 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
         var job = envelope.Job;
         await _exchange.WaitAsync(cancellationToken).ConfigureAwait(false);
         Touch();
-        var outgoing = Path.Combine(WorkDirectory, "outgoing");
-        var stem = $"{job.Sequence:D12}-{job.JobId}";
-        var files = new List<string>();
-        string? inbound = null;
         try
         {
             if (Status.State == SandboxState.Stopped && !_updating && await StartOnDemandAsync(cancellationToken).ConfigureAwait(false) is { } problem)
@@ -1420,6 +1468,29 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
             {
                 return new SandboxReply(null, $"Sandbox nicht bereit ({Status.Text})");
             }
+            if (!_updating && ToolchainFailure(job.Proposal) is { } failed)
+            {
+                return new SandboxReply(null, failed);
+            }
+            return await ExchangeLockedAsync(envelope, payloadPath, timeout, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Touch();
+            _exchange.Release();
+        }
+    }
+
+    /// <summary>Ein Job über Transfer-Laufwerk und Copy-VMFile bzw. Eingangs-Laufwerk; <see cref="_exchange"/> ist gehalten.</summary>
+    private async Task<SandboxReply> ExchangeLockedAsync(JobEnvelope envelope, string? payloadPath, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var job = envelope.Job;
+        var outgoing = Path.Combine(WorkDirectory, "outgoing");
+        var stem = $"{job.Sequence:D12}-{job.JobId}";
+        var files = new List<string>();
+        string? inbound = null;
+        try
+        {
             // Transfer-Laufwerk nur während des Jobs an der VM: ein noch angehängtes (Absturz, ältere Version) verwerfen,
             // dann ein frisches, leeres anhängen.
             if (_currentDisk is not null)
@@ -1553,8 +1624,143 @@ public sealed class HyperVSandbox : ISandboxTransport, IAsyncDisposable
                     // Bleibt angehängt bzw. liegt im VM-Ordner; beim nächsten Job wird es ersetzt, beim Neuaufbau gelöscht.
                 }
             }
-            Touch();
-            _exchange.Release();
+        }
+    }
+
+    /// <summary>Grund, falls der Job eine Toolchain braucht, deren Nachinstallation gescheitert ist.</summary>
+    private string? ToolchainFailure(ToolProposal proposal)
+    {
+        if (_toolchainProblems.Count == 0 || !proposal.Tool.StartsWith("Toolchain.", StringComparison.Ordinal)
+            || proposal.Arguments.ValueKind != JsonValueKind.Object
+            || !proposal.Arguments.TryGetProperty("toolchain", out var name) || name.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        return _toolchainProblems.GetValueOrDefault(name.GetString()!);
+    }
+
+    private bool CanUpdateToolchains => _buildToolchains is not null && _toolchainDigests is not null && !_settings.IsLinux;
+
+    /// <summary>Toolchains, deren Registrierung von der Installation in der VM abweicht (neu oder geändert).</summary>
+    public IReadOnlyList<string> PendingToolchains()
+    {
+        if (!CanUpdateToolchains || _installedToolchains is null)
+        {
+            return [];
+        }
+        var current = _toolchainDigests!();
+        var revisions = Revisions(current);
+        return current
+            .Where(kv => (!_installedToolchains.TryGetValue(kv.Key, out var installed) || installed != kv.Value)
+                         && !(_failedToolchains.TryGetValue(kv.Key, out var failed) && failed == revisions.GetValueOrDefault(kv.Key)))
+            .Select(kv => kv.Key).Order(StringComparer.Ordinal).ToList();
+    }
+
+    private IReadOnlyDictionary<string, string> Revisions(IReadOnlyDictionary<string, string> digests) =>
+        _toolchainRevisions?.Invoke() ?? digests;
+
+    /// <summary>
+    /// Toolchain-Update: signierter Job <see cref="ToolchainsTool"/> mit den bereitgestellten Toolchains (Hashes wie beim
+    /// Aufbau geprüft). Der Gast entfernt die alte Installation, installiert neu, prüft und stellt sie für Jobs bereit.
+    /// Rückgabe: null = alle installiert, sonst der Grund. <see cref="_exchange"/> ist gehalten.
+    /// </summary>
+    private async Task<string?> UpdateToolchainsLockedAsync(IReadOnlyList<string> names, CancellationToken ct)
+    {
+        var digests = _toolchainDigests!();
+        var revisions = Revisions(digests);
+        var zip = Path.Combine(WorkDirectory, "toolchain-update.zip");
+        var previous = Status;
+        var list = string.Join(", ", names);
+        SetStatus(SandboxState.Ready, $"Toolchains werden in der VM nachinstalliert: {list}");
+        try
+        {
+            File.Delete(zip);
+            await _buildToolchains!(names, zip).ConfigureAwait(false);
+            var now = DateTimeOffset.UtcNow;
+            var proposal = new ToolProposal(ContractJson.SchemaVersion, Guid.NewGuid().ToString("D"), "sandbox", "toolchain-update", AgentRole.Planner,
+                ToolchainsTool, "1", $"Toolchains nachinstallieren: {list}",
+                JsonSerializer.SerializeToElement(new { toolchains = names }), names.Select(n => new ToolTarget(n, n)).ToList(), "-", 0, "sbx-hyperv",
+                ContractTime.ToContract(now), ContractTime.ToContract(now.AddMinutes(15)));
+            byte[] payloadHash;
+            await using (var stream = File.OpenRead(zip))
+            {
+                payloadHash = await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
+            }
+            var job = new SandboxJob(ContractJson.SchemaVersion, Guid.NewGuid().ToString("D"), _session!.NextSequence(), _session.SessionId,
+                Guid.NewGuid().ToString("D"), proposal, ProposalHashing.Sha256(proposal), ContractTime.ToContract(now),
+                ContractTime.ToContract(now.AddMinutes(15)), PayloadSha256: Convert.ToHexStringLower(payloadHash));
+            SandboxReply reply;
+            _updating = true;
+            try
+            {
+                // Installation wie beim Aufbau: so lange, wie der Aufbau für diese Toolchains höchstens dauern darf.
+                reply = await ExchangeLockedAsync(JobSigner.Sign(job, _session.Key), zip, _settings.BuildTimeout, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _updating = false;
+            }
+            var result = ResultValidator.Validate(reply, job);
+            var installed = _installedToolchains!;
+            var problems = new List<string>();
+            foreach (var name in names)
+            {
+                var target = result.TargetResults.FirstOrDefault(t => t.TargetId == name);
+                if (target?.Status == ResultStatus.Succeeded)
+                {
+                    installed[name] = digests[name];
+                    _failedToolchains.Remove(name);
+                    _toolchainProblems.Remove(name);
+                }
+                else
+                {
+                    installed.Remove(name); // alte Installation ist entfernt bzw. unvollständig
+                    _failedToolchains[name] = revisions.GetValueOrDefault(name, digests[name]);
+                    var why = target?.Message ?? result.TargetResults.FirstOrDefault()?.Message ?? "kein Ergebnis";
+                    problems.Add(why);
+                    _toolchainProblems[name] = $"Toolchain {name} konnte in der VM nicht nachinstalliert werden: {GuestReport.Clip(why, 400)} – " +
+                                               "Toolchain-Ordner prüfen, neu registrieren und erneut versuchen (oder VM neu aufbauen)";
+                }
+            }
+            if (ReuseEnabled)
+            {
+                _currentFingerprint = _fingerprint!();
+            }
+            SaveReuseState(clean: false);
+            var done = string.Join("; ", result.TargetResults.Select(t => t.Message));
+            if (Status.State == SandboxState.Ready)
+            {
+                SetStatus(SandboxState.Ready, problems.Count == 0
+                    ? $"Offline-VM bereit – Toolchains nachinstalliert: {GuestReport.Clip(done, 300)}"
+                    : $"Offline-VM bereit – Nachinstallieren fehlgeschlagen: {GuestReport.Clip(string.Join("; ", problems), 300)}");
+            }
+            return problems.Count == 0 ? null
+                : "Toolchain in der VM nicht nachinstalliert: " + GuestReport.Clip(string.Join("; ", problems), 600)
+                  + " – Toolchain-Ordner prüfen, neu registrieren und erneut versuchen (oder VM neu aufbauen)";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or ToolchainException)
+        {
+            foreach (var name in names)
+            {
+                // Fehler auf dem Host (Bereitstellen, Kopieren) nicht merken: beim nächsten Job erneut versuchen – z. B.
+                // nachdem eine veränderte Datei wiederhergestellt wurde.
+                _toolchainProblems[name] = $"Toolchain {name} nicht bereitgestellt: {GuestReport.Clip(ex.Message, 400)}";
+            }
+            if (Status.State == SandboxState.Ready)
+            {
+                SetStatus(SandboxState.Ready, previous.Text);
+            }
+            return "Toolchain nicht bereitgestellt: " + GuestReport.Clip(ex.Message, 400);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(zip);
+            }
+            catch (IOException)
+            {
+            }
         }
     }
 

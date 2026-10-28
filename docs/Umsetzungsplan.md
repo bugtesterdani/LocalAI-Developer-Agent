@@ -217,6 +217,15 @@ JSON-Objekt), sondern klar zurückgemeldet; im Verlauf steht „Antwort an der A
 Zusammenfassung der eigenen Notizen läuft ohne Denkphase (`think: false`), sonst lieferten von sich aus denkende Modelle
 (qwen3.6) eine leere Zusammenfassung.
 
+**Toolchains ohne Neuaufbau nachinstallieren (Stand 28.10.2026):** Wird eine Toolchain geändert und neu registriert
+(z. B. fehlende Offline-Pakete ergänzt), installiert der Host sie in der laufenden Windows-VM neu, statt Windows neu
+aufzubauen: vor dem nächsten Job ein signierter Job `Sandbox.Toolchains` mit den wie beim Aufbau bereitgestellten
+Toolchains (Hashes, `pinned.json`); im Gast entfernt `toolchain-update.ps1` die alte Installation und ruft
+`Install-Toolchain` (Prüfbefehl, Selbsttest) und `Publish-ToolchainForJobs` auf. Mit `reuseVm` wird eine VM auch dann
+fortgesetzt, wenn sich nur Toolchains geändert haben (`sandbox-state.json`: `systemFingerprint`, `toolchains`). Scheitert
+die Installation, laufen andere Jobs weiter; Jobs dieser Toolchain bekommen den Grund, erneuter Versuch nach erneuter
+Registrierung. Linux-Gast: weiterhin Neuaufbau.
+
 **Fragen ohne Arbeitsauftrag (Stand 26.10.2026):** Ist das Ziel nur eine Frage („Kannst du …?“), antwortet der Planner
 in `message_de` und schließt mit `"tasks": []` ab. Bisher galt das als ungültig und lief bis zum Schrittlimit. Es gibt
 dann keinen Plan, keinen Prüflauf und nichts zu übernehmen.

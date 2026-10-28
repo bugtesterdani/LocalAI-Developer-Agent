@@ -743,3 +743,61 @@ public static class ToolchainBuildTime
         return (guest == GuestOs.Linux ? LinuxSetup : WindowsSetup) + TimeSpan.FromMinutes(minutes);
     }
 }
+
+
+/// <summary>Nutzlast des Toolchain-Updates (Job Sandbox.Toolchains): bereitgestellte Toolchains als ZIP.</summary>
+public static class ToolchainUpdatePayload
+{
+    /// <summary>Registrierungs-Digest je Toolchain der VM; nicht registrierte fehlen (die bleiben, wie sie sind).</summary>
+    public static IReadOnlyDictionary<string, string> Digests(IReadOnlyList<ToolchainRegistration> registrations, IReadOnlyList<string> names)
+    {
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in names)
+        {
+            if (registrations.FirstOrDefault(r => r.Name == name) is { } r)
+            {
+                result[name] = r.Digest;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Registrierungsstand je Toolchain: Digest und Zeitpunkt – ändert sich auch bei erneuter Registrierung mit
+    /// gleichem Inhalt (danach wird ein gescheitertes Nachinstallieren erneut versucht).</summary>
+    public static IReadOnlyDictionary<string, string> Revisions(IReadOnlyList<ToolchainRegistration> registrations, IReadOnlyList<string> names)
+    {
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in names)
+        {
+            if (registrations.FirstOrDefault(r => r.Name == name) is { } r)
+            {
+                result[name] = $"{r.Digest}|{r.RegisteredAt}";
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Stellt die Toolchains wie beim Aufbau bereit (Hashes gegen die Registrierung geprüft, pinned.json) und packt sie als
+    /// <c>toolchain-src/&lt;name&gt;/…</c> ohne Kompression (große Archive, Geschwindigkeit) in <paramref name="zipPath"/>.
+    /// </summary>
+    public static void Build(ToolchainRegistry registry, IReadOnlyList<string> names, string zipPath)
+    {
+        var temp = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(zipPath))!, "toolchain-update-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var staging = Path.Combine(temp, "toolchain-src");
+            Directory.CreateDirectory(staging);
+            registry.Stage(staging, CancellationToken.None, names);
+            System.IO.Compression.ZipFile.CreateFromDirectory(temp, zipPath, System.IO.Compression.CompressionLevel.NoCompression,
+                includeBaseDirectory: false);
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+            {
+                FileTools.DeleteTree(temp);
+            }
+        }
+    }
+}

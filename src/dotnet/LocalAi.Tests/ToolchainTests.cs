@@ -83,6 +83,34 @@ public sealed class ToolchainTests : IDisposable
         Assert.True(problems.Count == 0, string.Join("; ", problems));
     }
 
+    [Fact, Trait("Pruefung", "Toolchain-Update")]
+    public void Nutzlast_fuer_das_Nachinstallieren_ist_wie_beim_Aufbau_bereitgestellt()
+    {
+        var dir = CreateDemo();
+        var registry = Registry("demo");
+        var info = Assert.Single(registry.Scan(TestContext.Current.CancellationToken));
+        registry.Register(dir, info.Digest, TestContext.Current.CancellationToken);
+        Assert.Equal(new Dictionary<string, string> { ["demo"] = info.Digest },
+            ToolchainUpdatePayload.Digests(registry.Registrations, ["demo", "fehlt"]));
+        var registration = Assert.Single(registry.Registrations);
+        Assert.Equal($"{info.Digest}|{registration.RegisteredAt}",
+            ToolchainUpdatePayload.Revisions(registry.Registrations, ["demo"])["demo"]);
+
+        var zip = Path.Combine(_dir, "update.zip");
+        ToolchainUpdatePayload.Build(registry, ["demo"], zip);
+        using (var archive = System.IO.Compression.ZipFile.OpenRead(zip))
+        {
+            var names = archive.Entries.Select(e => e.FullName.Replace('\\', '/')).Order(StringComparer.Ordinal).ToList();
+            Assert.Equal(["toolchain-src/demo/demo.zip", "toolchain-src/demo/pinned.json", "toolchain-src/demo/selftest/a.txt",
+                "toolchain-src/demo/toolchain.json"], names);
+        }
+        Assert.Empty(Directory.GetDirectories(_dir, "toolchain-update-*"));
+
+        // Nach der Registrierung verändert: wie beim Aufbau abgelehnt.
+        File.WriteAllText(Path.Combine(dir, "selftest", "a.txt"), "anders");
+        Assert.Throws<ToolchainException>(() => ToolchainUpdatePayload.Build(registry, ["demo"], Path.Combine(_dir, "zwei.zip")));
+    }
+
     [Fact, Trait("Pruefung", "M2c")]
     public void Programm_aus_binaries_muss_im_ZIP_liegen()
     {
