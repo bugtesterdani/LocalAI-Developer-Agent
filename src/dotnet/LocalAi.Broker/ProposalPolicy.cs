@@ -142,6 +142,11 @@ public sealed class ProposalPolicy
         }
 
         var tool = GetTool(request.Tool);
+        if (request.Tool == "Patch.Apply" && request.Agent is not (AgentRole.Coder or AgentRole.Tester))
+        {
+            // Rollen: nur Coder (Produktivcode) und Tester (Tests) ändern Dateien; Debugger und Reviewer melden nur.
+            throw new BrokerException(BrokerErrorCodes.Forbidden, $"{request.Agent} darf keine Dateien ändern (Patch.Apply nur für Coder und Tester)");
+        }
         if (request.ToolVersion != tool.Version)
         {
             throw new BrokerException(BrokerErrorCodes.Forbidden,

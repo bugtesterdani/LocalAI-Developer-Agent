@@ -234,6 +234,12 @@ dann keinen Plan, keinen Prüflauf und nichts zu übernehmen.
 Aufgabe bisher als erledigt und die Änderung war verloren. Jetzt wartet der Agent auf den Nutzer und schlägt denselben
 Patch erneut vor. Nicht angewendete Änderungen werden am Ende als Entwurf im Datenordner gespeichert (`entwuerfe\<Run>`).
 
+**Engere Rollen (Stand 28.10.2026):** Nur der Coder ändert Produktivcode. Der Debugger kommt nur bei fehlgeschlagenem
+Build/Test (bzw. bei OS-Debugging) zum Einsatz und liefert eine Diagnose (Hypothese, Datei/Zeile, was zu ändern ist,
+Dateien; `fixable`), nie einen Patch – Edit-Blöcke von ihm gehen nur als Vorschlag an den Coder. Danach korrigiert der
+Coder (Aufgabe `K<n>`, Codeänderung Pflicht). Befunde des Reviewers korrigiert der Coder direkt, ohne Debugger.
+Debugger-Aufgaben des Planers (OS-Debugging) geben ihre Diagnose an abhängige Coder-Aufgaben weiter.
+
 **Ausgabe bis zum Kontextende (Stand 27.10.2026):** Ollama zählt die Denkphase zur Ausgabegrenze (`num_predict`). Ein
 Denkmodell schrieb eine ganze Projektdatei schon in der Denkphase und wurde nach 32.768 Token abgeschnitten. Neue
 Profiloption `outputUpToContext`: Ausgabe darf den Rest des Kontexts nach der Eingabe nutzen.

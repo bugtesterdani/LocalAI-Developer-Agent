@@ -100,10 +100,13 @@ def test_chat_startet_run_mit_fuenf_rollen(tmp_path, broker_factory, fake_ollama
     events, _ = collect(ui, 0, summary_done, timeout=90)
     assert events[0].agent == "User" and events[0].text == "Bitte leere Eingaben in add abfangen"
     assert [e.seq for e in events] == sorted(e.seq for e in events)
-    for role in ("Planner", "Coder", "Tester", "Debugger", "Reviewer"):
+    for role in ("Planner", "Coder", "Tester", "Reviewer"):
         mine = [e for e in events if e.agent == role]
         assert any(e.kind == ActivityKind.Output for e in mine), f"{role}: Live-Ausgabe"
         assert any(e.kind == ActivityKind.Chat for e in mine), f"{role}: Chatnachricht"
+    # Ohne Testlauf (dev-local) kein fehlgeschlagener Test: den Review-Befund korrigiert der Coder, der Debugger bleibt frei.
+    assert not [e for e in events if e.agent == "Debugger" and e.kind in (ActivityKind.Output, ActivityKind.Chat)]
+    assert any(e.agent == "Coder" and e.kind == ActivityKind.Chat and (e.text or "").startswith("Korrektur 1") for e in events)
     assert all(e.run_id == run_id for e in events)
     # Alle Lesezugriffe liefen über genehmigte Vorschläge des Runs (Testadapter zählt hier nicht: echter Worker).
     status = ui.orchestrator_status()

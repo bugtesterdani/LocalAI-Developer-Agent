@@ -84,6 +84,8 @@ class Assignment:
     files: list[str] = field(default_factory=list)
     # Mehr Modellschritte (z. B. Debug-Sitzung: jeder Befehl ist ein Schritt); None = limits der Rolle.
     max_steps: int | None = None
+    # Korrektur: eine Codeänderung ist Pflicht, auch ohne genannte Dateien (sonst gälte die Aufgabe als Analyse).
+    require_change: bool = False
 
 
 @dataclass
@@ -236,7 +238,7 @@ class Agent:
                 history.model(step, action, thinking=result.thinking)
                 if action.kind == "finish":
                     protocol.resolve_patch(role, action, assignment.files, lambda p: self._file_lines(evidence, p))
-                    final = protocol.validate_result(role, action.result, analysis_allowed=not assignment.files)
+                    final = protocol.validate_result(role, action.result, analysis_allowed=not assignment.files and not assignment.require_change)
                     feedback = assignment.finisher(final) if assignment.finisher else None
                     if feedback is not None:
                         history.orchestrator(step, feedback)

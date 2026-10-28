@@ -14,9 +14,10 @@ from localai.worker import patching
 
 MAX_READ_FILES = 8
 # Felder, an denen ein unverpacktes Abschlussergebnis erkennbar ist.
-RESULT_KEYS = {"message_de", "tasks", "patch", "test_plan", "test_patch", "verdict", "findings", "fix_patch", "hypothesis"}
+RESULT_KEYS = {"message_de", "tasks", "patch", "test_plan", "test_patch", "verdict", "findings", "fix_patch", "hypothesis",
+               "diagnosis"}
 # Rolle → Feld mit dem Unified Diff des Ergebnisses.
-PATCH_FIELD = {"Coder": "patch", "Tester": "test_patch", "Debugger": "fix_patch"}
+PATCH_FIELD = {"Coder": "patch", "Tester": "test_patch"}  # der Debugger ändert keinen Code, er diagnostiziert
 # Ergebnis aus Edit-Blöcken ohne Abschluss-JSON (protocol.parse)
 IMPLICIT_EDITS = "_implicit_edits"
 _FENCE_LINE = re.compile(r"^[ \t]*```[ \t]*([A-Za-z0-9_+.#-]*)[ \t]*$")
@@ -699,6 +700,13 @@ def resolve_patch(role: str, action: Action, known_files: list[str] | None = Non
                   lookup: FileLookup | None = None) -> None:
     """Setzt das Patchfeld der Rolle: aus SEARCH/REPLACE-Blöcken, sonst aus dem Feld bzw. einem ```diff-Block."""
     field_name = PATCH_FIELD.get(role)
+    if role == "Debugger" and action.edits:
+        # Schreibt der Debugger doch Edit-Blöcke: nicht anwenden, nur als Vorschlag an den Coder weitergeben.
+        try:
+            action.result["suggestion"] = edits_to_diff(action.edits, list(known_files or []), lookup)
+        except ProtocolError:
+            pass
+        return
     if field_name is None:
         return
     result = action.result
@@ -799,10 +807,14 @@ def validate_result(role: str, result: dict[str, Any], analysis_allowed: bool = 
         # Ob Tests liefen, entscheidet allein der Testlauf in der Sandbox – Behauptungen des Modells zählen nicht.
         result.pop("executed", None)
     elif role == "Debugger":
+        # Nur Diagnose: Ursache, Belege, was der Coder ändern soll – nie selbst ein Patch.
         _str(result, "hypothesis")
-        # Leer erlaubt: der Befund ist mit einer Codeänderung nicht zu beheben (Reparaturschleife endet dann).
-        if _str(result, "fix_patch", required=False).strip():
-            check_diff(result["fix_patch"], "fix_patch")
+        result["diagnosis"] = _notes_text(result.get("diagnosis")) or result["hypothesis"]
+        result["files"] = _str_list(result.get("files"), "result.files")
+        result["fixable"] = result.get("fixable") is not False
+        suggestion = result.pop("fix_patch", None)
+        if isinstance(suggestion, str) and suggestion.strip() and not result.get("suggestion"):
+            result["suggestion"] = suggestion
     elif role == "Reviewer":
         if result.get("verdict") not in ("changes_needed", "ready_for_user_review"):
             raise ProtocolError('result.verdict must be "changes_needed" or "ready_for_user_review".')

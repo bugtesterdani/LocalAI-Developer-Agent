@@ -211,10 +211,10 @@ Der Orchestrator legt je Ziel einen Run mit fünf Rollen an:
 | Rolle | Aufgabe |
 |---|---|
 | Planner | liest die Repo-Map, zerlegt das Ziel in einen Aufgabengraph mit Akzeptanzkriterien und Prüfläufen |
-| Coder | erzeugt Patches für einzelne Aufgaben |
+| Coder | erzeugt Patches für einzelne Aufgaben und korrigiert nach Diagnose des Debuggers bzw. Befunden des Reviewers – die einzige Rolle, die Produktivcode ändert |
 | Tester | entwirft Testfälle und Testpatches für unabhängige Teile; nicht ausgeführte Tests werden als solche gekennzeichnet |
-| Debugger | analysiert echte Testfehler und schlägt minimale Korrekturen vor (höchstens `maxRepairAttempts` Runden) |
-| Reviewer | prüft den finalen Diff gegen Ziel, Akzeptanzkriterien und Testbericht |
+| Debugger | nur bei fehlgeschlagenem Build/Test (bzw. OS-Debugging): sucht die Ursache in den echten Fehlermeldungen und übergibt dem Coder eine Diagnose – schreibt selbst keinen Code (höchstens `maxRepairAttempts` Runden) |
+| Reviewer | prüft den finalen Diff gegen Ziel, Akzeptanzkriterien und Testbericht; Befunde (hoch/mittel) gehen direkt an den Coder |
 
 - **DAG-Scheduler** (`orchestrator/dag.py`): unabhängige Aufgaben laufen parallel, Schreibzugriffe auf dieselben Pfade
   werden serialisiert, unbekannte Schreibmengen bekommen einen exklusiven Lock.

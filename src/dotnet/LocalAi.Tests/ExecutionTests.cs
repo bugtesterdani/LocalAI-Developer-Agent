@@ -114,6 +114,20 @@ public sealed class ExecutionTests : IAsyncLifetime
             new { grantId = "g", patch = "--- a/../x\n+++ b/../x\n@@ -1 +1 @@\n-a\n+b\n" }, "s1", "x"))));
     }
 
+    [Fact, Trait("Pruefung", "Rollen")]
+    public void Nur_Coder_und_Tester_duerfen_Dateien_aendern()
+    {
+        var policy = Policy([FolderRight.List, FolderRight.Read, FolderRight.Modify, FolderRight.Create], null, out _);
+        var request = Request("Patch.Apply", new { grantId = "g", patch = Patch }, "s1", "src/Calc.cs", "tests/CalcTests.cs");
+        Assert.Equal(2, policy.Validate(request with { Agent = AgentRole.Tester }).Count);
+        foreach (var role in new[] { AgentRole.Debugger, AgentRole.Reviewer, AgentRole.Planner })
+        {
+            var ex = Assert.Throws<BrokerException>(() => policy.Validate(request with { Agent = role }));
+            Assert.Equal(BrokerErrorCodes.Forbidden, ex.Code);
+            Assert.Contains("darf keine Dateien ändern", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact, Trait("Pruefung", "SEC-05")]
     public void Patch_braucht_passende_Ordnerrechte()
     {
