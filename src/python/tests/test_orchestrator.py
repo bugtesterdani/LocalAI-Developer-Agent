@@ -1454,6 +1454,25 @@ def test_nur_edit_bloecke_ohne_abschluss_json():
             protocol.validate_result(role, planner.result)
 
 
+def test_edit_block_ohne_pfad_nutzt_den_pfad_des_vorigen_blocks():
+    """Echter Lauf (gemma4): zweiter Block ohne Pfadzeile direkt nach dem ersten – „Put the file path on its own line“."""
+    text = ("Ich ersetze win32file.\n\nNew_Test_Project/test_new.py\n<<<<<<< SEARCH\nimport win32file\nimport json\n=======\n"
+            "import json\n>>>>>>> REPLACE\n\n<<<<<<< SEARCH\n    win32file.WriteFile(pipe, payload)\n=======\n"
+            "    pipe.write(payload)\n>>>>>>> REPLACE\n\nother/b.py\n<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE\n"
+            "Dann noch hier:\n<<<<<<< SEARCH\ny = 1\n=======\ny = 2\n>>>>>>> REPLACE\n"
+            '```json\n{"action": "finish", "result": {"message_de": "ersetzt"}}\n```')
+    action = protocol.parse(text)
+    protocol.resolve_patch("Coder", action, ["New_Test_Project/test_new.py", "other/b.py"], lambda p: None)
+    patch = action.result["patch"]
+    first, second = patch.split("+++ b/other/b.py")
+    assert "+++ b/New_Test_Project/test_new.py" in first and "pipe.write(payload)" in first
+    assert "+y = 2" in second, "vierter Block gehört zur Datei des dritten"
+    lone = protocol.parse("<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n"
+                          '```json\n{"action": "finish", "result": {"message_de": "x"}}\n```')
+    with pytest.raises(protocol.ProtocolError, match="at least before the first block"):
+        protocol.resolve_patch("Coder", lone, ["a.py", "b.py"], lambda p: None)
+
+
 # ---------------------------------------------------------------------- M5: weitere Sprachen
 
 def test_pruefLaeufe_fuer_cpp_powershell_batch_hdevelop():
