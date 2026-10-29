@@ -96,6 +96,7 @@ def tls_server():
     server = ThreadingHTTPServer((LOOPBACK, 0), _Handler)
     server.requests = []  # type: ignore[attr-defined]
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(DATA / "web-test.crt", DATA / "web-test.key")
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
