@@ -321,6 +321,20 @@ public sealed class WebToolAdapter(WebCaptureStore store, WebSettings settings, 
             Message: $"Webinhalt von {capture.Url} (untrusted, SHA-256 {current[..12]}) an {proposal.Agent} übergeben")]);
     }
 
+    private static string BuildSafeArgumentPreview(IReadOnlyList<string> args, int take)
+    {
+        var redacted = args.ToList();
+        for (var i = 0; i < redacted.Count - 1; i++)
+        {
+            if (redacted[i] is "--proxy-password-file" or "--proxy-user" or "--ca-file")
+            {
+                redacted[i + 1] = "***";
+                i++;
+            }
+        }
+        return string.Join(' ', redacted.Take(take));
+    }
+
     private async Task<string?> RunAsync(IReadOnlyList<string> extra, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var command = settings.Command;
@@ -373,7 +387,8 @@ public sealed class WebToolAdapter(WebCaptureStore store, WebSettings settings, 
                 return cancellationToken.IsCancellationRequested ? "Abruf abgebrochen (Not-Aus oder Abbruch)" : "Abruf abgebrochen (Zeitgrenze)";
             }
             var output = (await stdout.ConfigureAwait(false)) + (await stderr.ConfigureAwait(false));
-            ChildProcesses.AppendLog(logPath, $"[Web] {string.Join(' ', extra.Take(3))} → Exitcode {process.ExitCode}: {Clip(output, 2000)}");
+            var safeArgsPreview = BuildSafeArgumentPreview(extra, 3);
+            ChildProcesses.AppendLog(logPath, $"[Web] {safeArgsPreview} → Exitcode {process.ExitCode}: {Clip(output, 2000)}");
             return process.ExitCode == 0 ? null : $"Web-Fetcher endete mit Exitcode {process.ExitCode}: {Clip(output, 500)}";
         }
         finally
