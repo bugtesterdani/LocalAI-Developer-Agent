@@ -77,6 +77,8 @@ class FakeBroker:
     # M9: Einstellung osDebug wie vom Broker (None = nicht eingerichtet)
     os_debug: dict | None = None
     snapshot_message: str = ""  # Umfang laut Broker, z. B. „0 Dateien, 0 Bytes, 0 übersprungen“
+    auto_approve: list[str] = field(default_factory=list)  # autoApprove der Projektdatei
+    auto_active: set[str] = field(default_factory=set)  # nach bestätigtem Run.AutoApprove
     _results: dict = field(default_factory=dict)
 
     # -------------------------------------------------- Orchestrator-Methoden
@@ -87,14 +89,18 @@ class FakeBroker:
         return [FolderGrant(grant_id="p", root="/projekt", rights=list(self.rights), recursive=True)]
 
     def toolchains_available(self):
-        return {"enabled": bool(self.toolchains), "toolchains": self.toolchains, "osDebug": self.os_debug}
+        return {"enabled": bool(self.toolchains), "toolchains": self.toolchains, "osDebug": self.os_debug,
+                "autoApprove": list(self.auto_approve)}
 
     def submit(self, request: ProposalRequest):
         with self.lock:
             pid = f"prop-{len(self.proposals) + 1:04d}"
             self.proposals[pid] = request
             self.submitted_at[pid] = time.monotonic()
-        return SimpleNamespace(proposal=SimpleNamespace(proposal_id=pid), proposal_sha256="x")
+            if request.tool == "Run.AutoApprove":
+                self.auto_active = set()
+            state = ProposalState.Approved if request.tool in self.auto_active else ProposalState.AwaitingApproval
+        return SimpleNamespace(proposal=SimpleNamespace(proposal_id=pid), proposal_sha256="x", state=state)
 
     def outcome(self, pid: str) -> ProposalOutcome:
         request = self.proposals[pid]
@@ -119,6 +125,11 @@ class FakeBroker:
             cached = self._results.get(pid)
             if cached is not None:
                 return cached
+            if request.tool == "Run.AutoApprove":
+                self.auto_active = set(request.arguments["tools"])
+                result = done([TargetResult(target_id="autoApprove", status=ResultStatus.Succeeded, message="bestätigt")])
+                self._results[pid] = result
+                return result
             if request.tool == "OsDebug.Start":
                 text = json.dumps({"session": pid, "state": "angehalten vor dem ersten Befehl", "notes": ["QEMU pc, TCG"]})
                 result = done([TargetResult(target_id="debug", status=ResultStatus.Succeeded, text=text)])

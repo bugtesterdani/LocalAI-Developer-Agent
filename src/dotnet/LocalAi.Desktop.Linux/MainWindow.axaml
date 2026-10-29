@@ -389,6 +389,11 @@
                                             <TextBlock Text="{loc:T LabelHash}" Classes="label" />
                                             <TextBox Classes="copy mono" AutomationProperties.Name="{loc:T LabelHash}" Text="{Binding HashText, Mode=OneWay}" />
 
+                                            <!-- Run.AutoApprove: Liste der Tools, die in diesem Run automatisch genehmigt werden -->
+                                            <TextBlock Text="{loc:T LabelAutoApprove}" Classes="label" Foreground="DarkRed" IsVisible="{Binding IsAutoApprove}" />
+                                            <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelAutoApprove}" Text="{Binding AutoApproveText, Mode=OneWay}"
+                                                     IsVisible="{Binding IsAutoApprove}" />
+
                                             <TextBlock Text="{loc:T LabelSideEffects}" Classes="label" />
                                             <TextBox Classes="copy" AutomationProperties.Name="{loc:T LabelSideEffects}" Text="{Binding SideEffectsText, Mode=OneWay}" />
 

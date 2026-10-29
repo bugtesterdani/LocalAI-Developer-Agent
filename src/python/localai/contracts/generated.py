@@ -180,6 +180,7 @@ class ProjectConfig(Contract):
     guest_os: GuestOs | None = Field(default=None, alias="guestOs")
     toolchain_guests: dict[str, GuestOs] | None = Field(default=None, alias="toolchainGuests")
     os_debug: OsDebugConfig | None = Field(default=None, alias="osDebug")
+    auto_approve: dict[str, StrictBool] | None = Field(default=None, alias="autoApprove")
 
 
 class SnapshotFile(Contract):

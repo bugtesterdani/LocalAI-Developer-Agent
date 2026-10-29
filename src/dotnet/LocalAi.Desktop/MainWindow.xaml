@@ -430,6 +430,12 @@
                                             <TextBlock Text="{loc:T LabelHash}" Style="{StaticResource FieldLabel}" />
                                             <TextBox AutomationProperties.Name="{loc:T LabelHash}" Text="{Binding HashText, Mode=OneWay}" Style="{StaticResource CopyableValue}" FontFamily="Consolas" />
 
+                                            <!-- Run.AutoApprove: Liste der Tools, die in diesem Run automatisch genehmigt werden -->
+                                            <TextBlock Text="{loc:T LabelAutoApprove}" Style="{StaticResource FieldLabel}" Foreground="DarkRed"
+                                                       Visibility="{Binding IsAutoApprove, Converter={StaticResource BoolToVis}}" />
+                                            <TextBox AutomationProperties.Name="{loc:T LabelAutoApprove}" Text="{Binding AutoApproveText, Mode=OneWay}" Style="{StaticResource CopyableValue}"
+                                                     Visibility="{Binding IsAutoApprove, Converter={StaticResource BoolToVis}}" />
+
                                             <TextBlock Text="{loc:T LabelSideEffects}" Style="{StaticResource FieldLabel}" />
                                             <TextBox AutomationProperties.Name="{loc:T LabelSideEffects}" Text="{Binding SideEffectsText, Mode=OneWay}" Style="{StaticResource CopyableValue}" />
 

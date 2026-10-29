@@ -1870,3 +1870,38 @@ def test_debugger_bootet_das_betriebssystem_in_einer_freigegebenen_sitzung(ollam
     assert any("EIP=00007c22" in c and "Hallo DaniOS" in c for c in debugger_prompts)
     orch.stop()
     thread.join(5)
+
+
+def test_auto_freigabe_wird_angesagt_bestaetigt_und_markiert(ollama, tmp_path):
+    broker = FakeBroker(auto_approve=["File.List", "File.Read", "Repo.Index"], toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Bitte leere Eingaben in calc abfangen")
+    wait_for(lambda: finished(broker), timeout=60)
+    tools = [p.tool for p in broker.proposals.values()]
+    # Zuerst der Snapshot (nie automatisch), dann die ausdrückliche Bestätigung – erst danach automatisch.
+    assert tools[:3] == ["Workspace.Snapshot", "Run.AutoApprove", "Repo.Index"]
+    confirm = next(p for p in broker.proposals.values() if p.tool == "Run.AutoApprove")
+    assert confirm.arguments == {"tools": ["File.List", "File.Read", "Repo.Index"]}
+    chats = broker.chats("Orchestrator")
+    warning = next(c for c in chats if c.startswith("Achtung – automatische Freigabe"))
+    assert "- File.Read: eine Datei im Snapshot lesen (Sandbox)" in warning and "einzeln" in warning
+    assert any(c.startswith("Automatische Freigabe für diesen Run bestätigt: File.List, File.Read, Repo.Index") for c in chats)
+    texts = [e.text for e in broker.events if e.kind == ActivityKind.Proposal]
+    assert any("automatisch genehmigt (autoApprove" in t for t in texts)
+    # Nicht eingeschaltet (Patch.Apply, Übernahme) wartet weiterhin auf die Freigabe.
+    assert any("Snapshot – wartet auf Freigabe" in t for t in texts)
+    assert not any("Workspace" in t and "automatisch" in t for t in texts)
+    orch.stop()
+    thread.join(5)
+
+
+def test_auto_freigabe_abgelehnt_alles_einzeln(ollama, tmp_path):
+    broker = FakeBroker(auto_approve=["File.List", "File.Read"], toolchains=[],
+                        decide=lambda r: ProposalState.Denied if r.tool == "Run.AutoApprove" else ProposalState.Succeeded)
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Bitte leere Eingaben in calc abfangen")
+    wait_for(lambda: finished(broker), timeout=60)
+    assert any(c.startswith("Automatische Freigabe nicht bestätigt") for c in broker.chats("Orchestrator"))
+    assert not any("automatisch genehmigt" in (e.text or "") for e in broker.events)
+    orch.stop()
+    thread.join(5)

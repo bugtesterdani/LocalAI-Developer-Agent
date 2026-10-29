@@ -207,6 +207,23 @@ public sealed partial class DesktopTests
         Assert.Contains("ohne dass jeder einzeln bestätigt wird", card.SideEffectsText, StringComparison.Ordinal);
     }
 
+    [Fact, Trait("Pruefung", "autoApprove")]
+    public void AutoApprove_Karte_nennt_jedes_Tool_und_warnt_ausdruecklich()
+    {
+        var api = new FakeApi();
+        var main = new MainViewModel(api, api, a => a(), Guid.NewGuid().ToString("D"), "hyperv");
+        var now = DateTimeOffset.UtcNow;
+        var proposal = new ToolProposal(1, Guid.NewGuid().ToString("D"), "run", "T0", AgentRole.Planner, "Run.AutoApprove", "1", "Bestätigen",
+            JsonSerializer.SerializeToElement(new { tools = new[] { "File.List", "Toolchain.Test" } }), [], "snap", 1, "sbx",
+            ContractTime.ToContract(now), ContractTime.ToContract(now.AddMinutes(5)));
+        var card = new ApprovalCardViewModel(new ProposalView(proposal, ProposalHashing.Sha256(proposal), ProposalState.AwaitingApproval), main);
+        Assert.True(card.IsAutoApprove);
+        Assert.Contains("File.List – Dateien im Snapshot auflisten", card.AutoApproveText, StringComparison.Ordinal);
+        Assert.Contains("Toolchain.Test – Tests ausführen in der Offline-VM", card.AutoApproveText, StringComparison.Ordinal);
+        Assert.StartsWith("ACHTUNG – automatische Freigabe", card.SideEffectsText, StringComparison.Ordinal);
+        Assert.Equal("Für diesen Run bestätigen", card.ApproveText);
+    }
+
     [Fact]
     public void Einzelaufruf_hat_keine_Abwahl()
     {

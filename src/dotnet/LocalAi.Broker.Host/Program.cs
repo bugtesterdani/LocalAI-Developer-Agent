@@ -69,9 +69,12 @@ SandboxPool? vm;
 SandboxParts parts;
 ToolchainRegistry? toolchains = null;
 IReadOnlyList<string> projectToolchains = [];
+IReadOnlyList<string> autoApprove = [];
 try
 {
     var project = options.Mode == SandboxMode.Test ? null : LoadProject(options);
+    // Unbekannte oder nie erlaubte Einträge: Broker startet nicht (nichts wird stillschweigend eingeschaltet).
+    autoApprove = AutoApprove.Parse(project?.AutoApprove);
     if (project is not null)
     {
         toolchains = new ToolchainRegistry(Path.Combine(options.DataDirectory, "toolchains.json"), options.ToolchainsDirectory,
@@ -89,7 +92,12 @@ catch (Exception ex) when (ex is IOException or InvalidDataException or JsonExce
 }
 
 var journal = new AuditJournal(Path.Combine(options.DataDirectory, "audit.db"), clock);
-var brokerOptions = new BrokerOptions { ProposalTtl = options.ProposalTtl, SandboxId = $"sbx-{HostOptions.ModeName(options.Mode)}" };
+var brokerOptions = new BrokerOptions
+{
+    ProposalTtl = options.ProposalTtl,
+    SandboxId = $"sbx-{HostOptions.ModeName(options.Mode)}",
+    AutoApproveTools = autoApprove,
+};
 var broker = new ApprovalBroker(brokerOptions, adapter, journal, clock, policy);
 
 try

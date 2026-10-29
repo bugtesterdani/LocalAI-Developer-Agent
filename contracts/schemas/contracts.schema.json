@@ -448,6 +448,13 @@
         },
         "osDebug": {
           "$ref": "#/$defs/OsDebugConfig"
+        },
+        "autoApprove": {
+          "type": "object",
+          "description": "Tools, die der Broker in einem Run automatisch genehmigt – erst nachdem der Nutzer die Liste zu Beginn des Runs bestätigt hat (Run.AutoApprove). Standard: nichts.",
+          "additionalProperties": {
+            "type": "boolean"
+          }
         }
       },
       "required": [
