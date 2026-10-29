@@ -1,7 +1,8 @@
 # Werkzeuge und Rechte
 
 Alles, was ein Agent außerhalb seines Modells tun will, ist ein **Werkzeugaufruf** und braucht eine Freigabe – auch
-Lesen und Suchen. Reine Modellinferenz auf bereits freigegebenen Daten, Anzeige und interne Planung sind keine
+Lesen und Suchen (Ausnahme nach ausdrücklicher Bestätigung im Run: [`autoApprove`](konfiguration.md#autoapprove)).
+Reine Modellinferenz auf bereits freigegebenen Daten, Anzeige und interne Planung sind keine
 Werkzeuge. Ein generisches Shell-Werkzeug gibt es nicht: Unbekannte Werkzeuge (z. B. `Toolchain.Shell`,
 `Shell.Execute`) weist der Broker ab.
 
@@ -31,6 +32,7 @@ Definiert in `src/dotnet/LocalAi.Broker/ProposalPolicy.cs` (Prüfung) und ausgef
 | `OsDebug.Start` | Debug-Sitzung mit QEMU starten (eigene Freigabe mit Grenzen) | – | `Read`, `Execute` | Linux-VM |
 | `OsDebug.Command` | Befehl in der laufenden Debug-Sitzung | – | im Rahmen der Sitzung | Linux-VM |
 | `OsDebug.Stop` | Debug-Sitzung beenden | – | im Rahmen der Sitzung | Linux-VM |
+| `Run.AutoApprove` | automatische Freigabe (`autoApprove` der Projektdatei) für diesen Run bestätigen | – | – | Broker (führt nichts aus) |
 
 „Sammel“ = Sammelfreigabe mit abwählbaren Zielen (siehe [Bedienung](bedienung.md#sammelfreigabe)). Ausführende
 Werkzeuge (`Toolchain.*`, `Repo.Index`, `OsDebug.Start`) und `Web.Fetch` sind immer Einzelaufrufe.

@@ -18,6 +18,11 @@ namespace LocalAi.Broker;
 /// Befehle derselben Sitzung (<c>OsDebug.Command/Stop</c>) desselben Runs und Agenten – nur bis zur freigegebenen Zahl und
 /// Dauer, Eingaben nur mit allowInput; jeder Befehl wird als eigener Vorschlag mit Bezug auf die Sitzung protokolliert.
 /// Not-Aus und Abbruch beenden die Sitzung.</item>
+/// <item>Ausnahme mit eigener, ausdrücklicher Freigabe: automatische Freigabe („autoApprove“ der Projektdatei). Die Liste
+/// wird zu Beginn jedes Runs als eigener Vorschlag <c>Run.AutoApprove</c> vorgelegt; erst nach der Bestätigung genehmigt
+/// der Broker Vorschläge dieser Tools im selben Run selbst – nach derselben Prüfung, mit eigener Capability und
+/// Protokoll („AutoApprove“). Nie für Tools außerhalb der Sandbox (<see cref="AutoApprove.Never"/>). Not-Aus, Abbruch des
+/// Runs, Neustart und eine neue Bestätigungsanfrage beenden sie.</item>
 /// </list>
 /// </summary>
 public sealed class ApprovalBroker : IAsyncDisposable
@@ -62,7 +67,19 @@ public sealed class ApprovalBroker : IAsyncDisposable
         public bool Closed { get; set; }
     }
 
+    private sealed class AutoGrant
+    {
+        public required string ConfirmId { get; init; }
+        public required string RunId { get; init; }
+        public required IReadOnlySet<string> Tools { get; init; }
+        public int Used { get; set; }
+        public bool Closed { get; set; }
+    }
+
     private readonly Lock _gate = new();
+    private readonly Dictionary<string, AutoGrant> _autoGrants = new(StringComparer.Ordinal);
+    // Jüngste Bestätigungsanfrage je Run: nur sie darf eine automatische Freigabe öffnen.
+    private readonly Dictionary<string, string> _latestAutoConfirm = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DebugGrant> _debugGrants = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string RequestSha256, string ProposalId)> _idempotency = new(StringComparer.Ordinal);
@@ -90,6 +107,18 @@ public sealed class ApprovalBroker : IAsyncDisposable
 
     /// <summary>Kennung dieser Broker-Sitzung. Capabilities sind an sie gebunden.</summary>
     public string SessionId { get; }
+
+    /// <summary>In der Projektdatei eingeschaltete automatische Freigaben (wirksam erst nach Bestätigung im Run).</summary>
+    public IReadOnlyList<string> AutoApproveTools => _options.AutoApproveTools;
+
+    /// <summary>Im Run bestätigte automatische Freigaben (leer = keine).</summary>
+    public IReadOnlyList<string> ActiveAutoApprove(string runId)
+    {
+        lock (_gate)
+        {
+            return _autoGrants.TryGetValue(runId, out var g) && !g.Closed ? [.. g.Tools.Order(StringComparer.Ordinal)] : [];
+        }
+    }
 
     /// <summary>Freigegebene Ordner (für Agenten und Oberfläche lesbar, nie änderbar).</summary>
     public IReadOnlyList<FolderGrant> Grants => _policy.Grants;
@@ -164,6 +193,15 @@ public sealed class ApprovalBroker : IAsyncDisposable
                 }
 
                 var grant = OsDebugTools.IsSessionTool(request.Tool) ? RequireDebugGrant(request) : null;
+                if (request.Tool == AutoApprove.Tool && _autoGrants.TryGetValue(request.RunId, out var previous))
+                {
+                    // Neue Bestätigung angefragt: die bisherige endet sofort – abgelehnt heißt danach wieder einzeln.
+                    CloseAutoGrant(previous, "neue Bestätigung angefragt");
+                }
+                var auto = grant is null && _autoGrants.TryGetValue(request.RunId, out var running) && !running.Closed
+                           && running.Tools.Contains(request.Tool) && AutoApprove.Eligible.ContainsKey(request.Tool)
+                    ? running
+                    : null;
                 var open = _entries.Values.Count(e => e.State is ProposalState.AwaitingApproval or ProposalState.Approved);
                 if (open >= _options.MaxOpenProposals)
                 {
@@ -194,6 +232,14 @@ public sealed class ApprovalBroker : IAsyncDisposable
                 if (grant is not null)
                 {
                     ApproveInSession(entry, grant);
+                }
+                else if (auto is not null)
+                {
+                    ApproveAutomatically(entry, auto);
+                }
+                if (request.Tool == AutoApprove.Tool)
+                {
+                    SupersedeAutoConfirmations(entry);
                 }
                 return View(entry);
             }
@@ -310,6 +356,85 @@ public sealed class ApprovalBroker : IAsyncDisposable
             _dispatchQueue.Writer.TryWrite(entry.Proposal.ProposalId);
             return View(entry);
         }
+    }
+
+    // ------------------------------------------------------------------ Automatische Freigabe (autoApprove)
+
+    private void ApproveAutomatically(Entry entry, AutoGrant grant)
+    {
+        var capability = new Capability
+        {
+            Id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)),
+            ProposalSha256 = entry.Sha256,
+            SessionId = SessionId,
+            PolicyRevision = _options.PolicyRevision,
+        };
+        entry.Capability = capability;
+        grant.Used++;
+        Journal("decision", entry, new JsonObject
+        {
+            ["decision"] = "AutoApprove",
+            ["sha256"] = entry.Sha256,
+            ["sessionId"] = SessionId,
+            ["grant"] = grant.ConfirmId,
+            ["used"] = grant.Used,
+            ["capabilityFingerprint"] = CanonicalJson.Sha256Hex(capability.Id)[..16],
+        });
+        SetState(entry, ProposalState.Approved, "Automatisch genehmigt (autoApprove, für diesen Run bestätigt)");
+        _dispatchQueue.Writer.TryWrite(entry.Proposal.ProposalId);
+    }
+
+    /// <summary>
+    /// Eine neue Bestätigungsanfrage ersetzt ältere desselben Runs: offene oder schon erlaubte, noch nicht ausgeführte
+    /// werden ungültig, eine gerade laufende darf keine Freigabe mehr öffnen (sonst würde eine spätere Ablehnung übergangen).
+    /// </summary>
+    private void SupersedeAutoConfirmations(Entry latest)
+    {
+        var runId = latest.Proposal.RunId;
+        _latestAutoConfirm[runId] = latest.Proposal.ProposalId;
+        foreach (var older in _entries.Values.Where(e => e != latest && e.Proposal.Tool == AutoApprove.Tool && e.Proposal.RunId == runId
+                                                         && e.State is ProposalState.AwaitingApproval or ProposalState.Approved).ToList())
+        {
+            SetState(older, ProposalState.Invalidated, "Durch eine neue Bestätigungsanfrage ersetzt");
+        }
+    }
+
+    private void OpenAutoGrant(Entry confirm)
+    {
+        if (!_latestAutoConfirm.TryGetValue(confirm.Proposal.RunId, out var latest) || latest != confirm.Proposal.ProposalId)
+        {
+            Journal("autoapprove.skipped", confirm, new JsonObject { ["reason"] = "neuere Bestätigungsanfrage" });
+            return;
+        }
+        var tools = AutoApprove.RequireTools(confirm.Proposal.Arguments, _options.AutoApproveTools);
+        var grant = new AutoGrant
+        {
+            ConfirmId = confirm.Proposal.ProposalId,
+            RunId = confirm.Proposal.RunId,
+            Tools = tools.ToHashSet(StringComparer.Ordinal),
+        };
+        if (_autoGrants.TryGetValue(grant.RunId, out var previous))
+        {
+            CloseAutoGrant(previous, "ersetzt");
+        }
+        _autoGrants[grant.RunId] = grant;
+        Journal("autoapprove.granted", confirm, new JsonObject
+        {
+            ["runId"] = grant.RunId,
+            ["tools"] = new JsonArray(tools.Select(t => (JsonNode?)t).ToArray()),
+        });
+        AddEvent("autoapprove.granted", confirm, $"Automatische Freigabe für diesen Run bestätigt: {string.Join(", ", tools)}");
+    }
+
+    private void CloseAutoGrant(AutoGrant grant, string reason)
+    {
+        if (grant.Closed)
+        {
+            return;
+        }
+        grant.Closed = true;
+        _journal.Append("autoapprove.closed", new JsonObject { ["proposalId"] = grant.ConfirmId, ["reason"] = reason, ["used"] = grant.Used });
+        AddEvent("autoapprove.closed", null, $"Automatische Freigabe beendet ({reason}, {grant.Used} Vorschläge automatisch genehmigt)", grant.RunId);
     }
 
     // ------------------------------------------------------------------ Debug-Sitzungen (M9)
@@ -493,6 +618,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
             _stopped = true;
             _journal.Append("emergency.stop", new JsonObject());
             StopClosedDebugSessions = _debugGrants.Values.Any(g => !g.Closed);
+            foreach (var auto in _autoGrants.Values)
+            {
+                CloseAutoGrant(auto, "Not-Aus");
+            }
             foreach (var grant in _debugGrants.Values)
             {
                 CloseGrant(grant, "Not-Aus");
@@ -568,6 +697,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
             foreach (var grant in _debugGrants.Values.Where(g => g.RunId == runId && (agent is null || g.Agent == agent)))
             {
                 CloseGrant(grant, reason);
+            }
+            if (agent is null && _autoGrants.TryGetValue(runId, out var auto))
+            {
+                CloseAutoGrant(auto, reason);
             }
             foreach (var entry in _entries.Values.Where(e => e.Proposal.RunId == runId && (agent is null || e.Proposal.Agent == agent)).ToList())
             {
@@ -668,7 +801,16 @@ public sealed class ApprovalBroker : IAsyncDisposable
         ToolResult result;
         try
         {
-            result = await _adapter.ExecuteAsync(proposal, invocationId, runCts.Token).ConfigureAwait(false);
+            // Run.AutoApprove führt nichts aus: die Bestätigung selbst ist das Ergebnis (Freigabe wird unten geöffnet).
+            result = proposal.Tool == AutoApprove.Tool
+                ? (runCts.IsCancellationRequested
+                    ? EmptyResult(proposal, invocationId, ResultStatus.Cancelled)
+                    : EmptyResult(proposal, invocationId, ResultStatus.Succeeded) with
+                    {
+                        TargetResults = [new TargetResult("autoApprove", ResultStatus.Succeeded,
+                            Message: "Für diesen Run bestätigt: " + string.Join(", ", AutoApprove.RequireTools(proposal.Arguments, _options.AutoApproveTools)))],
+                    })
+                : await _adapter.ExecuteAsync(proposal, invocationId, runCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -686,6 +828,7 @@ public sealed class ApprovalBroker : IAsyncDisposable
         {
             var entry = _entries[proposalId];
             entry.RunCts = null;
+            var cancelledMeanwhile = runCts.IsCancellationRequested;
             runCts.Dispose();
             result = result with
             {
@@ -710,6 +853,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
             if (proposal.Tool == OsDebugTools.Start && result.Status == ResultStatus.Succeeded && !_stopped)
             {
                 OpenGrant(entry);
+            }
+            if (proposal.Tool == AutoApprove.Tool && result.Status == ResultStatus.Succeeded && !_stopped && !cancelledMeanwhile)
+            {
+                OpenAutoGrant(entry);
             }
         }
         return true;

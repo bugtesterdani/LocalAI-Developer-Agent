@@ -50,6 +50,23 @@ STATE_TEXT = {
 }
 
 
+AUTO_APPROVE_TOOL = "Run.AutoApprove"
+# Anzeige der automatischen Freigabe (autoApprove) im Chat – der Broker prüft die Liste selbst.
+AUTO_APPROVE_TEXT = {
+    "File.List": "Dateien im Snapshot auflisten (Sandbox)",
+    "File.Read": "eine Datei im Snapshot lesen (Sandbox)",
+    "File.ReadMany": "mehrere Dateien im Snapshot lesen (Sandbox)",
+    "File.Search": "im Snapshot suchen (Sandbox)",
+    "Repo.Index": "Symbolindex des Snapshots (Sandbox)",
+    "Patch.Apply": "Änderungen auf die Arbeitskopie in der Sandbox anwenden (nicht auf deinen Projektordner)",
+    "Toolchain.Restore": "Pakete wiederherstellen in der Offline-VM",
+    "Toolchain.Build": "bauen in der Offline-VM",
+    "Toolchain.Test": "Tests ausführen in der Offline-VM",
+    "Toolchain.Run": "Programm ausführen in der Offline-VM",
+    "Toolchain.Lint": "Lint/Format in der Offline-VM",
+}
+
+
 @dataclass
 class ToolOutcome:
     evidence: list[Evidence]
@@ -104,6 +121,9 @@ class ToolBridge:
         # M9: Einstellung osDebug des Projekts (vom Broker) und offene Debug-Sitzungen je (Agent, Aufgabe)
         self._os_debug: dict[str, Any] | None = None
         self._debug_sessions: dict[tuple[str, str], str] = {}
+        # autoApprove: eingeschaltet laut Projektdatei (vom Broker) und für diesen Run bestätigt
+        self._auto_approve: list[str] = []
+        self.auto_active: list[str] = []
 
     # ------------------------------------------------------------------ Grundlagen
     def find_grant(self) -> FolderGrant | None:
@@ -131,8 +151,14 @@ class ToolBridge:
                                     task_id=task_id)
                 return f"rejected by broker ({err.code}): {err.message}"
             proposal_id = view.proposal.proposal_id
-            self.reporter.event(agent, ActivityKind.Proposal, f"{label} – wartet auf Freigabe ({proposal_id[:8]})",
-                                task_id=task_id, state=AgentState.WaitingApproval)
+            automatic = (getattr(view, "state", ProposalState.AwaitingApproval) != ProposalState.AwaitingApproval
+                         and request.tool in self.auto_active)
+            if automatic:
+                self.reporter.event(agent, ActivityKind.Proposal,
+                                    f"{label} – automatisch genehmigt (autoApprove, {proposal_id[:8]})", task_id=task_id)
+            else:
+                self.reporter.event(agent, ActivityKind.Proposal, f"{label} – wartet auf Freigabe ({proposal_id[:8]})",
+                                    task_id=task_id, state=AgentState.WaitingApproval)
             started = time.monotonic()
             # Warten auf die Entscheidung zählt nicht zur aktiven Laufzeit.
             with self.clock.paused():
@@ -148,6 +174,8 @@ class ToolBridge:
             text = STATE_TEXT.get(outcome.state, outcome.state.value)
             if outcome.final_proposal_id != proposal_id:
                 text += " (nach Abwahl)"
+            if automatic:
+                text += " (automatisch genehmigt)"
             self.reporter.event(agent, ActivityKind.Proposal, f"{label}: {text} nach {seconds:.0f} s", task_id=task_id,
                                 state=AgentState.Generating if outcome.state == ProposalState.Succeeded else None)
             return outcome
@@ -166,6 +194,28 @@ class ToolBridge:
         # „N Dateien, B Bytes, M übersprungen[: Gründe]“ (vom Broker aus dem Snapshot-Manifest)
         self.snapshot_note = outcome.result.target_results[0].message or ""
         return self.snapshot_id
+
+    # ------------------------------------------------------------------ autoApprove
+    def auto_approve_tools(self) -> list[str]:
+        """In der Projektdatei eingeschaltete automatische Freigaben (leer = keine)."""
+        self.toolchains()
+        return list(self._auto_approve)
+
+    def confirm_auto_approve(self, agent: str, task_id: str, cancel: CancelToken) -> list[str]:
+        """Legt die Liste zu Beginn des Runs zur ausdrücklichen Bestätigung vor. Liefert die bestätigten Tools; abgelehnt,
+        abgelaufen oder abgewiesen = leer (dann wird jede Aktion einzeln freigegeben)."""
+        self.auto_active = []
+        tools = self.auto_approve_tools()
+        if not tools:
+            return []
+        request = self._request(agent, task_id, AUTO_APPROVE_TOOL,
+                                "Automatische Freigabe für diesen Run bestätigen: " + ", ".join(tools), [],
+                                {"tools": tools}, self.snapshot_id or "-")
+        outcome = self._submit_and_wait(agent, task_id, request, "Automatische Freigabe bestätigen", cancel)
+        if isinstance(outcome, str) or outcome.state != ProposalState.Succeeded:
+            return []
+        self.auto_active = tools
+        return tools
 
     def rights(self) -> set[FolderRight]:
         return set(self.grant.rights) if self.grant else set()
@@ -188,6 +238,7 @@ class ToolBridge:
                 info = self.client.toolchains_available()
                 self._toolchains = list(info.get("toolchains") or []) if info.get("enabled") else []
                 self._os_debug = info.get("osDebug") if isinstance(info.get("osDebug"), dict) else None
+                self._auto_approve = [str(t) for t in info.get("autoApprove") or []]
             except (BrokerError, AttributeError):
                 self._toolchains = []
         return self._toolchains

@@ -168,6 +168,7 @@ andere ist unerreichbar (R09).
 | `guestOs` | nein | Heimat-VM des Projekts (`Windows`/`Linux`); sonst `sandbox.defaultGuestOs` |
 | `toolchainGuests` | nein | Gastsystem je Toolchain; darf dem Manifest nur zustimmen, ein Widerspruch verhindert den Start |
 | `osDebug` | nein | eigenes Betriebssystem in QEMU booten und debuggen (M9), siehe unten |
+| `autoApprove` | nein | Tools, die in einem Run automatisch genehmigt werden – erst nach Bestätigung zu Beginn jedes Runs, siehe unten |
 
 ### `grants[]`
 
@@ -196,6 +197,42 @@ außerdem Verknüpfungen, Junctions und Dateien mit mehreren Hardlinks. Welche R
 | `maxCommands`, `maxMinutes` | Grenzen einer Debug-Sitzung |
 
 Beispiel: `config/m9-danios-project.json`. Ablauf: [Prüfanleitung M9](pruefung-M9.md).
+
+### `autoApprove`
+
+Erspart Klicks für Aktionen, die nur in der Sandbox wirken. Standard: nichts automatisch.
+
+```json
+"autoApprove": {
+  "File.List": true,
+  "File.Read": true,
+  "File.ReadMany": true,
+  "File.Search": true,
+  "Repo.Index": true,
+  "Toolchain.Test": false
+}
+```
+
+- **Bestätigung in jedem Run:** Zu Beginn jedes Runs (nach dem Snapshot) sagt der Orchestrator im Chat an, welche
+  Aktionen automatisch laufen sollen, und legt die Liste als eigene Freigabe `Run.AutoApprove` vor („Für diesen Run
+  bestätigen“). Erst danach genehmigt der Broker Vorschläge dieser Tools in diesem Run selbst. Ablehnen oder Ablaufen
+  lassen = jede Aktion wird wie gewohnt einzeln vorgelegt. Ohne eingeschaltete Tools gibt es keine Rückfrage.
+- **Wirkt nur im bestätigten Run:** Not-Aus, Abbruch des Runs, Neustart des Brokers und der nächste Run (neue
+  Bestätigung) beenden die automatische Freigabe.
+- **Volle Prüfung und Protokoll:** Jeder automatisch genehmigte Vorschlag wird wie jeder andere geprüft (Ziele, Rechte,
+  Snapshot, Pfade) und ist im Audit-Journal (`decision: AutoApprove`) und in der Aktivität als „automatisch genehmigt“
+  zu sehen.
+
+| Möglich | Wirkung |
+|---|---|
+| `File.List`, `File.Read`, `File.ReadMany`, `File.Search`, `Repo.Index` | lesen nur den Snapshot in der Sandbox |
+| `Patch.Apply` | ändert nur die Arbeitskopie in der Sandbox (Übernahme in den Projektordner bleibt eine eigene Freigabe) |
+| `Toolchain.Restore`, `Toolchain.Build`, `Toolchain.Test`, `Toolchain.Run`, `Toolchain.Lint` | führen Code aus – nur in der Offline-VM |
+
+**Nie automatisch** (der Broker startet nicht, wenn eines davon auf `true` steht): `Workspace.Snapshot` und
+`Workspace.Diff` (lesen den Projektordner auf dem Rechner), `Workspace.ExportPatch` (schreibt dorthin), `Web.Fetch` und
+`Web.Content` (Internet), `OsDebug.*` (eigene Sitzungsfreigabe). `false` ist bei allen erlaubt. Ein unbekannter
+Toolname verhindert ebenfalls den Start.
 
 ---
 

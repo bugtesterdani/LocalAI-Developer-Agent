@@ -162,7 +162,8 @@ public sealed partial record ProjectConfig(
     [property: JsonPropertyName("toolchains"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Toolchains = null,
     [property: JsonPropertyName("guestOs"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? GuestOs = null,
     [property: JsonPropertyName("toolchainGuests"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, GuestOs>? ToolchainGuests = null,
-    [property: JsonPropertyName("osDebug"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugConfig? OsDebug = null);
+    [property: JsonPropertyName("osDebug"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugConfig? OsDebug = null,
+    [property: JsonPropertyName("autoApprove"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, bool>? AutoApprove = null);
 
 public sealed partial record SnapshotFile(
     [property: JsonPropertyName("path")] string Path,

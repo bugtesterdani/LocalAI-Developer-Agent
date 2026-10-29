@@ -382,6 +382,8 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                     ["enabled"] = ToolchainCatalog is not null,
                     ["reason"] = ToolchainCatalog is null ? "Toolchain-Aktionen nur in der Betriebsart hyperv bzw. qemu" : null,
                     ["toolchains"] = list,
+                    // Eingeschaltete automatische Freigaben – der Orchestrator legt sie zu Beginn jedes Runs zur Bestätigung vor.
+                    ["autoApprove"] = new JsonArray(broker.AutoApproveTools.Select(t => (JsonNode?)t).ToArray()),
                 };
                 if (OsDebug is not null)
                 {

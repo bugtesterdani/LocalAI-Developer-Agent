@@ -179,6 +179,11 @@ Jeder Agentenzugriff auf externe Zustände oder Nebenwirkungen ist ein Tool: Dat
 
 Reine Modellinferenz auf bereits zugelassenen Eingaben, UI-Rendering, In-Memory-Scheduling und internes Speichern des Betriebszustands sind Infrastruktur, keine Agententools. Diese begrenzte Definition wird in der UI erläutert. Infrastruktur darf weder Repositoryzugriff noch Webabruf tarnen. Downloads von Modellen sowie das Öffnen/Starten einer Sandbox sind sichtbare administrative Aktionen mit expliziter Nutzerbestätigung. Das Produkt bietet keinen Modus zur automatischen Toolfreigabe.
 
+> **Abweichung (Entscheidung Dani, 29.10.2026):** Ausnahme `autoApprove` der Projektdatei – nur für Tools, die
+> ausschließlich in der Sandbox wirken, standardmäßig aus und nur wirksam, nachdem der Nutzer die Liste zu Beginn jedes
+> Runs ausdrücklich bestätigt hat (`Run.AutoApprove`). Snapshot, Übernahme in den Projektordner, Webabrufe und
+> Debug-Sitzungen sind davon fest ausgeschlossen. Einzelheiten: `docs/konfiguration.md#autoapprove`.
+
 ### Freigabekarte
 
 MUSS zeigen: Rolle und Aufgabe, Tool und Version, Zweck, exakte normalisierte Parameter, absolute Zielpfade bzw. URL, Lesemenge/Schreibmenge, ausführbare Datei samt Hash, getrennte Argumentliste, Arbeitsverzeichnis, erlaubte Umgebungsvariablen, Sandbox-ID, Basis-Snapshot, erwartete Nebenwirkungen, Zeit-/Ausgabegrenzen, Ablaufzeit und Datenabfluss. Für Patches vollständiger Diff; für Prozesse Hinweis auf transitive Ausführung durch Buildskripte oder Tests.

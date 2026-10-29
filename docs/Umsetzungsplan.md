@@ -250,6 +250,15 @@ Leseaktionen werden zu einer Sammelfreigabe mit Abwahl je Datei zusammengefasst 
 „finish“ daneben wird nicht ausgeführt – das Modell schließt nach den Ergebnissen ab. Läuft ein Vorschlag ab, werden die
 übrigen nicht mehr vorgeschlagen.
 
+**Automatische Freigabe `autoApprove` (Stand 29.10.2026, Entscheidung Dani):** Bewusste Abweichung von R05 und §6
+(„keine automatische Toolfreigabe“), eng begrenzt: In der Projektdatei lassen sich Sandbox-Tools einschalten
+(`File.*`, `Repo.Index`, `Patch.Apply`, `Toolchain.*`); Standard ist nichts. Zu Beginn jedes Runs kündigt der
+Orchestrator die Liste im Chat an und legt sie als eigene Freigabe `Run.AutoApprove` vor; nur nach dieser Bestätigung
+genehmigt der Broker passende Vorschläge dieses Runs selbst (volle Prüfung, eigene Capability, Audit `AutoApprove`,
+Aktivität „automatisch genehmigt“). Nie automatisch: Snapshot, Diff und Übernahme in den Projektordner, Webabrufe,
+Debug-Sitzungen – ein solcher Eintrag verhindert den Start des Brokers. Not-Aus, Abbruch des Runs, Neustart und eine
+neue Bestätigungsanfrage beenden die automatische Freigabe.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

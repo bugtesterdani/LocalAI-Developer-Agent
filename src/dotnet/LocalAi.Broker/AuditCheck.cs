@@ -44,6 +44,8 @@ public static class AuditCheck
         public required string Sha { get; init; }
         public required int Session { get; init; }
         public string Tool { get; init; } = "";
+        public string RunId { get; init; } = "";
+        public IReadOnlyList<string>? AutoTools { get; init; }
         public int Approvals;
         public int Denials;
         public string? ApprovedSha;
@@ -61,9 +63,23 @@ public static class AuditCheck
         public bool Closed;
     }
 
+    private sealed class AutoGrant
+    {
+        public required int Session { get; init; }
+        public required string RunId { get; init; }
+        public required HashSet<string> Tools { get; init; }
+        public bool Closed;
+    }
+
+    private static IReadOnlyList<string>? ToolList(JsonNode? node) =>
+        node is JsonArray array && array.All(t => t?.GetValueKind() == System.Text.Json.JsonValueKind.String)
+            ? array.Select(t => t!.GetValue<string>()).ToList()
+            : null;
+
     public static AuditReport Check(IReadOnlyList<JournalEntry> entries)
     {
         var problems = new List<string>();
+        var autoGrants = new Dictionary<string, AutoGrant>(StringComparer.Ordinal);
         var grants = new Dictionary<string, Grant>(StringComparer.Ordinal);
         var proposals = new Dictionary<string, Proposal>(StringComparer.Ordinal);
         int session = 0, approvals = 0, denials = 0, invocations = 0, stops = 0;
@@ -88,7 +104,12 @@ public static class AuditCheck
                         problems.Add($"#{e.Seq}: Vorschlag ohne Kennung oder Hash");
                         break;
                     }
-                    if (!proposals.TryAdd(pid, new Proposal { Sha = sha, Session = session, Tool = e.Data["proposal"]?["tool"]?.GetValue<string>() ?? "" }))
+                    if (!proposals.TryAdd(pid, new Proposal
+                        {
+                            Sha = sha, Session = session, Tool = e.Data["proposal"]?["tool"]?.GetValue<string>() ?? "",
+                            RunId = e.Data["proposal"]?["runId"]?.GetValue<string>() ?? "",
+                            AutoTools = ToolList(e.Data["proposal"]?["arguments"]?["tools"]),
+                        }))
                     {
                         problems.Add($"#{e.Seq}: Vorschlag {pid} doppelt angelegt");
                     }
@@ -133,6 +154,23 @@ public static class AuditCheck
                         p.Approvals++;
                         p.ApprovedSha = sha;
                     }
+                    else if (kind == "AutoApprove")
+                    {
+                        // autoApprove: nur nach bestätigter Liste desselben Runs und derselben Broker-Sitzung, nur Sandbox-Tools.
+                        var grantId = Str("grant");
+                        if (!AutoApprove.Eligible.ContainsKey(p.Tool))
+                        {
+                            problems.Add($"#{e.Seq}: automatische Freigabe für {p.Tool} ({id}) nicht erlaubt");
+                        }
+                        else if (grantId is null || !autoGrants.TryGetValue(grantId, out var g) || g.Closed || g.Session != session
+                                 || g.RunId != p.RunId || !g.Tools.Contains(p.Tool))
+                        {
+                            problems.Add($"#{e.Seq}: automatische Freigabe für {id} ohne passende, bestätigte Liste des Runs");
+                        }
+                        approvals++;
+                        p.Approvals++;
+                        p.ApprovedSha = sha;
+                    }
                     else
                     {
                         denials++;
@@ -157,6 +195,38 @@ public static class AuditCheck
                     grants[id] = new Grant { Session = session, Max = max };
                     break;
                 }
+                case "autoapprove.granted":
+                {
+                    // Nur nach genau einer ausdrücklich bestätigten und ausgeführten Run.AutoApprove.
+                    if (id is null || !proposals.TryGetValue(id, out var confirm) || confirm.Tool != AutoApprove.Tool
+                        || confirm.Invocations != 1 || confirm.Approvals != 1 || confirm.ApprovedSha != confirm.Sha
+                        || confirm.Session != session || Str("runId") != confirm.RunId)
+                    {
+                        problems.Add($"#{e.Seq}: automatische Freigabe {id} ohne bestätigte Liste");
+                        break;
+                    }
+                    var granted = ToolList(e.Data["tools"]) ?? [];
+                    var tools = granted.ToHashSet(StringComparer.Ordinal);
+                    var bad = tools.FirstOrDefault(t => !AutoApprove.Eligible.ContainsKey(t));
+                    if (bad is not null)
+                    {
+                        problems.Add($"#{e.Seq}: automatische Freigabe {id} enthält {bad} (nie automatisch)");
+                    }
+                    if (confirm.AutoTools is null || !tools.SetEquals(confirm.AutoTools) || granted.Count != confirm.AutoTools.Count)
+                    {
+                        // Nur genau die Liste, die der Nutzer auf der Karte bestätigt hat (Hash des Vorschlags).
+                        problems.Add($"#{e.Seq}: automatische Freigabe {id} weicht von der bestätigten Liste ab");
+                        break;
+                    }
+                    autoGrants[id] = new AutoGrant { Session = session, RunId = confirm.RunId, Tools = tools };
+                    break;
+                }
+                case "autoapprove.closed":
+                    if (id is not null && autoGrants.TryGetValue(id, out var autoClosed))
+                    {
+                        autoClosed.Closed = true;
+                    }
+                    break;
                 case "osdebug.closed":
                     if (id is not null && grants.TryGetValue(id, out var closed))
                     {

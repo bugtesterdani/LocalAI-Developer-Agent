@@ -60,4 +60,10 @@ public sealed record BrokerOptions
 
     /// <summary>Höchstzahl gleichzeitig offener Vorschläge (Schutz vor Überflutung).</summary>
     public int MaxOpenProposals { get; init; } = 500;
+
+    /// <summary>
+    /// Eingeschaltete automatische Freigaben der Projektdatei (sortiert, geprüft mit <see cref="LocalAi.Broker.AutoApprove.Parse"/>).
+    /// Wirksam nur nach Bestätigung im jeweiligen Run.
+    /// </summary>
+    public IReadOnlyList<string> AutoApproveTools { get; init; } = [];
 }

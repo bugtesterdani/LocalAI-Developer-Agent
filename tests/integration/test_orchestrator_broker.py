@@ -31,13 +31,14 @@ def fake_ollama():
     fake.stop()
 
 
-def setup(tmp_path, broker_factory, orchestrator_args, heartbeat=30, rights=("List", "Read")):
+def setup(tmp_path, broker_factory, orchestrator_args, heartbeat=30, rights=("List", "Read"), project_extra=None):
     project_dir = tmp_path / "projekt"
     (project_dir / "src").mkdir(parents=True)
     (project_dir / "README.md").write_bytes(b"# Rechner\n")
     (project_dir / "src" / "calc.py").write_bytes(b"def add(a, b):\n    return a + b\n")
     project = {"schemaVersion": 1, "projectId": "m3", "name": "M3",
-               "grants": [{"grantId": "p", "root": str(project_dir), "rights": list(rights), "recursive": True}]}
+               "grants": [{"grantId": "p", "root": str(project_dir), "rights": list(rights), "recursive": True}],
+               **(project_extra or {})}
     (tmp_path / "projekt.json").write_text(json.dumps(project), encoding="utf-8")
     models = tmp_path / "models.json"
     models.write_text(json.dumps({"requireCalibration": False, "profiles": [

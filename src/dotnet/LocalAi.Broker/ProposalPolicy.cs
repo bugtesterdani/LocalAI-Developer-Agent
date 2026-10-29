@@ -109,6 +109,9 @@ public sealed class ProposalPolicy
             RequiresSnapshot: false, RequiresGrant: false);
         _tools[OsDebugTools.Stop] = new(OsDebugTools.Stop, "1", 0, 0, false, new HashSet<string> { "sessionId" }, [],
             RequiresSnapshot: false, RequiresGrant: false);
+        // Bestätigung der automatischen Freigabe für einen Run: immer eine ausdrückliche Nutzerentscheidung.
+        _tools[AutoApprove.Tool] = new(AutoApprove.Tool, "1", 0, 0, false, new HashSet<string> { "tools" }, [],
+            RequiresSnapshot: false, RequiresGrant: false);
         foreach (var name in ToolchainTools.Actions.Keys)
         {
             // Ausführende Tools bleiben Einzelaufrufe ohne Ziele (Spezifikation §5 Sammelfreigabe).
@@ -229,6 +232,10 @@ public sealed class ProposalPolicy
         else if (tool.Name == OsDebugTools.Start)
         {
             OsDebugTools.ValidateStart(request.Arguments, _context.OsDebug);
+        }
+        else if (tool.Name == AutoApprove.Tool)
+        {
+            AutoApprove.RequireTools(request.Arguments, _options.AutoApproveTools);
         }
         else if (OsDebugTools.IsSessionTool(tool.Name))
         {

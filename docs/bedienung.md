@@ -99,6 +99,18 @@ Ein Webtext, der „Anweisungen“ enthält, bleibt Text; er kann keine Rechte o
 im selben Run Debug-Befehle senden, bis Budget oder Dauer erschöpft sind oder die Aufgabe endet. Einzelheiten:
 [Prüfanleitung M9](pruefung-M9.md).
 
+### Automatische Freigabe (`autoApprove`)
+
+Steht in der Projektdatei `autoApprove` (siehe [Konfiguration](konfiguration.md#autoapprove)), kündigt der
+Orchestrator zu Beginn **jedes** Runs im Chat an, welche Aktionen ohne Einzelfreigabe laufen sollen, und legt eine Karte
+`Run.AutoApprove` vor: rot hervorgehoben „Wird in diesem Run automatisch genehmigt“ mit jedem Tool und seiner Wirkung.
+
+- **„Für diesen Run bestätigen“** – der Broker genehmigt Vorschläge genau dieser Tools in diesem Run selbst. Sie
+  erscheinen in der Aktivität als „automatisch genehmigt (autoApprove)“, nicht mehr unter Freigaben.
+- **Ablehnen** oder ablaufen lassen – alles wird wie gewohnt einzeln vorgelegt.
+- Snapshot, Übernahme in den Projektordner, Webabrufe und Debug-Sitzungen sind nie automatisch.
+- Not-Aus oder Abbruch des Runs beenden die automatische Freigabe; der nächste Run fragt erneut.
+
 ## Übernahme in den Projektordner
 
 Bis hierhin hat sich nur die Arbeitskopie in der Sandbox geändert. Die Übernahme sind zwei Freigaben:

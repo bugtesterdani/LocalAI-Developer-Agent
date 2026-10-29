@@ -291,8 +291,31 @@ public sealed class ApprovalCardViewModel : ObservableObject
             "Repo.Index" => "SideEffectsIndex",
             _ when IsToolchain => "SideEffectsToolchain",
             "OsDebug.Start" => "SideEffectsOsDebug",
+            "Run.AutoApprove" => "SideEffectsAutoApprove",
             _ => "SideEffectsRead",
         });
+
+    /// <summary>Bestätigung der automatischen Freigabe für einen Run (autoApprove).</summary>
+    public bool IsAutoApprove => Proposal.Tool == "Run.AutoApprove";
+
+    /// <summary>Die Tools, die nach der Bestätigung in diesem Run ohne Einzelfreigabe laufen – je Zeile mit Erklärung.</summary>
+    public string AutoApproveText
+    {
+        get
+        {
+            if (!IsAutoApprove || Proposal.Arguments.ValueKind != JsonValueKind.Object
+                || !Proposal.Arguments.TryGetProperty("tools", out var tools) || tools.ValueKind != JsonValueKind.Array)
+            {
+                return string.Empty;
+            }
+            return string.Join("\n", tools.EnumerateArray().Select(t =>
+            {
+                var name = t.ValueKind == JsonValueKind.String ? t.GetString() ?? "?" : "?";
+                var key = "AutoTool_" + name.Replace('.', '_');
+                return "• " + (UiText.Exists(key) ? UiText.Get(key) : UiText.Format("AutoToolUnknown", InertText.Clean(name, 100)));
+            }));
+        }
+    }
 
     public bool IsToolchain => Proposal.Tool.StartsWith("Toolchain.", StringComparison.Ordinal);
 
@@ -412,6 +435,7 @@ public sealed class ApprovalCardViewModel : ObservableObject
     {
         "Web.Content" => UiText.Format("ApproveWebContent", UiText.AgentName(Proposal.Agent.ToString())),
         "Workspace.ExportPatch" => UiText.Get(IsBatch ? "ApproveExportSelection" : "ApproveExport"),
+        "Run.AutoApprove" => UiText.Get("ApproveAutoApprove"),
         _ => UiText.Get(IsBatch ? "ApproveSelectionOnce" : "ApproveOnce"),
     };
 

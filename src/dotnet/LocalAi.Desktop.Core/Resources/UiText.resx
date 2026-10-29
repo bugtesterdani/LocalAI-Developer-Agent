@@ -174,6 +174,51 @@
   <data name="SideEffectsOsDebug" xml:space="preserve">
     <value>Startet in der Linux-VM eine Debug-Sitzung: QEMU bootet das Abbild aus dem Snapshot (ohne Netzwerk, als eigener Benutzer, mit seccomp). Danach darf dieser Agent im selben Run bis zu den unten genannten Grenzen Befehle ausführen (Haltepunkte, Register, Speicher, Bildschirm, Tastatur/Maus nur wenn erlaubt), ohne dass jeder einzeln bestätigt wird – jeder Befehl erscheint in der Aktivität und im Audit-Journal. Not-Aus beendet die Sitzung.</value>
   </data>
+  <data name="SideEffectsAutoApprove" xml:space="preserve">
+    <value>ACHTUNG – automatische Freigabe: Mit „Für diesen Run bestätigen“ genehmigt der Broker in diesem Run jeden Vorschlag der unten genannten Tools selbst, ohne dich einzeln zu fragen (laut "autoApprove" in der Projektdatei). Alle Vorschläge werden trotzdem vollständig geprüft, im Audit-Journal und in der Aktivität als „automatisch genehmigt“ protokolliert. Nie automatisch: Snapshot, Diff und Übernahme in den Projektordner, Webabrufe, Debug-Sitzungen. Ablehnen = jede Aktion wird wie gewohnt einzeln freigegeben. Not-Aus und Abbruch beenden die automatische Freigabe; der nächste Run fragt erneut.</value>
+  </data>
+  <data name="LabelAutoApprove" xml:space="preserve">
+    <value>Wird in diesem Run automatisch genehmigt</value>
+  </data>
+  <data name="ApproveAutoApprove" xml:space="preserve">
+    <value>Für diesen Run bestätigen</value>
+  </data>
+  <data name="AutoTool_File_List" xml:space="preserve">
+    <value>File.List – Dateien im Snapshot auflisten (Sandbox)</value>
+  </data>
+  <data name="AutoTool_File_Read" xml:space="preserve">
+    <value>File.Read – eine Datei im Snapshot lesen (Sandbox)</value>
+  </data>
+  <data name="AutoTool_File_ReadMany" xml:space="preserve">
+    <value>File.ReadMany – mehrere Dateien im Snapshot lesen (Sandbox)</value>
+  </data>
+  <data name="AutoTool_File_Search" xml:space="preserve">
+    <value>File.Search – im Snapshot suchen (Sandbox)</value>
+  </data>
+  <data name="AutoTool_Repo_Index" xml:space="preserve">
+    <value>Repo.Index – Symbolindex des Snapshots (Sandbox)</value>
+  </data>
+  <data name="AutoTool_Patch_Apply" xml:space="preserve">
+    <value>Patch.Apply – Änderungen auf die Arbeitskopie in der Sandbox anwenden (nicht auf deinen Projektordner)</value>
+  </data>
+  <data name="AutoTool_Toolchain_Restore" xml:space="preserve">
+    <value>Toolchain.Restore – Pakete wiederherstellen in der Offline-VM (führt Code aus, nur in der VM)</value>
+  </data>
+  <data name="AutoTool_Toolchain_Build" xml:space="preserve">
+    <value>Toolchain.Build – bauen in der Offline-VM (führt Code aus, nur in der VM)</value>
+  </data>
+  <data name="AutoTool_Toolchain_Test" xml:space="preserve">
+    <value>Toolchain.Test – Tests ausführen in der Offline-VM (führt Code aus, nur in der VM)</value>
+  </data>
+  <data name="AutoTool_Toolchain_Run" xml:space="preserve">
+    <value>Toolchain.Run – Programm ausführen in der Offline-VM (führt Code aus, nur in der VM)</value>
+  </data>
+  <data name="AutoTool_Toolchain_Lint" xml:space="preserve">
+    <value>Toolchain.Lint – Lint/Format in der Offline-VM (führt Code aus, nur in der VM)</value>
+  </data>
+  <data name="AutoToolUnknown" xml:space="preserve">
+    <value>{0} – unbekannt (wird vom Broker abgewiesen)</value>
+  </data>
   <data name="OsDebugImage" xml:space="preserve">
     <value>Abbild: {0} ({1})</value>
   </data>
@@ -420,6 +465,12 @@ Empfänger: {7}</value>
   </data>
   <data name="Event_proposal.rejected" xml:space="preserve">
     <value>Vorschlag abgewiesen</value>
+  </data>
+  <data name="Event_autoapprove.granted" xml:space="preserve">
+    <value>Automatische Freigabe bestätigt</value>
+  </data>
+  <data name="Event_autoapprove.closed" xml:space="preserve">
+    <value>Automatische Freigabe beendet</value>
   </data>
   <data name="Event_emergency.stop" xml:space="preserve">
     <value>Not-Aus</value>

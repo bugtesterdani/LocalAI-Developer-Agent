@@ -59,7 +59,12 @@ from localai.orchestrator.runtime import (
     LimitReached,
     RunClock,
 )
-from localai.orchestrator.tools import PatchOutcome, ToolBridge, ToolchainOutcome
+from localai.orchestrator.tools import (
+    AUTO_APPROVE_TEXT,
+    PatchOutcome,
+    ToolBridge,
+    ToolchainOutcome,
+)
 from localai.worker import patching
 
 SEVERITY_DE = {"high": "hoch", "medium": "mittel", "low": "niedrig"}
@@ -555,7 +560,35 @@ class Orchestrator:
                               "Projektdatei prüfen (\"root\", \"recursive\": true, \"exclude\") und neu starten.")
                 bridge.snapshot_id = bridge.base_snapshot_id = None
                 return None
+        self._confirm_auto_approve(state, bridge)
         return agents
+
+    def _confirm_auto_approve(self, state: GoalState, bridge: ToolBridge) -> None:
+        """autoApprove der Projektdatei: zu Beginn jedes Runs ausdrücklich ansagen und bestätigen lassen (sonst einzeln)."""
+        tools = bridge.auto_approve_tools()
+        if not tools:
+            bridge.auto_active = []
+            return
+        reporter = self.reporter
+        lines = "\n".join(f"- {t}: {AUTO_APPROVE_TEXT.get(t, t)}" for t in tools)
+        reporter.chat("Orchestrator", "Achtung – automatische Freigabe: Laut Projektdatei („autoApprove“) sollen in diesem Run "
+                      f"diese Aktionen ohne Einzelfreigabe ausgeführt werden:\n{lines}\n\nBitte in den Freigaben bestätigen "
+                      "(„Für diesen Run bestätigen“). Lehnst du ab oder läuft die Frist ab, lege ich jede Aktion wie gewohnt "
+                      "einzeln vor. Snapshot, Übernahme in deinen Projektordner, Webabrufe und Debug-Sitzungen frage ich immer "
+                      "einzeln.")
+        reporter.state("Planner", AgentState.WaitingApproval, "Automatische Freigabe bestätigen", "T0")
+        try:
+            active = bridge.confirm_auto_approve("Planner", "T0", state.controls.token("Planner"))
+        except Cancelled:
+            state.controls.run.raise_if_cancelled()
+            active = []
+        if active:
+            reporter.chat("Orchestrator", "Automatische Freigabe für diesen Run bestätigt: " + ", ".join(active)
+                          + ". Diese Vorschläge erscheinen in der Aktivität als „automatisch genehmigt“; Not-Aus oder "
+                          "Abbruch beenden das.")
+        else:
+            reporter.chat("Orchestrator", "Automatische Freigabe nicht bestätigt – ich lege in diesem Run jede Aktion "
+                          "einzeln zur Freigabe vor.")
 
     def _start_evidence(self, state: GoalState, bridge: ToolBridge, planner: Agent) -> None:
         """Repo-Map als angeheftete Startevidenz; ohne Index (abgelehnt/fehlgeschlagen) die Dateiliste."""
