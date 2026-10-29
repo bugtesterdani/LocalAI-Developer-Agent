@@ -184,21 +184,21 @@ class RunTimings:
             lines.append("Parallel laufende Aufgaben überlappen, die Summen können deshalb größer sein als die Gesamtdauer.")
         return "\n".join(lines)
 
-    def to_json(self, run_id: str, goal: str) -> dict:
+    def to_json(self, run_id: str) -> dict:
+        # Bewusst ohne das Ziel: es kann vertrauliche Angaben enthalten und gehört nicht in ein dauerhaftes Protokoll.
         return {
             "runId": run_id,
-            "goal": goal[:200],
             "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "totals": {k: round(v, 2) for k, v in self.totals().items()},
             "models": {name: {**asdict(s), "roles": sorted(self.roles.get(name, ()))} for name, s in self.models.items()},
             "tools": {name: asdict(s) for name, s in self.tools.items()},
         }
 
-    def save(self, path: pathlib.Path, run_id: str, goal: str) -> None:
+    def save(self, path: pathlib.Path, run_id: str) -> None:
         """Eine Zeile je Run (JSON Lines) – zum Vergleichen verschiedener Einstellungen."""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as out:
-                out.write(json.dumps(self.to_json(run_id, goal), ensure_ascii=False) + "\n")
+                out.write(json.dumps(self.to_json(run_id), ensure_ascii=False) + "\n")
         except OSError:
             pass

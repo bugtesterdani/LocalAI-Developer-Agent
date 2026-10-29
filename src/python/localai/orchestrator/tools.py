@@ -163,25 +163,29 @@ class ToolBridge:
                                     task_id=task_id, state=AgentState.WaitingApproval)
             started = time.monotonic()
             decided = started if automatic else None  # Zeitpunkt der Freigabe (für die Zeitaufschlüsselung)
-            # Warten auf die Entscheidung zählt nicht zur aktiven Laufzeit.
-            with self.clock.paused():
-                while True:
-                    if cancel.cancelled:
-                        # Broker hat die Vorschläge des Agenten beim Abbruch bereits ungültig gemacht.
-                        raise Cancelled(cancel.reason)
-                    outcome = self.client.outcome(proposal_id)
-                    if decided is None and outcome.state != ProposalState.AwaitingApproval:
-                        decided = time.monotonic()
-                    if outcome.is_final:
-                        break
-                    cancel.wait(self.poll)
+            outcome = None
+            try:
+                # Warten auf die Entscheidung zählt nicht zur aktiven Laufzeit.
+                with self.clock.paused():
+                    while True:
+                        if cancel.cancelled:
+                            # Broker hat die Vorschläge des Agenten beim Abbruch bereits ungültig gemacht.
+                            raise Cancelled(cancel.reason)
+                        outcome = self.client.outcome(proposal_id)
+                        if decided is None and outcome.state != ProposalState.AwaitingApproval:
+                            decided = time.monotonic()
+                        if outcome.is_final:
+                            break
+                        cancel.wait(self.poll)
+            finally:
+                # Auch bei Abbruch oder Fehler: die bis dahin verbrachte Zeit zählt mit.
+                if self.timings is not None:
+                    ended = time.monotonic()
+                    ran = outcome is None or outcome.state not in (
+                        ProposalState.Denied, ProposalState.Expired, ProposalState.Invalidated, ProposalState.Rejected)
+                    approved_at = decided if (decided is not None and ran) else ended
+                    self.timings.tool(request.tool, approved_at - started, ended - approved_at, automatic)
             seconds = time.monotonic() - started
-            if self.timings is not None:
-                ended = time.monotonic()
-                ran = outcome.state not in (ProposalState.Denied, ProposalState.Expired, ProposalState.Invalidated,
-                                            ProposalState.Rejected)
-                approved_at = decided if (decided is not None and ran) else ended
-                self.timings.tool(request.tool, approved_at - started, ended - approved_at, automatic)
             text = STATE_TEXT.get(outcome.state, outcome.state.value)
             if outcome.final_proposal_id != proposal_id:
                 text += " (nach Abwahl)"

@@ -481,7 +481,7 @@ class Orchestrator:
                                 f"{totals['approval']:.0f} s, Ausführung {totals['tools']:.0f} s, gesamt {totals['wall']:.0f} s")
         except Exception:  # noqa: BLE001 – die Auswertung darf den Orchestrator nie stören
             return
-        timings.save(self.data_dir / "zeiten.jsonl", self.run_id, state.goal)
+        timings.save(self.data_dir / "zeiten.jsonl", self.run_id)
 
     def _agents(self, prep: Preparation, state: GoalState, bridge: ToolBridge) -> dict[str, Agent]:
         agents = {}

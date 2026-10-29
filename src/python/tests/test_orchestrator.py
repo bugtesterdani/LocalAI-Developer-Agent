@@ -1925,3 +1925,19 @@ def test_zeitaufschluesselung_am_ende_des_runs(ollama, tmp_path):
     assert row["runId"] == "run-t" and row["models"]["qwen2.5-coder:14b"]["calls"] >= 3
     orch.stop()
     thread.join(5)
+
+
+def test_zeitaufschluesselung_auch_bei_abbruch_waehrend_der_freigabe(ollama, tmp_path):
+    broker = FakeBroker(decide=lambda r: None)  # Snapshot bleibt offen
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: any(e.state == AgentState.WaitingApproval for e in broker.of("Planner")), timeout=30)
+    time.sleep(0.3)
+    broker.send(OrchestratorCommandKind.CancelRun)
+    wait_for(lambda: any(c.startswith("Zeitaufschlüsselung") for c in broker.chats("Orchestrator")), timeout=10)
+    report = next(c for c in broker.chats("Orchestrator") if c.startswith("Zeitaufschlüsselung"))
+    assert "Snapshot und Übernahme: 1× – Warten auf Freigabe" in report
+    row = json.loads((tmp_path / "zeiten.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert row["tools"]["Snapshot und Übernahme"]["approval_seconds"] >= 0.2 and "goal" not in row
+    orch.stop()
+    thread.join(5)

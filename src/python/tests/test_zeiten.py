@@ -30,11 +30,12 @@ def test_aufschluesselung_je_modell_und_kategorie(tmp_path):
     assert "gemma3:4b (Reviewer): 1 Aufrufe, 1× geladen" in text
     assert "Lesen, Suchen, Patches: 2× – Warten auf Freigabe 20 s, Ausführung 0.8 s, davon 1 automatisch genehmigt" in text
     assert "Sandbox: Build/Test/Ausführen: 1× – Warten auf Freigabe 5.0 s, Ausführung 40 s" in text
-    t.save(tmp_path / "zeiten.jsonl", "run-1", "Ziel")
-    t.save(tmp_path / "zeiten.jsonl", "run-2", "Ziel 2")
+    t.save(tmp_path / "zeiten.jsonl", "run-1")
+    t.save(tmp_path / "zeiten.jsonl", "run-2")
     rows = [json.loads(line) for line in (tmp_path / "zeiten.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [r["runId"] for r in rows] == ["run-1", "run-2"]
     assert rows[0]["models"]["qwen2.5-coder:7b"]["loads"] == 1 and rows[0]["totals"]["load"] == 20.0
+    assert "goal" not in rows[0], "das Ziel (evtl. vertraulich) wird nicht gespeichert"
 
 
 def test_hinweise_modellwechsel_cpu_freigaben():
