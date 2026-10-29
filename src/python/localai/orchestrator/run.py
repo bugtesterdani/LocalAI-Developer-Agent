@@ -59,6 +59,7 @@ from localai.orchestrator.runtime import (
     LimitReached,
     RunClock,
 )
+from localai.orchestrator.timings import RunTimings
 from localai.orchestrator.tools import (
     AUTO_APPROVE_TEXT,
     PatchOutcome,
@@ -298,6 +299,7 @@ class GoalState:
     controls: AgentControls
     clock: RunClock
     notes: list[str] = field(default_factory=list)
+    timings: RunTimings = field(default_factory=RunTimings)
 
 
 class Orchestrator:
@@ -460,8 +462,26 @@ class Orchestrator:
         finally:
             with self._lock:
                 self.current = None
+            self._report_timings(state)
             for role in ROLES:
                 self.reporter.state(role, AgentState.Ready, "bereit")
+
+    def _report_timings(self, state: GoalState) -> None:
+        """Wohin die Zeit ging – im Chat und als Zeile in zeiten.jsonl (Vergleich verschiedener Einstellungen)."""
+        timings = state.timings
+        if self.bridge is not None and self.bridge.timings is timings:
+            self.bridge.timings = None
+        if timings.empty:
+            return
+        try:
+            self.reporter.chat("Orchestrator", timings.report())
+            totals = timings.totals()
+            self.reporter.event("Orchestrator", ActivityKind.Metric,
+                                f"Zeiten: Modell {totals['model']:.0f} s (laden {totals['load']:.0f} s), Freigaben "
+                                f"{totals['approval']:.0f} s, Ausführung {totals['tools']:.0f} s, gesamt {totals['wall']:.0f} s")
+        except Exception:  # noqa: BLE001 – die Auswertung darf den Orchestrator nie stören
+            return
+        timings.save(self.data_dir / "zeiten.jsonl", self.run_id, state.goal)
 
     def _agents(self, prep: Preparation, state: GoalState, bridge: ToolBridge) -> dict[str, Agent]:
         agents = {}
@@ -471,6 +491,7 @@ class Orchestrator:
             agents[role] = Agent(role, choice.profile, choice.measurement, self.gateway, self.gpu, bridge, self.reporter,
                                  state.clock, self.config.limits, lambda: list(state.notes), self.config.history,
                                  prep.summary.profile if prep.summary else None)
+            agents[role].timings = state.timings
         return agents
 
     def _history_note(self, prep: Preparation) -> str:
@@ -513,7 +534,9 @@ class Orchestrator:
         """Modelle, Agenten, Grant und Snapshot; None, wenn der Run nicht starten kann (Grund steht im Chat)."""
         reporter = self.reporter
         reporter.state("Orchestrator", AgentState.Generating, "Run startet: Modelle und Hardware prüfen")
+        preparing = time.monotonic()
         prep = self.prepare()
+        state.timings.prepare_seconds += time.monotonic() - preparing
         if prep.hardware is not None:
             reporter.event("Orchestrator", ActivityKind.Metric, f"Hardware: {prep.hardware.describe()} · Ollama {prep.ollama_version}")
         if prep.problems:
@@ -526,6 +549,7 @@ class Orchestrator:
             self.bridge = ToolBridge(self.client, reporter, self.run_id, state.clock, self.config.limits.max_sandbox_jobs)
         bridge = self.bridge
         bridge.clock = state.clock
+        bridge.timings = state.timings
         agents = self._agents(prep, state, bridge)
         for role, agent in agents.items():
             reporter.state(role, AgentState.Ready, f"bereit · {prep.choices[role].describe()} · Prompts {agent.prompt_tags}")

@@ -55,6 +55,17 @@ ANSI-Zeichen entfernt, Bidi- und unsichtbare Zeichen sichtbar markiert, Länge b
 
 Die Agenten antworten auf Deutsch. Fragt ein Agent zurück („wartet auf dich“), antwortest du im Chat.
 
+**Zeitaufschlüsselung:** Am Ende jedes Runs (auch nach Abbruch) zeigt der Orchestrator im Chat, wohin die Zeit ging:
+
+- Modell gesamt, aufgeteilt in Laden, Prompt einlesen und Ausgabe; die Zahlen stammen von Ollama selbst;
+- Warten auf den GPU-Slot;
+- je Werkzeugart: Warten auf deine Freigabe und Ausführung (Sandbox), automatisch genehmigte mitgezählt;
+- je Modell: Aufrufe, wie oft es (neu) geladen wurde, Token/s für Prompt und Ausgabe.
+
+Dazu kommen Hinweise, wo es sich zu drehen lohnt: häufige Modellwechsel, verdächtig wenige Token/s (Teil auf der CPU),
+viele Zusammenfassungen, lange Prompts, viel Warten auf Freigaben. Jeder Run wird außerdem als eine Zeile in
+`%LOCALAPPDATA%\LocalAi\broker\zeiten.jsonl` gespeichert, zum Vergleichen verschiedener Modell-Einstellungen.
+
 ## Freigabekarten
 
 Jede Karte zeigt: Rolle, Werkzeug, Zweck, exakte Parameter, Ziele, Snapshot, Sandbox, Gültigkeit (5 Minuten),
