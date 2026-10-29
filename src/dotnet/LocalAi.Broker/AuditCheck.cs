@@ -45,6 +45,7 @@ public static class AuditCheck
         public required int Session { get; init; }
         public string Tool { get; init; } = "";
         public string RunId { get; init; } = "";
+        public IReadOnlyList<string>? AutoTools { get; init; }
         public int Approvals;
         public int Denials;
         public string? ApprovedSha;
@@ -69,6 +70,11 @@ public static class AuditCheck
         public required HashSet<string> Tools { get; init; }
         public bool Closed;
     }
+
+    private static IReadOnlyList<string>? ToolList(JsonNode? node) =>
+        node is JsonArray array && array.All(t => t?.GetValueKind() == System.Text.Json.JsonValueKind.String)
+            ? array.Select(t => t!.GetValue<string>()).ToList()
+            : null;
 
     public static AuditReport Check(IReadOnlyList<JournalEntry> entries)
     {
@@ -102,6 +108,7 @@ public static class AuditCheck
                         {
                             Sha = sha, Session = session, Tool = e.Data["proposal"]?["tool"]?.GetValue<string>() ?? "",
                             RunId = e.Data["proposal"]?["runId"]?.GetValue<string>() ?? "",
+                            AutoTools = ToolList(e.Data["proposal"]?["arguments"]?["tools"]),
                         }))
                     {
                         problems.Add($"#{e.Seq}: Vorschlag {pid} doppelt angelegt");
@@ -198,11 +205,18 @@ public static class AuditCheck
                         problems.Add($"#{e.Seq}: automatische Freigabe {id} ohne bestätigte Liste");
                         break;
                     }
-                    var tools = (e.Data["tools"] as JsonArray)?.Select(t => t?.GetValue<string>() ?? "").ToHashSet(StringComparer.Ordinal) ?? [];
+                    var granted = ToolList(e.Data["tools"]) ?? [];
+                    var tools = granted.ToHashSet(StringComparer.Ordinal);
                     var bad = tools.FirstOrDefault(t => !AutoApprove.Eligible.ContainsKey(t));
                     if (bad is not null)
                     {
                         problems.Add($"#{e.Seq}: automatische Freigabe {id} enthält {bad} (nie automatisch)");
+                    }
+                    if (confirm.AutoTools is null || !tools.SetEquals(confirm.AutoTools) || granted.Count != confirm.AutoTools.Count)
+                    {
+                        // Nur genau die Liste, die der Nutzer auf der Karte bestätigt hat (Hash des Vorschlags).
+                        problems.Add($"#{e.Seq}: automatische Freigabe {id} weicht von der bestätigten Liste ab");
+                        break;
                     }
                     autoGrants[id] = new AutoGrant { Session = session, RunId = confirm.RunId, Tools = tools };
                     break;

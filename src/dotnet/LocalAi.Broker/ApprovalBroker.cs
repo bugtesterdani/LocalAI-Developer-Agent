@@ -78,6 +78,8 @@ public sealed class ApprovalBroker : IAsyncDisposable
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, AutoGrant> _autoGrants = new(StringComparer.Ordinal);
+    // Jüngste Bestätigungsanfrage je Run: nur sie darf eine automatische Freigabe öffnen.
+    private readonly Dictionary<string, string> _latestAutoConfirm = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DebugGrant> _debugGrants = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string RequestSha256, string ProposalId)> _idempotency = new(StringComparer.Ordinal);
@@ -235,6 +237,10 @@ public sealed class ApprovalBroker : IAsyncDisposable
                 {
                     ApproveAutomatically(entry, auto);
                 }
+                if (request.Tool == AutoApprove.Tool)
+                {
+                    SupersedeAutoConfirmations(entry);
+                }
                 return View(entry);
             }
             catch (BrokerException ex)
@@ -378,8 +384,28 @@ public sealed class ApprovalBroker : IAsyncDisposable
         _dispatchQueue.Writer.TryWrite(entry.Proposal.ProposalId);
     }
 
+    /// <summary>
+    /// Eine neue Bestätigungsanfrage ersetzt ältere desselben Runs: offene oder schon erlaubte, noch nicht ausgeführte
+    /// werden ungültig, eine gerade laufende darf keine Freigabe mehr öffnen (sonst würde eine spätere Ablehnung übergangen).
+    /// </summary>
+    private void SupersedeAutoConfirmations(Entry latest)
+    {
+        var runId = latest.Proposal.RunId;
+        _latestAutoConfirm[runId] = latest.Proposal.ProposalId;
+        foreach (var older in _entries.Values.Where(e => e != latest && e.Proposal.Tool == AutoApprove.Tool && e.Proposal.RunId == runId
+                                                         && e.State is ProposalState.AwaitingApproval or ProposalState.Approved).ToList())
+        {
+            SetState(older, ProposalState.Invalidated, "Durch eine neue Bestätigungsanfrage ersetzt");
+        }
+    }
+
     private void OpenAutoGrant(Entry confirm)
     {
+        if (!_latestAutoConfirm.TryGetValue(confirm.Proposal.RunId, out var latest) || latest != confirm.Proposal.ProposalId)
+        {
+            Journal("autoapprove.skipped", confirm, new JsonObject { ["reason"] = "neuere Bestätigungsanfrage" });
+            return;
+        }
         var tools = AutoApprove.RequireTools(confirm.Proposal.Arguments, _options.AutoApproveTools);
         var grant = new AutoGrant
         {

@@ -191,6 +191,53 @@ public sealed class AutoApproveTests : IAsyncDisposable
     }
 
     [Fact, Trait("Pruefung", "autoApprove")]
+    public async Task Neuere_Anfrage_ersetzt_aeltere_Bestaetigung_auch_wenn_sie_schon_erlaubt_ist()
+    {
+        await using var broker = NewBroker();
+        // A erlaubt, aber noch nicht ausgeführt; dann B angefragt und abgelehnt: A darf nichts mehr öffnen.
+        var a = broker.Submit(Confirm());
+        broker.Decide(new UserDecision(a.Proposal.ProposalId, a.ProposalSha256, DecisionKind.Approve));
+        var b = broker.Submit(Confirm());
+        Assert.Equal(ProposalState.Invalidated, broker.Get(a.Proposal.ProposalId).State);
+        broker.Decide(new UserDecision(b.Proposal.ProposalId, b.ProposalSha256, DecisionKind.Deny));
+        Assert.False(await broker.DispatchAsync(a.Proposal.ProposalId));
+        Assert.Empty(broker.ActiveAutoApprove("run-1"));
+        Assert.Equal(ProposalState.AwaitingApproval, broker.Submit(List()).State);
+
+        // Offene ältere Anfrage: ebenfalls ungültig, nicht mehr bestätigbar.
+        var c = broker.Submit(Confirm());
+        var d = broker.Submit(Confirm());
+        Assert.Equal(ProposalState.Invalidated, broker.Get(c.Proposal.ProposalId).State);
+        Assert.Throws<BrokerException>(() => broker.Decide(new UserDecision(c.Proposal.ProposalId, c.ProposalSha256, DecisionKind.Approve)));
+        Assert.Equal(ProposalState.AwaitingApproval, broker.Get(d.Proposal.ProposalId).State);
+        // Anderer Run bleibt unberührt.
+        var other = broker.Submit(Confirm(run: "run-2"));
+        Assert.Equal(ProposalState.AwaitingApproval, broker.Get(d.Proposal.ProposalId).State);
+        Assert.Equal(ProposalState.AwaitingApproval, other.State);
+        var audit = AuditCheck.Check(AuditJournal.ReadVerified(JournalPath));
+        Assert.True(audit.Ok, string.Join("; ", audit.Problems));
+    }
+
+    [Fact, Trait("Pruefung", "autoApprove")]
+    public async Task Audit_erkennt_Freigabe_ueber_die_bestaetigte_Liste_hinaus()
+    {
+        await using (var broker = NewBroker())
+        {
+            await ConfirmAsync(broker);
+        }
+        var entries = AuditJournal.ReadVerified(JournalPath);
+        var forged = entries.Select(e => e.Type == "autoapprove.granted"
+            ? e with { Data = new System.Text.Json.Nodes.JsonObject
+            {
+                ["proposalId"] = e.Data["proposalId"]!.GetValue<string>(),
+                ["runId"] = "run-1",
+                ["tools"] = new System.Text.Json.Nodes.JsonArray("File.List", "File.Read", "Patch.Apply"),
+            } }
+            : e).ToList();
+        Assert.Contains(AuditCheck.Check(forged).Problems, p => p.Contains("weicht von der bestätigten Liste ab", StringComparison.Ordinal));
+    }
+
+    [Fact, Trait("Pruefung", "autoApprove")]
     public async Task Audit_erkennt_gefaelschte_automatische_Freigabe()
     {
         await using (var broker = NewBroker())
