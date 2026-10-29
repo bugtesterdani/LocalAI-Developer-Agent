@@ -8,7 +8,6 @@ import ssl
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
 
 import pytest
 
@@ -279,10 +278,9 @@ def test_proxy_tunnel_mit_firmenzertifikat_und_angezeigter_anfrage(proxy):
     assert proxy.requests[-1][0] == "CONNECT docs.example.com:443 HTTP/1.1"
     assert meta.proxy == f"{LOOPBACK}:{proxy.port}" and meta.address == "93.184.215.14"
     assert meta.request.startswith("CONNECT docs.example.com:443") and "GET /page HTTP/1.1\nHost: docs.example.com" in meta.request
-    issuer_url = meta.tls_issuer if "://" in meta.tls_issuer else f"https://{meta.tls_issuer}"
-    issuer_host = urlparse(issuer_url).hostname
-    assert issuer_host and (issuer_host == "docs.example.com" or issuer_host.endswith(".docs.example.com")), \
-        "Aussteller wird festgehalten (TLS-Aufbruch erkennbar)"
+    # Aussteller als „commonName=…, organizationName=…“ – exakter Vergleich des commonName (kein Teilstring).
+    issuer = dict(part.split("=", 1) for part in meta.tls_issuer.split(", ") if "=" in part)
+    assert issuer.get("commonName") == "docs.example.com", "Aussteller wird festgehalten (TLS-Aufbruch erkennbar)"
 
 
 def test_proxy_ohne_firmenzertifikat_scheitert_mit_hinweis(proxy):
