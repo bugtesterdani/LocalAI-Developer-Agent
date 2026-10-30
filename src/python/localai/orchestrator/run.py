@@ -25,6 +25,7 @@ import re
 import threading
 import time
 import traceback
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,14 +33,28 @@ from localai.contracts import (
     ActivityKind,
     AgentState,
     FolderRight,
+    LimitAction,
+    LimitAnswer,
+    LimitQuestion,
     OrchestratorCommand,
     OrchestratorCommandKind,
 )
 from localai.orchestrator import dag, hardware, prompts
 from localai.orchestrator.activity import ActivityReporter
-from localai.orchestrator.agents import Agent, AgentFailed, Assignment
+from localai.orchestrator.agents import (
+    Agent,
+    AgentFailed,
+    Assignment,
+    LimitDecision,
+    LimitRequest,
+)
 from localai.orchestrator.context import Evidence
-from localai.orchestrator.gateway import Cancelled, GatewayError, OllamaGateway
+from localai.orchestrator.gateway import (
+    Cancelled,
+    CancelToken,
+    GatewayError,
+    OllamaGateway,
+)
 from localai.orchestrator.journal import RunJournal
 from localai.orchestrator.models import (
     ROLES,
@@ -335,6 +350,8 @@ class Orchestrator:
         self._first_goal = True
         self._held_goal: str | None = None  # erstes Ziel, solange ein unterbrochener Run auf „fortsetzen“/„neu“ wartet
         self._discard_requested = False  # „webinhalt verwerfen“ während eines Runs
+        # Offene Rückfragen „Schrittlimit erreicht“: Frage-ID → (Signal, Antwort)
+        self._limit_waits: dict[str, tuple[threading.Event, list[LimitAnswer]]] = {}
         self._discarded_urls: list[str] = []
         self._live: tuple[list[dag.Task], list[str]] | None = None  # laufender Plan (für Journal beim Abbruch)
 
@@ -361,6 +378,16 @@ class Orchestrator:
             self.reporter.state(command.agent, AgentState.Cancelled, "Abbruch durch Nutzer")
         elif command.kind == OrchestratorCommandKind.CancelRun and current is not None:
             current.controls.cancel_run("Run durch Nutzer abgebrochen")
+        elif command.kind == OrchestratorCommandKind.LimitAnswer:
+            try:
+                answer = LimitAnswer.model_validate_json(command.text or "")
+            except ValueError:
+                return
+            with self._lock:
+                waiting = self._limit_waits.get(answer.question_id)
+            if waiting is not None:
+                waiting[1].append(answer)
+                waiting[0].set()
 
     def inbox_loop(self) -> None:
         after = self.inbox_after
@@ -492,7 +519,56 @@ class Orchestrator:
                                  state.clock, self.config.limits, lambda: list(state.notes), self.config.history,
                                  prep.summary.profile if prep.summary else None)
             agents[role].timings = state.timings
+            agents[role].on_limit = functools.partial(self._ask_limit, state)
         return agents
+
+    def _ask_limit(self, state: GoalState, request: LimitRequest, cancel: CancelToken) -> LimitDecision | None:
+        """Schrittlimit erreicht: vollständige Eingabe des nächsten Schritts im Chat-Tab vorlegen und auf die
+        Entscheidung warten (zählt nicht zur aktiven Laufzeit). None = Aufgabe beenden."""
+        ask = getattr(self.client, "limit_ask", None)
+        if ask is None:
+            return None
+        question_id = uuid.uuid4().hex
+        signal: tuple[threading.Event, list[LimitAnswer]] = (threading.Event(), [])
+        with self._lock:
+            self._limit_waits[question_id] = signal
+        role, task_id = request.role, request.task_id
+        try:
+            try:
+                ask(LimitQuestion(question_id=question_id, run_id=self.run_id, agent=role, task_id=task_id,
+                                  title=request.title[:500], steps=request.steps, suggested_steps=request.suggested_steps,
+                                  system=request.system, task=request.task, rest=request.rest))
+            except Exception as err:  # noqa: BLE001 – ohne Rückfrage endet die Aufgabe wie bisher
+                self.reporter.event(role, ActivityKind.Warning, f"Rückfrage zum Schrittlimit nicht möglich: {err}",
+                                    task_id=task_id)
+                return None
+            self.reporter.state(role, AgentState.WaitingUser, f"Schrittlimit ({request.steps}) erreicht – Entscheidung im "
+                                "Chat-Tab", task_id)
+            self.reporter.chat(role, f"{task_id}: {request.steps} Modellschritte erreicht. Im Chat-Tab siehst du die "
+                               "vollständige Eingabe des nächsten Schritts: weitermachen (gern mit angepasster Aufgabe) "
+                               "oder die Aufgabe beenden.")
+            with state.clock.paused():
+                while not signal[0].wait(0.2):
+                    cancel.raise_if_cancelled()
+        finally:
+            with self._lock:
+                self._limit_waits.pop(question_id, None)
+            if not signal[1]:
+                try:
+                    self.client.limit_withdraw(question_id)
+                except Exception:  # noqa: BLE001,S110 – Broker räumt beim Abbruch ohnehin auf
+                    pass
+        answer = signal[1][0]
+        if answer.action != LimitAction.Continue or not answer.extra_steps:
+            self.reporter.chat(role, f"{task_id}: von dir nach {request.steps} Schritten beendet.")
+            return None
+        changed = (answer.system, answer.task, answer.rest) != (request.system, request.task, request.rest)
+        task_changed = (answer.task or "").strip() != request.task.strip()
+        self.reporter.chat(role, f"{task_id}: weiter mit {answer.extra_steps} Schritten"
+                           + (" – Aufgabe angepasst (gilt ab jetzt)" if task_changed else "")
+                           + (" – nächste Eingabe bearbeitet" if changed and not task_changed else "") + ".")
+        self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id} fortgesetzt", task_id)
+        return LimitDecision(int(answer.extra_steps), answer.system or "", answer.task or "", answer.rest or "")
 
     def _history_note(self, prep: Preparation) -> str:
         settings = self.config.history

@@ -469,6 +469,63 @@ Empfänger: {7}</value>
   <data name="Event_autoapprove.granted" xml:space="preserve">
     <value>Automatische Freigabe bestätigt</value>
   </data>
+  <data name="Event_run.limitQuestion" xml:space="preserve">
+    <value>Schrittlimit erreicht</value>
+  </data>
+  <data name="Event_run.limitAnswer" xml:space="preserve">
+    <value>Schrittlimit entschieden</value>
+  </data>
+  <data name="LimitTitle" xml:space="preserve">
+    <value>SCHRITTLIMIT ERREICHT – WIE GEHT ES WEITER?</value>
+  </data>
+  <data name="LimitHeader" xml:space="preserve">
+    <value>{0}, Aufgabe {1} „{2}“: {3} Modellschritte verbraucht. Unten steht die vollständige Eingabe des nächsten Schritts – du kannst sie prüfen und ändern.</value>
+  </data>
+  <data name="LimitExtraSteps" xml:space="preserve">
+    <value>Weitere Schritte (1–200):</value>
+  </data>
+  <data name="LimitStepsInvalid" xml:space="preserve">
+    <value>Bitte eine Zahl von 1 bis 200 eingeben.</value>
+  </data>
+  <data name="LimitSystem" xml:space="preserve">
+    <value>Regeln (Systemnachricht) – Änderung gilt nur für den nächsten Schritt</value>
+  </data>
+  <data name="LimitTask" xml:space="preserve">
+    <value>Aufgabe und Anforderungen – Änderung gilt ab jetzt für alle weiteren Schritte</value>
+  </data>
+  <data name="LimitRest" xml:space="preserve">
+    <value>Verlauf und Evidenz – Änderung gilt nur für den nächsten Schritt</value>
+  </data>
+  <data name="LimitUnchanged" xml:space="preserve">
+    <value>Unverändert.</value>
+  </data>
+  <data name="LimitTaskChanged" xml:space="preserve">
+    <value>Aufgabe geändert – gilt ab dem nächsten Schritt dauerhaft.</value>
+  </data>
+  <data name="LimitInputChanged" xml:space="preserve">
+    <value>Eingabe des nächsten Schritts geändert (nur dieser Schritt).</value>
+  </data>
+  <data name="LimitSize" xml:space="preserve">
+    <value>{0} Zeichen insgesamt</value>
+  </data>
+  <data name="LimitContinue" xml:space="preserve">
+    <value>Weitermachen</value>
+  </data>
+  <data name="LimitStop" xml:space="preserve">
+    <value>Aufgabe beenden</value>
+  </data>
+  <data name="LimitReset" xml:space="preserve">
+    <value>Änderungen verwerfen</value>
+  </data>
+  <data name="LimitMore" xml:space="preserve">
+    <value>+{0} weitere Rückfrage(n) danach</value>
+  </data>
+  <data name="LimitContinued" xml:space="preserve">
+    <value>Der Agent macht weiter.</value>
+  </data>
+  <data name="LimitStopped" xml:space="preserve">
+    <value>Die Aufgabe wurde am Schrittlimit beendet.</value>
+  </data>
   <data name="Event_autoapprove.closed" xml:space="preserve">
     <value>Automatische Freigabe beendet</value>
   </data>

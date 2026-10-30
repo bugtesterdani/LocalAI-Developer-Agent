@@ -10,7 +10,7 @@ import re
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from localai.contracts import ActivityKind, AgentState
@@ -88,6 +88,40 @@ class Assignment:
     max_steps: int | None = None
     # Korrektur: eine Codeänderung ist Pflicht, auch ohne genannte Dateien (sonst gälte die Aufgabe als Analyse).
     require_change: bool = False
+    # Nutzerhinweise, die schon im (vom Nutzer nach dem Schrittlimit bearbeiteten) Aufgabentext stehen.
+    notes_seen: int = 0
+
+
+@dataclass
+class LimitRequest:
+    """Schrittlimit erreicht: Eingabe des nächsten Schritts, aufgeteilt für die Bearbeitung durch den Nutzer."""
+
+    role: str
+    task_id: str
+    title: str
+    steps: int
+    suggested_steps: int
+    system: str
+    task: str
+    rest: str
+
+
+@dataclass
+class LimitDecision:
+    """Weitermachen mit ``extra_steps`` Schritten; system/task/rest = Eingabe des nächsten Schritts (ggf. bearbeitet)."""
+
+    extra_steps: int
+    system: str
+    task: str
+    rest: str
+
+
+def decision_input(decision: LimitDecision) -> tuple[str, str] | None:
+    """Bearbeitete Eingabe für den nächsten Schritt; None = unverändert (normal zusammenbauen)."""
+    if not decision.system and not decision.task:
+        return None
+    user = decision.task.strip() + ("\n\n" + decision.rest.strip() if decision.rest.strip() else "")
+    return decision.system, user
 
 
 @dataclass
@@ -116,6 +150,8 @@ class Agent:
         self.gateway = gateway
         self.gpu = gpu
         self.timings: RunTimings | None = None  # Zeitaufschlüsselung des Runs (vom Orchestrator gesetzt)
+        # Schrittlimit erreicht: Nutzer entscheiden lassen (None = Aufgabe endet wie bisher mit LimitReached).
+        self.on_limit: Callable[[LimitRequest, CancelToken], LimitDecision | None] | None = None
         self.bridge = bridge
         self.reporter = reporter
         self.clock = clock
@@ -135,7 +171,7 @@ class Agent:
 
     def _task_text(self, assignment: Assignment) -> str:
         text = assignment.text
-        notes = self.user_notes()
+        notes = self.user_notes()[assignment.notes_seen:]
         if notes:
             text += "\n\n## Notes from the user (latest last; they refine the goal)\n" + "\n".join(f"- {n}" for n in notes)
         return text
@@ -163,7 +199,16 @@ class Agent:
         denials = 0
         invalid = 0
         self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: {assignment.title}", task_id)
-        for step in range(1, max_steps + 1):
+        step = 0
+        override: tuple[str, str] | None = None  # vom Nutzer bearbeitete Eingabe für genau den nächsten Schritt
+        while True:
+            step += 1
+            if step > max_steps:
+                decision = self._ask_limit(assignment, history, summarize, evidence, max_steps, cancel)
+                if decision is None:
+                    raise LimitReached(f"{max_steps} Modellschritte für Aufgabe {task_id} erreicht")
+                max_steps += decision.extra_steps
+                override = decision_input(decision)
             cancel.raise_if_cancelled()
             if self.clock.exceeded():
                 minutes = self.limits.max_active_minutes
@@ -175,6 +220,12 @@ class Agent:
             task = self._task_text(assignment)
             self._compact(history, summarize, task, task_id)
             parts = assemble(self.system, task, history.lines(), evidence, self.budget, self.chars_per_token)
+            if override is not None:
+                # Genau die vom Nutzer bestätigte Eingabe senden (einmal); danach wieder normal zusammenbauen.
+                parts = replace(parts, system=override[0], user=override[1],
+                                rules_tokens=estimate_tokens(override[0], self.chars_per_token),
+                                task_tokens=estimate_tokens(override[1], self.chars_per_token), evidence_tokens=0)
+                override = None
             # Nicht (vollständig) sichtbare Evidenz: weggelassen oder gekürzt – darauf nie verweisen statt erneut anzufragen.
             dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence} | set(parts.truncated_evidence)
             limit = self._output_limit(parts.prompt_tokens)
@@ -279,7 +330,34 @@ class Agent:
                 if done == "expired":
                     break  # der Nutzer war weg: übrige Aktionen nicht mehr vorschlagen, das Modell entscheidet neu
             self.reporter.state(role, AgentState.Generating, f"Aufgabe {task_id}: weiter nach Schritt {step}", task_id)
-        raise LimitReached(f"{max_steps} Modellschritte für Aufgabe {task_id} erreicht")
+
+    def _ask_limit(self, assignment: Assignment, history: StepHistory, summarize: Callable[[str, list[str]], str],
+                   evidence: list[Evidence], steps: int, cancel: CancelToken) -> LimitDecision | None:
+        """Schrittlimit: die Eingabe des nächsten Schritts vorlegen. Eine geänderte Aufgabe gilt für alle weiteren
+        Schritte; Regeln, Verlauf und Evidenz nur für den nächsten."""
+        if self.on_limit is None:
+            return None
+        task = self._task_text(assignment)
+        self._compact(history, summarize, task, assignment.task_id)
+        parts = assemble(self.system, task, history.lines(), evidence, self.budget, self.chars_per_token)
+        shown_task = task_text(task, task_budget(self.system, self.budget, self.chars_per_token), self.chars_per_token)
+        rest = parts.user[len(shown_task):].lstrip("\n") if parts.user.startswith(shown_task) else parts.user
+        base = assignment.max_steps or self.limits.steps_for(self.role)
+        request = LimitRequest(self.role, assignment.task_id, assignment.title, steps, max(5, min(200, base // 2)),
+                               parts.system, shown_task, rest)
+        decision = self.on_limit(request, cancel)
+        if decision is None:
+            return None
+        notes = []
+        if decision.task.strip() != shown_task.strip():
+            assignment.text = decision.task.strip()
+            assignment.notes_seen = len(self.user_notes())
+            notes.append("the user revised your task (see the task section); follow the revised version")
+        history.orchestrator(steps, f"step limit reached; the user allowed {decision.extra_steps} more steps"
+                             + (" and " + notes[0] if notes else "") + ". Work towards finishing.")
+        if (decision.system, decision.task, decision.rest) == (parts.system, shown_task, rest):
+            return replace(decision, system="", task="", rest="")  # unverändert: normal zusammenbauen
+        return decision
 
     def _compact(self, history: StepHistory, summarize: Callable[[str, list[str]], str], task: str, task_id: str) -> None:
         # Platz für eigene Notizen: was vom Anteil für Aufgabe und Verlauf nach Aufgabentext, Rückmeldungen des

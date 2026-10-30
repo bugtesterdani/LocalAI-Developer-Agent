@@ -1288,7 +1288,8 @@
       "enum": [
         "Chat",
         "CancelAgent",
-        "CancelRun"
+        "CancelRun",
+        "LimitAnswer"
       ]
     },
     "OrchestratorCommand": {
@@ -1316,6 +1317,93 @@
         "seq",
         "at",
         "kind"
+      ]
+    },
+    "LimitQuestion": {
+      "type": "object",
+      "description": "Rückfrage des Orchestrators: ein Agent hat sein Schrittlimit erreicht. Enthält die vollständige Eingabe des nächsten Schritts (Regeln, Aufgabe, Verlauf/Evidenz) zum Prüfen und Bearbeiten.",
+      "properties": {
+        "questionId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "integer"
+        },
+        "suggestedSteps": {
+          "type": "integer"
+        },
+        "system": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "rest": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "questionId",
+        "runId",
+        "agent",
+        "taskId",
+        "title",
+        "steps",
+        "suggestedSteps",
+        "system",
+        "task",
+        "rest"
+      ]
+    },
+    "LimitAction": {
+      "type": "string",
+      "enum": [
+        "Continue",
+        "Stop"
+      ]
+    },
+    "LimitAnswer": {
+      "type": "object",
+      "description": "Antwort auf eine LimitQuestion. Bei Continue: system/task/rest = (bearbeitete) Eingabe des nächsten Schritts; die Aufgabe gilt danach für alle weiteren Schritte.",
+      "properties": {
+        "questionId": {
+          "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/LimitAction"
+        },
+        "extraSteps": {
+          "type": "integer"
+        },
+        "system": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "rest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "questionId",
+        "action"
       ]
     },
     "TestCaseFailure": {

@@ -270,7 +270,7 @@ diese Hardware und diesen Modell-Digest **kalibriert** ist (`requireCalibration:
 
 | Feld | Standard | Bedeutung |
 |---|---|---|
-| `maxStepsPerTask` | `20` | Modellschritte je Aufgabe |
+| `maxStepsPerTask` | `20` | Modellschritte je Aufgabe; danach fragt der Orchestrator, ob es weitergeht (siehe [Bedienung](bedienung.md#schrittlimit-erreicht)) |
 | `maxStepsPerRole` | `{}` | Schritte je Rolle, überschreibt `maxStepsPerTask` (z. B. `{"Coder": 25}`) |
 | `maxPlanAttempts` | `2` | Versuche für einen gültigen Plan |
 | `maxPatchRetries` | `3` | Korrekturen, wenn ein Patch nicht passt |

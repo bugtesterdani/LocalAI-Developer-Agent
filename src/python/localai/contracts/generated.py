@@ -488,6 +488,7 @@ class OrchestratorCommandKind(str, Enum):
     Chat = "Chat"
     CancelAgent = "CancelAgent"
     CancelRun = "CancelRun"
+    LimitAnswer = "LimitAnswer"
 
 
 class OrchestratorCommand(Contract):
@@ -498,6 +499,38 @@ class OrchestratorCommand(Contract):
     kind: OrchestratorCommandKind = Field(alias="kind")
     agent: str | None = Field(default=None, alias="agent")
     text: str | None = Field(default=None, alias="text")
+
+
+class LimitQuestion(Contract):
+    """Rückfrage des Orchestrators: ein Agent hat sein Schrittlimit erreicht. Enthält die vollständige Eingabe des nächsten Schritts (Regeln, Aufgabe, Verlauf/Evidenz) zum Prüfen und Bearbeiten."""
+
+    question_id: str = Field(alias="questionId")
+    run_id: str = Field(alias="runId")
+    agent: str = Field(alias="agent")
+    task_id: str = Field(alias="taskId")
+    title: str = Field(alias="title")
+    steps: StrictInt = Field(alias="steps")
+    suggested_steps: StrictInt = Field(alias="suggestedSteps")
+    system: str = Field(alias="system")
+    task: str = Field(alias="task")
+    rest: str = Field(alias="rest")
+    created_at: str | None = Field(default=None, alias="createdAt")
+
+
+class LimitAction(str, Enum):
+    Continue = "Continue"
+    Stop = "Stop"
+
+
+class LimitAnswer(Contract):
+    """Antwort auf eine LimitQuestion. Bei Continue: system/task/rest = (bearbeitete) Eingabe des nächsten Schritts; die Aufgabe gilt danach für alle weiteren Schritte."""
+
+    question_id: str = Field(alias="questionId")
+    action: LimitAction = Field(alias="action")
+    extra_steps: StrictInt | None = Field(default=None, alias="extraSteps")
+    system: str | None = Field(default=None, alias="system")
+    task: str | None = Field(default=None, alias="task")
+    rest: str | None = Field(default=None, alias="rest")
 
 
 class TestCaseFailure(Contract):

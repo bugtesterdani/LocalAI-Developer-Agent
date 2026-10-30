@@ -183,6 +183,11 @@ public sealed class BrokerConnection : IBrokerUiApi, IAsyncDisposable
         ContractJson.Deserialize<List<BrokerEvent>>(await CallAsync(M.WaitEvents,
             new Dictionary<string, long> { ["afterSeq"] = afterSeq, ["timeoutMs"] = timeoutMs }, ct).ConfigureAwait(false));
 
+    public async Task<IReadOnlyList<LimitQuestion>> LimitPendingAsync(CancellationToken ct) =>
+        ContractJson.Deserialize<List<LimitQuestion>>(await CallAsync(M.LimitPending, null, ct).ConfigureAwait(false));
+
+    public Task LimitAnswerAsync(LimitAnswer answer, CancellationToken ct) => CallAsync(M.LimitAnswer, answer, ct);
+
     public Task EmergencyStopAsync(CancellationToken ct) => CallAsync(M.EmergencyStop, null, ct);
 
     public Task ReleaseAsync(CancellationToken ct) => CallAsync(M.Release, null, ct);

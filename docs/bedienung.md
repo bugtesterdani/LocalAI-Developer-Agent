@@ -66,6 +66,28 @@ Dazu kommen Hinweise, wo es sich zu drehen lohnt: häufige Modellwechsel, verdä
 viele Zusammenfassungen, lange Prompts, viel Warten auf Freigaben. Jeder Run wird außerdem als eine Zeile in
 `%LOCALAPPDATA%\LocalAi\broker\zeiten.jsonl` gespeichert, zum Vergleichen verschiedener Modell-Einstellungen.
 
+### Schrittlimit erreicht
+
+Braucht ein Agent alle Modellschritte einer Aufgabe (`maxStepsPerTask` bzw. `maxStepsPerRole`), endet die Aufgabe nicht
+mehr sofort. Der Agent wartet („Schrittlimit erreicht – Entscheidung im Chat-Tab“), und oben im Chat-Tab erscheint ein
+gelber Kasten mit der **vollständigen Eingabe des nächsten Schritts**:
+
+| Feld | Inhalt | Eine Änderung gilt … |
+|---|---|---|
+| Aufgabe und Anforderungen | Aufgabentext samt deinen Hinweisen | ab jetzt für **alle** weiteren Schritte |
+| Verlauf und Evidenz (aufklappen) | bisherige Schritte, Rückmeldungen, gelesene Dateien | nur für den nächsten Schritt |
+| Regeln (aufklappen) | Systemnachricht der Rolle | nur für den nächsten Schritt |
+
+- **Weitermachen:** Der Agent bekommt die angegebene Zahl weiterer Schritte (Vorschlag: die Hälfte des Limits, 1–200).
+  Der nächste Schritt sendet genau den angezeigten (ggf. bearbeiteten) Text an das Modell. Danach baut der
+  Orchestrator die Eingabe wieder selbst zusammen, mit deiner geänderten Aufgabe. Das Modell erfährt, dass du
+  verlängert bzw. die Aufgabe angepasst hast.
+- **Aufgabe beenden:** wie bisher, die Aufgabe endet am Limit.
+- **Änderungen verwerfen:** stellt den angezeigten Text wieder her.
+
+Die Wartezeit zählt nicht zur aktiven Laufzeit. Abbruch des Agenten oder des Runs zieht die Rückfrage zurück. Warten
+mehrere Agenten, steht unter dem Kasten „+N weitere Rückfrage(n)“; sie kommen der Reihe nach.
+
 ## Freigabekarten
 
 Jede Karte zeigt: Rolle, Werkzeug, Zweck, exakte Parameter, Ziele, Snapshot, Sandbox, Gültigkeit (5 Minuten),
