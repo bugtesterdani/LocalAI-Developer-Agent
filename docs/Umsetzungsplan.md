@@ -264,6 +264,13 @@ ist gegenüber Modell, Freigaben und Sandbox vernachlässigbar), wird gemessen, 
 Zeiten je Antwort (laden, Prompt, Ausgabe) je Modell und Rolle, Warten auf den GPU-Slot, Warten auf Freigaben und
 Ausführung je Werkzeugart. Am Ende jedes Runs im Chat mit Hinweisen; je Run eine Zeile in `zeiten.jsonl`.
 
+**Rückfrage beim Schrittlimit (Stand 30.10.2026):** Erreicht ein Agent sein Schrittlimit, legt der Orchestrator die
+vollständige Eingabe des nächsten Schritts (Regeln, Aufgabe, Verlauf/Evidenz) über den Broker der Oberfläche vor
+(`limit.ask`/`limit.pending`/`limit.answer`, Auftrag `LimitAnswer`). Der Nutzer macht mit N weiteren Schritten weiter
+oder beendet die Aufgabe. Der bearbeitete Text geht genau so beim nächsten Schritt raus; eine geänderte Aufgabe gilt für
+alle weiteren Schritte. Kein Werkzeug, keine Freigabe – nur die Oberfläche darf antworten, nur der laufende
+Orchestrator fragen.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

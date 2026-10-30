@@ -43,6 +43,11 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
         [M.OrchestratorStop] = [CallerRole.Ui],
         [M.SandboxRebuild] = [CallerRole.Ui],
         [M.SandboxContinue] = [CallerRole.Ui],
+        [M.LimitAsk] = [CallerRole.Orchestrator],
+        [M.LimitWithdraw] = [CallerRole.Orchestrator],
+        [M.LimitPending] = [CallerRole.Ui],
+        // Nur die Oberfläche entscheidet, ob und wie ein Agent nach dem Schrittlimit weiterarbeitet.
+        [M.LimitAnswer] = [CallerRole.Ui],
         // Nur die Oberfläche sieht den Text eines Webabrufs vor der Inhaltsfreigabe (SEC-09).
         [M.WebCapture] = [CallerRole.Ui],
         [M.SystemManifest] = [CallerRole.Ui],
@@ -64,6 +69,9 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
 
     /// <summary>Registrierte Toolchains (administrative Aktionen nur über den UI-Token).</summary>
     public LocalAi.Sandbox.ToolchainRegistry? Toolchains { get; init; }
+
+    /// <summary>Offene Rückfragen „Schrittlimit erreicht“.</summary>
+    public LimitQuestionStore LimitQuestions { get; init; } = new(SystemClock.Instance);
 
     /// <summary>Betriebssystem-Debugging des Projekts (M9); null = nicht eingerichtet.</summary>
     public OsDebugSettings? OsDebug { get; init; }
@@ -422,6 +430,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                     throw new BrokerException(BrokerErrorCodes.Unprocessable, $"Unbekannter Agent: {agent}");
                 }
                 var cancelled = Orchestrator.RunId is { } run ? broker.CancelProposals(run, agentRole, $"Abbruch von {agentRole} durch Nutzer") : 0;
+                LimitQuestions.ClearAgent(Orchestrator.RunId, agentRole.ToString());
                 Inbox.Post(OrchestratorCommandKind.CancelAgent, agent: agentRole.ToString());
                 broker.PublishInfo("run.agentCancelled", $"{agentRole} abgebrochen ({cancelled} Vorschläge)");
                 return new JsonObject { ["cancelledProposals"] = cancelled };
@@ -429,6 +438,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             case M.RunCancel:
             {
                 var cancelled = Orchestrator.RunId is { } run ? broker.CancelProposals(run, null, "Run durch Nutzer abgebrochen") : 0;
+                LimitQuestions.ClearRun(Orchestrator.RunId);
                 Inbox.Post(OrchestratorCommandKind.CancelRun);
                 broker.PublishInfo("run.cancelled", $"Run abgebrochen ({cancelled} Vorschläge)");
                 return new JsonObject { ["cancelledProposals"] = cancelled };
@@ -454,6 +464,49 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                 var after = p.TryGetProperty("afterSeq", out var a) ? a.GetInt64() : 0;
                 var timeoutMs = p.TryGetProperty("timeoutMs", out var t) ? Math.Clamp(t.GetInt32(), 0, 30_000) : 10_000;
                 return Node(await Inbox.WaitAsync(after, TimeSpan.FromMilliseconds(timeoutMs), cancellationToken).ConfigureAwait(false));
+            }
+            case M.LimitAsk:
+            {
+                var question = ContractJson.Deserialize<LimitQuestion>(p);
+                if (Orchestrator.RunId is not { } current || question.RunId != current)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Conflict, "Kein laufender Run mit dieser Kennung");
+                }
+                var stored = LimitQuestions.Add(question);
+                broker.PublishInfo("run.limitQuestion", $"{question.Agent} {question.TaskId}: Schrittlimit ({question.Steps}) erreicht – Entscheidung im Chat");
+                return new JsonObject { ["questionId"] = stored.QuestionId };
+            }
+            case M.LimitWithdraw:
+                return new JsonObject { ["withdrawn"] = LimitQuestions.Withdraw(RequireString(p, "questionId")) };
+            case M.LimitPending:
+            {
+                // Nur Fragen des laufenden Orchestrators; ältere (beendeter Prozess) verfallen.
+                var run = Orchestrator.RunId;
+                foreach (var stale in LimitQuestions.Pending().Where(q => q.RunId != run))
+                {
+                    LimitQuestions.Withdraw(stale.QuestionId);
+                }
+                return Node(LimitQuestions.Pending());
+            }
+            case M.LimitAnswer:
+            {
+                var answer = ContractJson.Deserialize<LimitAnswer>(p);
+                var (question, warnings) = LimitQuestions.Answer(answer);
+                if (Orchestrator.RunId != question.RunId)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Gone, "Der Run dieser Rückfrage läuft nicht mehr");
+                }
+                Inbox.Post(OrchestratorCommandKind.LimitAnswer, agent: question.Agent,
+                    text: JsonSerializer.Serialize(answer, ContractJson.Options));
+                broker.PublishInfo("run.limitAnswer", answer.Action == LimitAction.Continue
+                    ? $"{question.Agent} {question.TaskId}: weiter mit {answer.ExtraSteps} Schritten"
+                      + (warnings.Count > 0 ? " – trotz Hinweis: " + string.Join(" ", warnings) : "")
+                    : $"{question.Agent} {question.TaskId}: Aufgabe beendet");
+                return new JsonObject
+                {
+                    ["accepted"] = true,
+                    ["warnings"] = new JsonArray(warnings.Select(w => (JsonNode?)w).ToArray()),
+                };
             }
             case M.SandboxRebuild:
             {

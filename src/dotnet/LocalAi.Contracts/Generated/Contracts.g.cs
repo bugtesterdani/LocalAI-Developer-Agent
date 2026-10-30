@@ -456,6 +456,7 @@ public enum OrchestratorCommandKind
     Chat,
     CancelAgent,
     CancelRun,
+    LimitAnswer,
 }
 
 /// <summary>Auftrag der Oberfläche an den Orchestrator (über den Broker).</summary>
@@ -465,6 +466,39 @@ public sealed partial record OrchestratorCommand(
     [property: JsonPropertyName("kind")] OrchestratorCommandKind Kind,
     [property: JsonPropertyName("agent"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Agent = null,
     [property: JsonPropertyName("text"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text = null);
+
+/// <summary>Rückfrage des Orchestrators: ein Agent hat sein Schrittlimit erreicht. Enthält die vollständige Eingabe des nächsten Schritts (Regeln, Aufgabe, Verlauf/Evidenz) zum Prüfen und Bearbeiten.</summary>
+public sealed partial record LimitQuestion(
+    [property: JsonPropertyName("questionId")] string QuestionId,
+    [property: JsonPropertyName("runId")] string RunId,
+    [property: JsonPropertyName("agent")] string Agent,
+    [property: JsonPropertyName("taskId")] string TaskId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("steps")] long Steps,
+    [property: JsonPropertyName("suggestedSteps")] long SuggestedSteps,
+    [property: JsonPropertyName("system")] string System,
+    [property: JsonPropertyName("task")] string Task,
+    [property: JsonPropertyName("rest")] string Rest,
+    [property: JsonPropertyName("maxInputTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? MaxInputTokens = null,
+    [property: JsonPropertyName("charsPerToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? CharsPerToken = null,
+    [property: JsonPropertyName("notice"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Notice = null,
+    [property: JsonPropertyName("createdAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CreatedAt = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter<LimitAction>))]
+public enum LimitAction
+{
+    Continue,
+    Stop,
+}
+
+/// <summary>Antwort auf eine LimitQuestion. Bei Continue: system/task/rest = (bearbeitete) Eingabe des nächsten Schritts; die Aufgabe gilt danach für alle weiteren Schritte.</summary>
+public sealed partial record LimitAnswer(
+    [property: JsonPropertyName("questionId")] string QuestionId,
+    [property: JsonPropertyName("action")] LimitAction Action,
+    [property: JsonPropertyName("extraSteps"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExtraSteps = null,
+    [property: JsonPropertyName("system"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? System = null,
+    [property: JsonPropertyName("task"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Task = null,
+    [property: JsonPropertyName("rest"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Rest = null);
 
 /// <summary>Ein fehlgeschlagener Testfall (aus Trx/JUnit, untrusted).</summary>
 public sealed partial record TestCaseFailure(

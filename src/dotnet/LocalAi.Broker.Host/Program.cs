@@ -129,6 +129,7 @@ var server = new PipeServer(pipeName, tokens, broker, testAdapter, children, opt
 {
     Activity = activity,
     Inbox = inbox,
+    LimitQuestions = new LimitQuestionStore(clock),
     Orchestrator = orchestrator,
     SandboxStatus = () => vm?.StatusText,
     RebuildSandbox = vm is null ? null : vm.RebuildAsync,

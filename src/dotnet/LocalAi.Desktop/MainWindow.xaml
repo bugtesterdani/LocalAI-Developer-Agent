@@ -184,6 +184,50 @@
                                 </TextBox.InputBindings>
                             </TextBox>
                         </DockPanel>
+                        <!-- Schrittlimit erreicht: vollständige Eingabe des nächsten Schritts, bearbeitbar -->
+                        <Border DockPanel.Dock="Top" Background="#FFFBEB" BorderBrush="#B45309" BorderThickness="2" Padding="8" Margin="0,0,0,8"
+                                Visibility="{Binding HasLimitQuestion, Converter={StaticResource BoolToVis}}">
+                            <StackPanel DataContext="{Binding LimitQuestion}">
+                                <TextBlock Text="{loc:T LimitTitle}" FontWeight="Bold" Foreground="#78350F" />
+                                <TextBlock Text="{Binding HeaderText}" TextWrapping="Wrap" Margin="0,4,0,6" />
+                                <TextBlock Text="{Binding NoticeText}" TextWrapping="Wrap" Foreground="#B91C1C" FontWeight="Bold" Margin="0,0,0,6"
+                                           Visibility="{Binding HasNotice, Converter={StaticResource BoolToVis}}" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{loc:T LimitExtraSteps}" VerticalAlignment="Center" />
+                                    <TextBox Text="{Binding ExtraStepsText, UpdateSourceTrigger=PropertyChanged}" Width="70" Margin="6,0"
+                                             AutomationProperties.Name="{loc:T LimitExtraSteps}" />
+                                    <TextBlock Text="{Binding ExtraStepsError}" Foreground="#B91C1C" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Text="{loc:T LimitTask}" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding TaskText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                                         MinHeight="60" MaxHeight="200" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"
+                                         AutomationProperties.Name="{loc:T LimitTask}" />
+                                <Expander Header="{loc:T LimitRest}" Margin="0,6,0,0">
+                                    <TextBox Text="{Binding RestText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                                             MaxHeight="300" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"
+                                             AutomationProperties.Name="{loc:T LimitRest}" />
+                                </Expander>
+                                <Expander Header="{loc:T LimitSystem}" Margin="0,4,0,0">
+                                    <TextBox Text="{Binding SystemText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                                             MaxHeight="300" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"
+                                             AutomationProperties.Name="{loc:T LimitSystem}" />
+                                </Expander>
+                                <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#4B5563">
+                                    <Run Text="{Binding ChangeText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding SizeText, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock Text="{Binding CheckErrorsText, Mode=OneWay}" TextWrapping="Wrap" Foreground="#B91C1C" FontWeight="Bold"
+                                           Margin="0,4,0,0" Visibility="{Binding HasCheckErrors, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="{Binding CheckWarningsText, Mode=OneWay}" TextWrapping="Wrap" Foreground="#92400E"
+                                           Margin="0,4,0,0" Visibility="{Binding HasCheckWarnings, Converter={StaticResource BoolToVis}}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="{loc:T LimitContinue}" Command="{Binding ContinueCommand}" Padding="14,4" FontWeight="SemiBold" />
+                                    <Button Content="{loc:T LimitStop}" Command="{Binding StopCommand}" Padding="14,4" Margin="8,0,0,0" />
+                                    <Button Content="{loc:T LimitReset}" Command="{Binding ResetCommand}" Padding="10,4" Margin="8,0,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding LimitMoreText}" Foreground="#78350F" Margin="0,0,0,6"
+                                   Visibility="{Binding LimitMoreText, Converter={StaticResource EmptyToCollapsed}}" />
                         <TextBlock DockPanel.Dock="Top" Text="{loc:T ChatEmpty}" TextWrapping="Wrap" Foreground="#4B5563" Margin="0,0,0,8"
                                    Visibility="{Binding HasChat, Converter={StaticResource InverseBoolToVis}}" />
                         <ListBox ItemsSource="{Binding Chat}" loc:AutoScroll.ToEnd="True"

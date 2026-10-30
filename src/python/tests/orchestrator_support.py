@@ -79,6 +79,9 @@ class FakeBroker:
     snapshot_message: str = ""  # Umfang laut Broker, z. B. „0 Dateien, 0 Bytes, 0 übersprungen“
     auto_approve: list[str] = field(default_factory=list)  # autoApprove der Projektdatei
     auto_active: set[str] = field(default_factory=set)  # nach bestätigtem Run.AutoApprove
+    ask_limits: bool = False  # Rückfrage beim Schrittlimit annehmen (sonst wie ein Broker ohne diese Methode)
+    limit_questions: list = field(default_factory=list)
+    limit_withdrawn: list[str] = field(default_factory=list)
     _results: dict = field(default_factory=dict)
 
     # -------------------------------------------------- Orchestrator-Methoden
@@ -91,6 +94,18 @@ class FakeBroker:
     def toolchains_available(self):
         return {"enabled": bool(self.toolchains), "toolchains": self.toolchains, "osDebug": self.os_debug,
                 "autoApprove": list(self.auto_approve)}
+
+    def limit_ask(self, question):
+        if not self.ask_limits:
+            raise RuntimeError("limit.ask nicht verfügbar")
+        with self.lock:
+            self.limit_questions.append(question)
+        return question.question_id
+
+    def limit_withdraw(self, question_id: str) -> bool:
+        with self.lock:
+            self.limit_withdrawn.append(question_id)
+        return True
 
     def submit(self, request: ProposalRequest):
         with self.lock:

@@ -44,6 +44,12 @@ public interface IBrokerUiApi
 
     /// <summary>Sicherung (Journal, Registrierungen, Kalibrierung, Konfiguration) erstellen.</summary>
     Task<JsonElement> BackupCreateAsync(CancellationToken ct) => Task.FromResult(default(JsonElement));
+
+    /// <summary>Offene Rückfragen „Schrittlimit erreicht“.</summary>
+    Task<IReadOnlyList<LimitQuestion>> LimitPendingAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<LimitQuestion>>([]);
+
+    /// <summary>Antwort auf eine Rückfrage „Schrittlimit erreicht“.</summary>
+    Task LimitAnswerAsync(LimitAnswer answer, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed record EventLine(string Time, string Text)
@@ -929,6 +935,63 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public ObservableCollection<AgentViewModel> Agents { get; }
     public ObservableCollection<ApprovalCardViewModel> Approvals { get; } = [];
+
+    // ------------------------------------------------------------------ Schrittlimit erreicht
+
+    private LimitQuestionViewModel? _limitQuestion;
+    private int _limitQuestionCount;
+
+    /// <summary>Älteste offene Rückfrage „Schrittlimit erreicht“ (im Chat-Tab oben); null = keine.</summary>
+    public LimitQuestionViewModel? LimitQuestion
+    {
+        get => _limitQuestion;
+        private set
+        {
+            if (Set(ref _limitQuestion, value))
+            {
+                OnPropertyChanged(nameof(HasLimitQuestion));
+            }
+        }
+    }
+
+    public bool HasLimitQuestion => _limitQuestion is not null;
+
+    /// <summary>Weitere wartende Rückfragen (andere Agenten), z. B. „+1 weitere“.</summary>
+    public string LimitMoreText => _limitQuestionCount > 1 ? UiText.Format("LimitMore", _limitQuestionCount - 1) : string.Empty;
+
+    public async Task RefreshLimitQuestionsAsync()
+    {
+        IReadOnlyList<LimitQuestion> open = [];
+        await GuardAsync(async () => open = await _api.LimitPendingAsync(_shutdown.Token).ConfigureAwait(false)).ConfigureAwait(false);
+        Post(() => SyncLimitQuestions(open));
+    }
+
+    internal void SyncLimitQuestions(IReadOnlyList<LimitQuestion> open)
+    {
+        _limitQuestionCount = open.Count;
+        OnPropertyChanged(nameof(LimitMoreText));
+        // Eine angefangene Bearbeitung bleibt erhalten, solange die Frage offen ist.
+        if (_limitQuestion is not null && open.Any(q => q.QuestionId == _limitQuestion.QuestionId))
+        {
+            return;
+        }
+        var next = open.OrderBy(q => q.CreatedAt, StringComparer.Ordinal).FirstOrDefault();
+        LimitQuestion = next is null ? null : new LimitQuestionViewModel(next, AnswerLimitAsync);
+        if (next is not null)
+        {
+            SelectedTab = 0;
+        }
+    }
+
+    private async Task AnswerLimitAsync(LimitAnswer answer)
+    {
+        await GuardAsync(async () =>
+        {
+            await _api.LimitAnswerAsync(answer, _shutdown.Token).ConfigureAwait(false);
+            Post(() => InfoText = UiText.Get(answer.Action == LimitAction.Continue ? "LimitContinued" : "LimitStopped"));
+        }).ConfigureAwait(false);
+        await RefreshLimitQuestionsAsync().ConfigureAwait(false);
+    }
     public ObservableCollection<EventLine> EventLog { get; } = [];
 
     public RelayCommand StartFakeRunCommand { get; }
@@ -1045,6 +1108,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
         }).ConfigureAwait(false);
         await RefreshPendingAsync().ConfigureAwait(false);
+        await RefreshLimitQuestionsAsync().ConfigureAwait(false);
         _eventLoop = Task.Run(EventLoopAsync);
         if (_activityApi is not null)
         {
@@ -1139,6 +1203,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (events.Any(e => e.Type.StartsWith("proposal.", StringComparison.Ordinal) || e.Type.StartsWith("emergency.", StringComparison.Ordinal)))
             {
                 await RefreshPendingAsync().ConfigureAwait(false);
+            }
+            if (events.Any(e => e.Type is "run.limitQuestion" or "run.limitAnswer" or "run.cancelled" or "run.agentCancelled"
+                                || e.Type.StartsWith("orchestrator.", StringComparison.Ordinal)))
+            {
+                await RefreshLimitQuestionsAsync().ConfigureAwait(false);
             }
         }
     }

@@ -42,6 +42,12 @@ public static class PipeProtocol
         public const string SandboxRebuild = "sandbox.rebuild";
         public const string SandboxContinue = "sandbox.continue";
 
+        /// <summary>Schrittlimit erreicht: Orchestrator legt die Eingabe des nächsten Schritts zur Entscheidung vor.</summary>
+        public const string LimitAsk = "limit.ask";
+        public const string LimitWithdraw = "limit.withdraw";
+        public const string LimitPending = "limit.pending";
+        public const string LimitAnswer = "limit.answer";
+
         /// <summary>Sanitisierter Text eines Webabrufs für die Inhaltsfreigabe – nur die Oberfläche (SEC-09).</summary>
         public const string WebCapture = "web.capture";
         public const string SystemManifest = "system.manifest";
