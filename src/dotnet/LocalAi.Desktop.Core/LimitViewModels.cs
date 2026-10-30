@@ -82,9 +82,30 @@ public sealed class LimitQuestionViewModel : ObservableObject
         ? UiText.Get("LimitUnchanged")
         : UiText.Get(IsTaskChanged ? "LimitTaskChanged" : "LimitInputChanged");
 
-    public string SizeText => UiText.Format("LimitSize", _systemText.Length + _taskText.Length + _restText.Length);
+    /// <summary>Hinweis des Orchestrators zur vorigen Antwort (z. B. Eingabe zu lang).</summary>
+    public string NoticeText => InertText.Clean(Question.Notice ?? string.Empty, 2_000);
 
-    public bool CanContinue => !_busy && ExtraSteps is not null && !string.IsNullOrWhiteSpace(_taskText);
+    public bool HasNotice => !string.IsNullOrWhiteSpace(Question.Notice);
+
+    /// <summary>Geschätzte Token der Eingabe – wie der Orchestrator rechnet (Zeichen je Token, +8 je Nachricht).</summary>
+    public int EstimatedTokens
+    {
+        get
+        {
+            var cpt = Question.CharsPerToken is > 0 and var c ? c : 3.0;
+            var user = _taskText.Trim().Length + (_restText.Trim().Length > 0 ? _restText.Trim().Length + 2 : 0);
+            return (int)(_systemText.Length / cpt) + 8 + (int)(user / cpt) + 8;
+        }
+    }
+
+    /// <summary>Passt die Eingabe nicht in den Kontext des Modells, ist Weitermachen gesperrt.</summary>
+    public bool IsTooLong => Question.MaxInputTokens is > 0 and var max && EstimatedTokens > max;
+
+    public string SizeText => Question.MaxInputTokens is > 0 and var max
+        ? UiText.Format(IsTooLong ? "LimitSizeTooLong" : "LimitSizeOf", EstimatedTokens, max)
+        : UiText.Format("LimitSize", _systemText.Length + _taskText.Length + _restText.Length);
+
+    public bool CanContinue => !_busy && ExtraSteps is not null && !string.IsNullOrWhiteSpace(_taskText) && !IsTooLong;
 
     public RelayCommand ContinueCommand { get; }
     public RelayCommand StopCommand { get; }
@@ -125,6 +146,8 @@ public sealed class LimitQuestionViewModel : ObservableObject
             OnPropertyChanged(nameof(IsChanged));
             OnPropertyChanged(nameof(ChangeText));
             OnPropertyChanged(nameof(SizeText));
+            OnPropertyChanged(nameof(EstimatedTokens));
+            OnPropertyChanged(nameof(IsTooLong));
             Refresh();
         }
     }

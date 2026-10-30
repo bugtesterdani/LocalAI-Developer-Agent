@@ -174,6 +174,8 @@ TEXTS = {
     "LimitTaskChanged": "Aufgabe geändert – gilt ab dem nächsten Schritt dauerhaft.",
     "LimitInputChanged": "Eingabe des nächsten Schritts geändert (nur dieser Schritt).",
     "LimitSize": "{0} Zeichen insgesamt",
+    "LimitSizeOf": "~{0} von höchstens ~{1} Token Eingabe",
+    "LimitSizeTooLong": "ZU LANG: ~{0} Token, das Modell fasst höchstens ~{1} Token Eingabe – bitte kürzen (z. B. Evidenz)",
     "LimitContinue": "Weitermachen",
     "LimitStop": "Aufgabe beenden",
     "LimitReset": "Änderungen verwerfen",

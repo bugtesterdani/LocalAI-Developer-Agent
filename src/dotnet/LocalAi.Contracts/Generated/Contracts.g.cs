@@ -479,6 +479,9 @@ public sealed partial record LimitQuestion(
     [property: JsonPropertyName("system")] string System,
     [property: JsonPropertyName("task")] string Task,
     [property: JsonPropertyName("rest")] string Rest,
+    [property: JsonPropertyName("maxInputTokens"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? MaxInputTokens = null,
+    [property: JsonPropertyName("charsPerToken"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? CharsPerToken = null,
+    [property: JsonPropertyName("notice"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Notice = null,
     [property: JsonPropertyName("createdAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CreatedAt = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter<LimitAction>))]

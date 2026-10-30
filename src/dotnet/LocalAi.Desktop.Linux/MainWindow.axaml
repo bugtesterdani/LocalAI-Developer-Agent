@@ -180,6 +180,8 @@
                             <StackPanel DataContext="{Binding LimitQuestion}">
                                 <TextBlock Text="{loc:T LimitTitle}" FontWeight="Bold" Foreground="#78350F" />
                                 <TextBlock Text="{Binding HeaderText}" TextWrapping="Wrap" Margin="0,4,0,6" />
+                                <TextBlock Text="{Binding NoticeText}" TextWrapping="Wrap" Foreground="#B91C1C" FontWeight="Bold" Margin="0,0,0,6"
+                                           IsVisible="{Binding HasNotice}" />
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="{loc:T LimitExtraSteps}" VerticalAlignment="Center" />
                                     <TextBox Text="{Binding ExtraStepsText}" Width="70" AutomationProperties.Name="{loc:T LimitExtraSteps}" />

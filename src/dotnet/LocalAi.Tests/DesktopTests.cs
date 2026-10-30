@@ -225,7 +225,7 @@ public sealed partial class DesktopTests
     }
 
     private static LimitQuestion Limit(string id, string created = "2026-10-30T10:00:00Z") =>
-        new(id, "run", "Coder", "T1", "Funktion ergänzen", 20, 10, "RULES", "TASK", "REST", created);
+        new(id, "run", "Coder", "T1", "Funktion ergänzen", 20, 10, "RULES", "TASK", "REST", CreatedAt: created);
 
     [Fact, Trait("Pruefung", "Schrittlimit")]
     public async Task Schrittlimit_Rueckfrage_zeigt_Eingabe_und_sendet_Bearbeitung()
@@ -272,6 +272,22 @@ public sealed partial class DesktopTests
         await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.Equal(new LimitAnswer("q2", LimitAction.Stop), api.LimitAnswers[^1]);
         Assert.False(main.HasLimitQuestion);
+    }
+
+    [Fact, Trait("Pruefung", "Schrittlimit")]
+    public void Schrittlimit_zu_lange_Eingabe_sperrt_Weitermachen_und_zeigt_Hinweis()
+    {
+        var question = Limit("q1") with { MaxInputTokens = 100, CharsPerToken = 3.0, Notice = "Die Eingabe ist zu lang" };
+        var q = new LimitQuestionViewModel(question, _ => Task.CompletedTask);
+        Assert.True(q.HasNotice && q.NoticeText.Contains("zu lang", StringComparison.Ordinal));
+        Assert.True(q.CanContinue);
+        Assert.Contains("von höchstens ~100 Token", q.SizeText, StringComparison.Ordinal);
+        q.RestText = new string('x', 600);
+        Assert.True(q.IsTooLong);
+        Assert.False(q.CanContinue);
+        Assert.False(q.ContinueCommand.CanExecute(null));
+        Assert.StartsWith("ZU LANG", q.SizeText, StringComparison.Ordinal);
+        Assert.True(q.StopCommand.CanExecute(null)); // Beenden geht immer
     }
 
     [Fact]

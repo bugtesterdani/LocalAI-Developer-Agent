@@ -23,9 +23,9 @@ public sealed class LimitQuestionStore(IClock clock)
         Require(question.RunId, "runId", 100);
         Require(question.Agent, "agent", 50);
         Require(question.TaskId, "taskId", 100);
-        if (question.Title.Length > 500)
+        if (question.Title.Length > 500 || question.Notice is { Length: > 2_000 })
         {
-            throw new BrokerException(BrokerErrorCodes.Unprocessable, "title zu lang");
+            throw new BrokerException(BrokerErrorCodes.Unprocessable, "title bzw. notice zu lang");
         }
         foreach (var (name, text) in new[] { ("system", question.System), ("task", question.Task), ("rest", question.Rest) })
         {

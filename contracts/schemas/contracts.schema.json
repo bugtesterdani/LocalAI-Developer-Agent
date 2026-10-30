@@ -1353,6 +1353,18 @@
         "rest": {
           "type": "string"
         },
+        "maxInputTokens": {
+          "type": "integer",
+          "description": "Höchstens so viele Token (geschätzt) darf die Eingabe haben – Kontext des Modells abzüglich Ausgabe und Reserve."
+        },
+        "charsPerToken": {
+          "type": "number",
+          "description": "Zeichen je Token für die Schätzung (wie der Orchestrator rechnet)."
+        },
+        "notice": {
+          "type": "string",
+          "description": "Hinweis zur vorigen Antwort, z. B. Eingabe zu lang (dann erneut gefragt)."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"

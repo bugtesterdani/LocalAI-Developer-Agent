@@ -508,6 +508,12 @@ Empfänger: {7}</value>
   <data name="LimitSize" xml:space="preserve">
     <value>{0} Zeichen insgesamt</value>
   </data>
+  <data name="LimitSizeOf" xml:space="preserve">
+    <value>~{0} von höchstens ~{1} Token Eingabe</value>
+  </data>
+  <data name="LimitSizeTooLong" xml:space="preserve">
+    <value>ZU LANG: ~{0} Token, das Modell fasst höchstens ~{1} Token Eingabe – bitte kürzen (z. B. Evidenz)</value>
+  </data>
   <data name="LimitContinue" xml:space="preserve">
     <value>Weitermachen</value>
   </data>

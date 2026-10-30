@@ -1968,11 +1968,34 @@ def test_schrittlimit_rueckfrage_mit_bearbeiteter_eingabe(ollama, tmp_path):
     assert len(_planner_requests(ollama)) == 3, "während der Rückfrage kein weiterer Modellaufruf"
     assert any(e.state == AgentState.WaitingUser and "Schrittlimit" in (e.text or "") for e in broker.of("Planner"))
 
-    new_task = question.task.replace("Leere Eingaben in calc abfangen", "NUR README lesen und dann abschließen")
-    _answer(broker, question, extra_steps=2, system=question.system, task=new_task, rest="BEARBEITETER VERLAUF")
+    # Hinweis während der offenen Rückfrage: steht nicht im angezeigten Text, darf aber nicht verloren gehen.
+    broker.send(OrchestratorCommandKind.Chat, "HINWEIS-WAEHREND-DER-RUECKFRAGE")
+    wait_for(lambda: any(c.startswith("Hinweis aufgenommen") for c in broker.chats("Orchestrator")), timeout=10)
+    # Antwort mit fremdem Agenten wird ignoriert (der Broker setzt den Agenten der Frage).
+    broker.send(OrchestratorCommandKind.LimitAnswer, agent="Coder", text=LimitAnswer(
+        question_id=question.question_id, action=LimitAction.Stop).model_dump_json(by_alias=True, exclude_none=True))
+    time.sleep(0.5)
+    assert len(_planner_requests(ollama)) == 3 and len(broker.limit_questions) == 1
+    assert question.max_input_tokens == 8192 - 2048 - 512 and question.chars_per_token
+
+    # Zu lange Eingabe: nicht senden, sondern mit dem bearbeiteten Text und einem Hinweis erneut fragen.
+    huge = "x" * 200_000
+    _answer(broker, question, extra_steps=2, system=question.system, task=question.task, rest=huge)
     wait_for(lambda: len(broker.limit_questions) == 2, timeout=30)
+    again = broker.limit_questions[1]
+    assert again.rest == huge and "zu lang" in (again.notice or "") and len(_planner_requests(ollama)) == 3
+    assert any("zu lang" in c and "erneut" in c for c in broker.chats("Planner"))
+    lists_before = [p.tool for p in broker.proposals.values()].count("File.List")
+
+    new_task = question.task.replace("Leere Eingaben in calc abfangen", "NUR README lesen und dann abschließen")
+    _answer(broker, again, extra_steps=2, system=question.system, task=new_task, rest="BEARBEITETER VERLAUF")
+    wait_for(lambda: len(broker.limit_questions) == 3, timeout=30)
+    broker.limit_questions.pop(1)  # die wiederholte Frage – unten geht es mit der nächsten weiter
     requests = _planner_requests(ollama)
     assert len(requests) == 5
+    # Evidenz, die der Nutzer aus der Eingabe entfernt hat, gilt nicht mehr als sichtbar: list wird wieder ausgeführt.
+    assert [p.tool for p in broker.proposals.values()].count("File.List") > lists_before
+    assert "HINWEIS-WAEHREND-DER-RUECKFRAGE" in requests[4]["messages"][1]["content"]
     # Schritt 4: genau die bestätigte Eingabe; Schritt 5: wieder normal gebaut, aber mit der neuen Aufgabe.
     assert requests[3]["messages"][1]["content"] == new_task.strip() + "\n\nBEARBEITETER VERLAUF"
     assert "NUR README lesen" in requests[4]["messages"][1]["content"]

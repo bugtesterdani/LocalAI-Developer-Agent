@@ -104,6 +104,10 @@ class LimitRequest:
     system: str
     task: str
     rest: str
+    max_input_tokens: int = 0  # geschätzte Höchstgröße der Eingabe (Kontext − Ausgabe − Reserve)
+    chars_per_token: float = DEFAULT_CHARS_PER_TOKEN
+    # Prüft eine (bearbeitete) Eingabe: None = passt, sonst deutscher Grund (dann wird erneut gefragt).
+    check: Callable[[str, str, str], str | None] | None = None
 
 
 @dataclass
@@ -220,6 +224,7 @@ class Agent:
             task = self._task_text(assignment)
             self._compact(history, summarize, task, task_id)
             parts = assemble(self.system, task, history.lines(), evidence, self.budget, self.chars_per_token)
+            edited = override is not None
             if override is not None:
                 # Genau die vom Nutzer bestätigte Eingabe senden (einmal); danach wieder normal zusammenbauen.
                 parts = replace(parts, system=override[0], user=override[1],
@@ -228,6 +233,10 @@ class Agent:
                 override = None
             # Nicht (vollständig) sichtbare Evidenz: weggelassen oder gekürzt – darauf nie verweisen statt erneut anzufragen.
             dropped = {d.split(" ", 1)[0] for d in parts.dropped_evidence} | set(parts.truncated_evidence)
+            if edited:
+                # Bearbeitete Eingabe: nur Evidenz, die dort noch vollständig steht, gilt als sichtbar – was der Nutzer
+                # entfernt oder gekürzt hat, darf das Modell erneut anfordern.
+                dropped |= {e.evidence_id for e in evidence if e.render() not in parts.user}
             limit = self._output_limit(parts.prompt_tokens)
             request = ChatRequest(
                 model=self.profile.model,
@@ -338,26 +347,46 @@ class Agent:
         if self.on_limit is None:
             return None
         task = self._task_text(assignment)
+        notes_shown = len(self.user_notes())  # nur diese Hinweise stehen in der angezeigten Aufgabe
         self._compact(history, summarize, task, assignment.task_id)
         parts = assemble(self.system, task, history.lines(), evidence, self.budget, self.chars_per_token)
         shown_task = task_text(task, task_budget(self.system, self.budget, self.chars_per_token), self.chars_per_token)
         rest = parts.user[len(shown_task):].lstrip("\n") if parts.user.startswith(shown_task) else parts.user
         base = assignment.max_steps or self.limits.steps_for(self.role)
         request = LimitRequest(self.role, assignment.task_id, assignment.title, steps, max(5, min(200, base // 2)),
-                               parts.system, shown_task, rest)
+                               parts.system, shown_task, rest, self._max_input_tokens(), self.chars_per_token,
+                               self._check_limit_input)
         decision = self.on_limit(request, cancel)
         if decision is None:
             return None
         notes = []
         if decision.task.strip() != shown_task.strip():
             assignment.text = decision.task.strip()
-            assignment.notes_seen = len(self.user_notes())
+            # Hinweise, die erst während der Rückfrage kamen, stehen nicht im bearbeiteten Text – sie bleiben offen.
+            assignment.notes_seen = notes_shown
             notes.append("the user revised your task (see the task section); follow the revised version")
         history.orchestrator(steps, f"step limit reached; the user allowed {decision.extra_steps} more steps"
                              + (" and " + notes[0] if notes else "") + ". Work towards finishing.")
         if (decision.system, decision.task, decision.rest) == (parts.system, shown_task, rest):
             return replace(decision, system="", task="", rest="")  # unverändert: normal zusammenbauen
         return decision
+
+    def _max_input_tokens(self) -> int:
+        """Größte Eingabe (geschätzt), die zusammen mit der Ausgabe und der Reserve in den Kontext passt."""
+        return max(0, self.profile.context_tokens - self.budget.output - self.budget.reserve)
+
+    def _check_limit_input(self, system: str, task: str, rest: str) -> str | None:
+        """Bearbeitete Eingabe muss in den Kontext des Modells passen (sonst schneidet Ollama still ab)."""
+        if not task.strip():
+            return "Die Aufgabe darf nicht leer sein."
+        user = task.strip() + ("\n\n" + rest.strip() if rest.strip() else "")
+        tokens = estimate_tokens(system, self.chars_per_token) + estimate_tokens(user, self.chars_per_token)
+        limit = self._max_input_tokens()
+        if tokens > limit:
+            return (f"Die Eingabe ist mit ~{tokens} Token zu lang: {self.profile.model} hat {self.profile.context_tokens} "
+                    f"Token Kontext, nach Ausgabe und Reserve passen höchstens ~{limit} Token. Bitte kürzen "
+                    "(z. B. Evidenz im Verlauf).")
+        return None
 
     def _compact(self, history: StepHistory, summarize: Callable[[str, list[str]], str], task: str, task_id: str) -> None:
         # Platz für eigene Notizen: was vom Anteil für Aufgabe und Verlauf nach Aufgabentext, Rückmeldungen des

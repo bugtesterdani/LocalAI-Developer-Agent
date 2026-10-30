@@ -514,6 +514,9 @@ class LimitQuestion(Contract):
     system: str = Field(alias="system")
     task: str = Field(alias="task")
     rest: str = Field(alias="rest")
+    max_input_tokens: StrictInt | None = Field(default=None, alias="maxInputTokens")
+    chars_per_token: float | None = Field(default=None, alias="charsPerToken")
+    notice: str | None = Field(default=None, alias="notice")
     created_at: str | None = Field(default=None, alias="createdAt")
 
 
