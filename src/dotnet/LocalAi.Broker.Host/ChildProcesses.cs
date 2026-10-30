@@ -124,7 +124,7 @@ public sealed class ChildProcesses
         {
             using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-            writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {line}");
+            writer.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {RedactSensitiveLogContent(line)}");
         }
         catch (IOException)
         {
@@ -133,6 +133,20 @@ public sealed class ChildProcesses
         {
             LogGate.Release();
         }
+    }
+
+    private static string RedactSensitiveLogContent(string line)
+    {
+        if (string.IsNullOrEmpty(line))
+        {
+            return line;
+        }
+
+        return System.Text.RegularExpressions.Regex.Replace(
+            line,
+            @"(?<=\s|^)(--proxy-password-file|--proxy-user|--ca-file)\s+\S+",
+            "$1 [REDACTED]",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     private static async Task PumpAsync(StreamReader reader, string logPath)
@@ -146,7 +160,7 @@ public sealed class ChildProcesses
                 {
                     await using var stream = new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
                     await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-                    await writer.WriteLineAsync(line).ConfigureAwait(false);
+                    await writer.WriteLineAsync(RedactSensitiveLogContent(line)).ConfigureAwait(false);
                 }
                 finally
                 {
