@@ -215,6 +215,10 @@
                                 <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#4B5563">
                                     <Run Text="{Binding ChangeText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding SizeText, Mode=OneWay}" />
                                 </TextBlock>
+                                <TextBlock Text="{Binding CheckErrorsText, Mode=OneWay}" TextWrapping="Wrap" Foreground="#B91C1C" FontWeight="Bold"
+                                           Margin="0,4,0,0" Visibility="{Binding HasCheckErrors, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="{Binding CheckWarningsText, Mode=OneWay}" TextWrapping="Wrap" Foreground="#92400E"
+                                           Margin="0,4,0,0" Visibility="{Binding HasCheckWarnings, Converter={StaticResource BoolToVis}}" />
                                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                     <Button Content="{loc:T LimitContinue}" Command="{Binding ContinueCommand}" Padding="14,4" FontWeight="SemiBold" />
                                     <Button Content="{loc:T LimitStop}" Command="{Binding StopCommand}" Padding="14,4" Margin="8,0,0,0" />

@@ -105,7 +105,17 @@ public sealed class LimitQuestionViewModel : ObservableObject
         ? UiText.Format(IsTooLong ? "LimitSizeTooLong" : "LimitSizeOf", EstimatedTokens, max)
         : UiText.Format("LimitSize", _systemText.Length + _taskText.Length + _restText.Length);
 
-    public bool CanContinue => !_busy && ExtraSteps is not null && !string.IsNullOrWhiteSpace(_taskText) && !IsTooLong;
+    private LimitCheckResult? _check;
+
+    /// <summary>Prüfung der Eingabe wie im Broker: Fehler sperren Weitermachen, Warnungen nur anzeigen.</summary>
+    public LimitCheckResult Check => _check ??= LimitInputCheck.Check(Question, _systemText, _taskText, _restText);
+
+    public bool HasCheckErrors => !Check.Ok;
+    public bool HasCheckWarnings => Check.Warnings.Count > 0;
+    public string CheckErrorsText => string.Join("\n", Check.Errors.Select(e => "• " + e));
+    public string CheckWarningsText => string.Join("\n", Check.Warnings.Select(w => "• " + w));
+
+    public bool CanContinue => !_busy && ExtraSteps is not null && !string.IsNullOrWhiteSpace(_taskText) && !IsTooLong && Check.Ok;
 
     public RelayCommand ContinueCommand { get; }
     public RelayCommand StopCommand { get; }
@@ -148,6 +158,11 @@ public sealed class LimitQuestionViewModel : ObservableObject
             OnPropertyChanged(nameof(SizeText));
             OnPropertyChanged(nameof(EstimatedTokens));
             OnPropertyChanged(nameof(IsTooLong));
+            _check = null;
+            OnPropertyChanged(nameof(HasCheckErrors));
+            OnPropertyChanged(nameof(HasCheckWarnings));
+            OnPropertyChanged(nameof(CheckErrorsText));
+            OnPropertyChanged(nameof(CheckWarningsText));
             Refresh();
         }
     }

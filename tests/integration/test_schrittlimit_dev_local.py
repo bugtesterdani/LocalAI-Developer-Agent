@@ -44,7 +44,14 @@ def test_rueckfrage_und_antwort_ueber_den_broker(tmp_path, broker_factory):
         ui.limit_answer(LimitAnswer(question_id="q1", action=LimitAction.Continue, extra_steps=0, system="s", task="t", rest=""))
     assert no_steps.value.code == 422
 
-    ui.limit_answer(LimitAnswer(question_id="q1", action=LimitAction.Continue, extra_steps=5, system="s", task="Neu", rest=big))
+    with pytest.raises(BrokerError) as hidden:
+        ui.limit_answer(LimitAnswer(question_id="q1", action=LimitAction.Continue, extra_steps=5, system="s",
+                                    task="Neu\u202egeheim", rest=big))
+    assert hidden.value.code == 422 and "Unsichtbare" in hidden.value.message and len(ui.limit_pending()) == 1
+
+    warnings = ui.limit_answer(LimitAnswer(question_id="q1", action=LimitAction.Continue, extra_steps=5, system="s",
+                                           task="Neu", rest=big))
+    assert any("Regeln" in w for w in warnings)  # nur Warnung, angenommen
     assert ui.limit_pending() == []
     with pytest.raises(BrokerError) as twice:
         ui.limit_answer(LimitAnswer(question_id="q1", action=LimitAction.Stop))

@@ -491,7 +491,7 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
             case M.LimitAnswer:
             {
                 var answer = ContractJson.Deserialize<LimitAnswer>(p);
-                var question = LimitQuestions.Answer(answer);
+                var (question, warnings) = LimitQuestions.Answer(answer);
                 if (Orchestrator.RunId != question.RunId)
                 {
                     throw new BrokerException(BrokerErrorCodes.Gone, "Der Run dieser Rückfrage läuft nicht mehr");
@@ -500,8 +500,13 @@ public sealed class PipeServer(string pipeName, RoleTokens tokens, ApprovalBroke
                     text: JsonSerializer.Serialize(answer, ContractJson.Options));
                 broker.PublishInfo("run.limitAnswer", answer.Action == LimitAction.Continue
                     ? $"{question.Agent} {question.TaskId}: weiter mit {answer.ExtraSteps} Schritten"
+                      + (warnings.Count > 0 ? " – trotz Hinweis: " + string.Join(" ", warnings) : "")
                     : $"{question.Agent} {question.TaskId}: Aufgabe beendet");
-                return new JsonObject { ["accepted"] = true };
+                return new JsonObject
+                {
+                    ["accepted"] = true,
+                    ["warnings"] = new JsonArray(warnings.Select(w => (JsonNode?)w).ToArray()),
+                };
             }
             case M.SandboxRebuild:
             {

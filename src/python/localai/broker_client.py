@@ -77,8 +77,9 @@ class BrokerClient:
     def limit_pending(self) -> list[LimitQuestion]:
         return [LimitQuestion.model_validate(q) for q in self.pipe.call("limit.pending", {})]
 
-    def limit_answer(self, answer: LimitAnswer) -> None:
-        self.pipe.call("limit.answer", answer.to_json_obj())
+    def limit_answer(self, answer: LimitAnswer) -> list[str]:
+        """Liefert die Warnungen der Prüfung (Fehler weist der Broker mit 422 ab, die Frage bleibt offen)."""
+        return [str(w) for w in self.pipe.call("limit.answer", answer.to_json_obj()).get("warnings") or []]
 
     def chat_send(self, text: str) -> str:
         return str(self.pipe.call("chat.send", {"text": text})["runId"])

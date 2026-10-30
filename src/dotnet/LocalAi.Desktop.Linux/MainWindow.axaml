@@ -201,6 +201,10 @@
                                 <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#4B5563">
                                     <Run Text="{Binding ChangeText}" /><Run Text=" · " /><Run Text="{Binding SizeText}" />
                                 </TextBlock>
+                                <SelectableTextBlock Text="{Binding CheckErrorsText}" TextWrapping="Wrap" Foreground="#B91C1C" FontWeight="Bold"
+                                                     Margin="0,4,0,0" IsVisible="{Binding HasCheckErrors}" />
+                                <SelectableTextBlock Text="{Binding CheckWarningsText}" TextWrapping="Wrap" Foreground="#92400E"
+                                                     Margin="0,4,0,0" IsVisible="{Binding HasCheckWarnings}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
                                     <Button Content="{loc:T LimitContinue}" Command="{Binding ContinueCommand}" Padding="14,4" FontWeight="SemiBold" />
                                     <Button Content="{loc:T LimitStop}" Command="{Binding StopCommand}" Padding="14,4" />

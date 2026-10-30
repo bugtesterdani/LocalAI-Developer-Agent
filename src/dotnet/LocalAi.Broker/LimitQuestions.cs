@@ -60,8 +60,11 @@ public sealed class LimitQuestionStore(IClock clock)
         }
     }
 
-    /// <summary>Prüft die Antwort und entfernt die Frage (eine Antwort je Frage).</summary>
-    public LimitQuestion Answer(LimitAnswer answer)
+    /// <summary>
+    /// Prüft die Antwort und entfernt die Frage (eine Antwort je Frage). Bei Weitermachen wird die Eingabe geprüft
+    /// (<see cref="LimitInputCheck"/>): Fehler weisen die Antwort ab (Frage bleibt offen), Warnungen kommen zurück.
+    /// </summary>
+    public (LimitQuestion Question, IReadOnlyList<string> Warnings) Answer(LimitAnswer answer)
     {
         lock (_gate)
         {
@@ -89,9 +92,16 @@ public sealed class LimitQuestionStore(IClock clock)
                 {
                     throw new BrokerException(BrokerErrorCodes.Unprocessable, $"Eingabe länger als {MaxFieldChars} Zeichen je Feld");
                 }
+                var check = LimitInputCheck.Check(question, answer.System, answer.Task, answer.Rest);
+                if (!check.Ok)
+                {
+                    throw new BrokerException(BrokerErrorCodes.Unprocessable, string.Join(" ", check.Errors));
+                }
+                _open.Remove(question);
+                return (question, check.Warnings);
             }
             _open.Remove(question);
-            return question;
+            return (question, []);
         }
     }
 

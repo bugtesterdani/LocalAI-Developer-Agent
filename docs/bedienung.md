@@ -85,6 +85,17 @@ gelber Kasten mit der **vollständigen Eingabe des nächsten Schritts**:
 - **Aufgabe beenden:** wie bisher, die Aufgabe endet am Limit.
 - **Änderungen verwerfen:** stellt den angezeigten Text wieder her.
 
+Was du einfügst, wird beim Tippen geprüft (und noch einmal im Broker). Fast alles ist erlaubt; verglichen wird mit dem
+angezeigten Text, was dort schon stand, zählt nicht:
+
+- **Gesperrt** (rot, „Weitermachen“ aus): neu eingefügte unsichtbare Steuer- oder Richtungszeichen (z. B. U+202E,
+  Nullbreite, Tag-Zeichen) – sie verbergen Text und kommen fast immer aus kopiertem Fremdtext; eine leere Aufgabe; eine
+  Eingabe, die nicht in den Kontext des Modells passt („ZU LANG“).
+- **Nur Warnung** (braun): Text, der wie Evidenz aussieht („<<<EVIDENCE …“) – das Modell hielte ihn für ein
+  Werkzeugergebnis; geänderte Regeln bzw. fehlendes Aktionsformat; Formulierungen, die Regeln aushebeln sollen
+  („ignore previous instructions“, „ohne Freigabe“ …); eine stark gekürzte Aufgabe. Weitermachen bleibt möglich, die
+  Warnung steht dann auch in den Ereignissen.
+
 Die Wartezeit zählt nicht zur aktiven Laufzeit. Abbruch des Agenten oder des Runs zieht die Rückfrage zurück. Warten
 mehrere Agenten, steht unter dem Kasten „+N weitere Rückfrage(n)“; sie kommen der Reihe nach.
 
