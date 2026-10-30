@@ -582,6 +582,11 @@ def start(broker: FakeBroker, fake: FakeOllama, tmp_path, **limits) -> tuple[Orc
     return orch, thread
 
 
+def work_chats(broker) -> list[str]:
+    """Chat des Orchestrators ohne die Zeitaufschlüsselung, die am Ende jedes Runs folgt."""
+    return [c for c in broker.chats("Orchestrator") if not c.startswith("Zeitaufschlüsselung")]
+
+
 def finished(broker):
     """Run einschließlich Übernahme fertig (Zustand Done des Orchestrators nach der Zusammenfassung)."""
     return broker.summary() and any(e.kind == ActivityKind.State and e.state == AgentState.Done
@@ -633,7 +638,7 @@ def test_run_mit_fuenf_rollen_parallel_und_reparaturschleife(ollama, tmp_path):
     assert coder_fix and "## Diagnosis by the Debugger" in coder_fix[0] and "treats None like empty input" in coder_fix[0]
     review_chats = broker.chats("Reviewer")
     assert len(review_chats) == 1 and "keine Freigabe" in review_chats[0]
-    orchestrator_chats = broker.chats("Orchestrator")
+    orchestrator_chats = work_chats(broker)
     assert any("python test (path=.): fehlgeschlagen (Exitcode 1)" in c for c in orchestrator_chats)
     assert any("python test (path=.): ok" in c for c in orchestrator_chats)
     summary = broker.summary()
@@ -796,7 +801,7 @@ def test_ohne_schreibrecht_und_toolchain_nur_vorschlaege(ollama, tmp_path):
     wait_for(lambda: finished(broker), timeout=60)
     tools = {p.tool for p in broker.proposals.values()}
     assert "Patch.Apply" not in tools and not any(t.startswith("Toolchain.") for t in tools)
-    chats = broker.chats("Orchestrator")
+    chats = work_chats(broker)
     assert any("Rechte Modify, Create" in c for c in chats) and any("nur in der Offline-VM" in c for c in chats)
     assert "nicht angewendet" in broker.chats("Coder")[0]
     summary = chats[-1]
@@ -1688,7 +1693,7 @@ def test_uebernahme_abgelehnt_dann_per_befehl_mit_abwahl(ollama, tmp_path):
     orch, thread = start(broker, ollama, tmp_path)
     broker.send(OrchestratorCommandKind.Chat, "Ziel")
     wait_for(lambda: finished(broker), timeout=60)
-    assert "Übernahme nicht durchgeführt" in broker.chats("Orchestrator")[-1] and not broker.exported
+    assert "Übernahme nicht durchgeführt" in work_chats(broker)[-1] and not broker.exported
     export = [p for p in broker.proposals.values() if p.tool == "Workspace.ExportPatch"][0]
     assert export.snapshot_id == "-" and set(export.arguments) == {"grantId", "stagingId", "patch"}
     assert sorted(t.path for t in export.targets) == sorted(broker.changed)
@@ -1903,5 +1908,36 @@ def test_auto_freigabe_abgelehnt_alles_einzeln(ollama, tmp_path):
     wait_for(lambda: finished(broker), timeout=60)
     assert any(c.startswith("Automatische Freigabe nicht bestätigt") for c in broker.chats("Orchestrator"))
     assert not any("automatisch genehmigt" in (e.text or "") for e in broker.events)
+    orch.stop()
+    thread.join(5)
+
+
+def test_zeitaufschluesselung_am_ende_des_runs(ollama, tmp_path):
+    broker = FakeBroker(toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Bitte leere Eingaben in calc abfangen")
+    wait_for(lambda: any(c.startswith("Zeitaufschlüsselung") for c in broker.chats("Orchestrator")), timeout=60)
+    report = next(c for c in broker.chats("Orchestrator") if c.startswith("Zeitaufschlüsselung"))
+    assert "Modell gesamt:" in report and "Je Modell:" in report and "qwen2.5-coder:14b" in report
+    assert "Lesen, Suchen, Patches:" in report and "Snapshot und Übernahme:" in report
+    wait_for(lambda: (tmp_path / "zeiten.jsonl").exists(), timeout=10)
+    row = json.loads((tmp_path / "zeiten.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert row["runId"] == "run-t" and row["models"]["qwen2.5-coder:14b"]["calls"] >= 3
+    orch.stop()
+    thread.join(5)
+
+
+def test_zeitaufschluesselung_auch_bei_abbruch_waehrend_der_freigabe(ollama, tmp_path):
+    broker = FakeBroker(decide=lambda r: None)  # Snapshot bleibt offen
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Ziel")
+    wait_for(lambda: any(e.state == AgentState.WaitingApproval for e in broker.of("Planner")), timeout=30)
+    time.sleep(0.3)
+    broker.send(OrchestratorCommandKind.CancelRun)
+    wait_for(lambda: any(c.startswith("Zeitaufschlüsselung") for c in broker.chats("Orchestrator")), timeout=10)
+    report = next(c for c in broker.chats("Orchestrator") if c.startswith("Zeitaufschlüsselung"))
+    assert "Snapshot und Übernahme: 1× – Warten auf Freigabe" in report
+    row = json.loads((tmp_path / "zeiten.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert row["tools"]["Snapshot und Übernahme"]["approval_seconds"] >= 0.2 and "goal" not in row
     orch.stop()
     thread.join(5)

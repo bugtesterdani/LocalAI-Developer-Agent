@@ -305,7 +305,8 @@ def test_run_bietet_uebernahme_an(tmp_path, broker_factory, fake_ollama):
                    for e in events)
 
     events, _ = collect(ui, 0, exported, timeout=120)
-    chats = [e.text or "" for e in events if e.kind == ActivityKind.Chat and e.agent == "Orchestrator"]
+    chats = [e.text or "" for e in events if e.kind == ActivityKind.Chat and e.agent == "Orchestrator"
+             and not (e.text or "").startswith("Zeitaufschlüsselung")]
     assert chats[-1].startswith("Übernommen:"), chats[-1]
     assert (project / "src" / "calc.py").read_bytes() != ORIGINAL
     proposals = [e.text or "" for e in events if e.kind == ActivityKind.Proposal]

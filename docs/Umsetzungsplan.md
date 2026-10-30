@@ -259,6 +259,11 @@ Aktivität „automatisch genehmigt“). Nie automatisch: Snapshot, Diff und Üb
 Debug-Sitzungen – ein solcher Eintrag verhindert den Start des Brokers. Not-Aus, Abbruch des Runs, Neustart und eine
 neue Bestätigungsanfrage beenden die automatische Freigabe.
 
+**Zeitaufschlüsselung (Stand 29.10.2026):** Statt den Orchestrator in Rust neu zu schreiben (seine eigene Rechenzeit
+ist gegenüber Modell, Freigaben und Sandbox vernachlässigbar), wird gemessen, wohin die Zeit geht: Ollamas eigene
+Zeiten je Antwort (laden, Prompt, Ausgabe) je Modell und Rolle, Warten auf den GPU-Slot, Warten auf Freigaben und
+Ausführung je Werkzeugart. Am Ende jedes Runs im Chat mit Hinweisen; je Run eine Zeile in `zeiten.jsonl`.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

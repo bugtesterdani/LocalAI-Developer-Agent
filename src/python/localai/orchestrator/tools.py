@@ -34,6 +34,7 @@ from localai.orchestrator.context import Evidence
 from localai.orchestrator.gateway import Cancelled, CancelToken
 from localai.orchestrator.protocol import Action
 from localai.orchestrator.runtime import RunClock
+from localai.orchestrator.timings import RunTimings
 from localai.pipe import BrokerError
 from localai.worker import patching
 
@@ -124,6 +125,7 @@ class ToolBridge:
         # autoApprove: eingeschaltet laut Projektdatei (vom Broker) und für diesen Run bestätigt
         self._auto_approve: list[str] = []
         self.auto_active: list[str] = []
+        self.timings: RunTimings | None = None  # Zeitaufschlüsselung des laufenden Runs
 
     # ------------------------------------------------------------------ Grundlagen
     def find_grant(self) -> FolderGrant | None:
@@ -160,16 +162,29 @@ class ToolBridge:
                 self.reporter.event(agent, ActivityKind.Proposal, f"{label} – wartet auf Freigabe ({proposal_id[:8]})",
                                     task_id=task_id, state=AgentState.WaitingApproval)
             started = time.monotonic()
-            # Warten auf die Entscheidung zählt nicht zur aktiven Laufzeit.
-            with self.clock.paused():
-                while True:
-                    if cancel.cancelled:
-                        # Broker hat die Vorschläge des Agenten beim Abbruch bereits ungültig gemacht.
-                        raise Cancelled(cancel.reason)
-                    outcome = self.client.outcome(proposal_id)
-                    if outcome.is_final:
-                        break
-                    cancel.wait(self.poll)
+            decided = started if automatic else None  # Zeitpunkt der Freigabe (für die Zeitaufschlüsselung)
+            outcome = None
+            try:
+                # Warten auf die Entscheidung zählt nicht zur aktiven Laufzeit.
+                with self.clock.paused():
+                    while True:
+                        if cancel.cancelled:
+                            # Broker hat die Vorschläge des Agenten beim Abbruch bereits ungültig gemacht.
+                            raise Cancelled(cancel.reason)
+                        outcome = self.client.outcome(proposal_id)
+                        if decided is None and outcome.state != ProposalState.AwaitingApproval:
+                            decided = time.monotonic()
+                        if outcome.is_final:
+                            break
+                        cancel.wait(self.poll)
+            finally:
+                # Auch bei Abbruch oder Fehler: die bis dahin verbrachte Zeit zählt mit.
+                if self.timings is not None:
+                    ended = time.monotonic()
+                    ran = outcome is None or outcome.state not in (
+                        ProposalState.Denied, ProposalState.Expired, ProposalState.Invalidated, ProposalState.Rejected)
+                    approved_at = decided if (decided is not None and ran) else ended
+                    self.timings.tool(request.tool, approved_at - started, ended - approved_at, automatic)
             seconds = time.monotonic() - started
             text = STATE_TEXT.get(outcome.state, outcome.state.value)
             if outcome.final_proposal_id != proposal_id:

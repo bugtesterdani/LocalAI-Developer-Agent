@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,6 +42,7 @@ from localai.orchestrator.runtime import (
     LimitReached,
     RunClock,
 )
+from localai.orchestrator.timings import RunTimings
 from localai.orchestrator.tools import ToolBridge
 
 # Zeichen je Token, die eine Kalibrierung realistisch liefern kann (Code/Englisch ≈ 2,5–4,5).
@@ -113,6 +115,7 @@ class Agent:
                            "kalibrieren.")
         self.gateway = gateway
         self.gpu = gpu
+        self.timings: RunTimings | None = None  # Zeitaufschlüsselung des Runs (vom Orchestrator gesetzt)
         self.bridge = bridge
         self.reporter = reporter
         self.clock = clock
@@ -185,11 +188,16 @@ class Agent:
                 label += f" · bis zu {limit} Token Ausgabe"
             if parts.dropped_evidence:
                 label += f" · {len(parts.dropped_evidence)} Evidenzblöcke wegen Budget ausgelassen"
+            queued = time.monotonic()
+            gpu_wait = 0.0
             try:
                 with self.gpu.slot(role, self.profile.key, assignment.priority, cancel,
                                    on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
+                    gpu_wait = time.monotonic() - queued
                     self.reporter.state(role, AgentState.Generating, label, task_id)
                     result = self.gateway.chat(request, cancel, self._callbacks(task_id))
+                if self.timings is not None:
+                    self.timings.model(role, result, gpu_wait)
             except OutOfMemory as err:
                 raise AgentFailed(f"Speichermangel bei {self.profile.label()}: {err}. Profil neu kalibrieren oder kleineres "
                                   "Profil wählen.") from err
@@ -333,8 +341,10 @@ class Agent:
                 model=profile.model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 num_ctx=profile.context_tokens, num_predict=num_predict, temperature=0.1, think=think,
                 extra_options=dict(profile.options))
+            queued = time.monotonic()
             with self.gpu.slot(role, profile.key, assignment.priority, cancel,
                                on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):
+                gpu_wait = time.monotonic() - queued
                 self.reporter.state(role, AgentState.Generating, f"Eigene Notizen zusammenfassen ({profile.model})", task_id)
                 try:
                     result = self.gateway.chat(request, cancel)
@@ -343,6 +353,8 @@ class Agent:
                 except GatewayError as err:
                     last_error = err
                     continue
+            if self.timings is not None:
+                self.timings.model(role, result, gpu_wait, summary=True)
             text = _THINK.sub("", result.content).strip()
             if text:
                 return text
