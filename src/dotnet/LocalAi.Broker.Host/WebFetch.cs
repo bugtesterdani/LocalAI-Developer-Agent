@@ -324,14 +324,31 @@ public sealed class WebToolAdapter(WebCaptureStore store, WebSettings settings, 
     private static string BuildSafeArgumentPreview(IReadOnlyList<string> args, int take)
     {
         var redacted = args.ToList();
-        for (var i = 0; i < redacted.Count - 1; i++)
+        static bool IsSensitiveSwitch(string arg) =>
+            arg is "--proxy-password-file" or "--proxy-user" or "--ca-file";
+
+        for (var i = 0; i < redacted.Count; i++)
         {
-            if (redacted[i] is "--proxy-password-file" or "--proxy-user" or "--ca-file")
+            var current = redacted[i];
+            if (IsSensitiveSwitch(current))
             {
-                redacted[i + 1] = "***";
-                i++;
+                if (i + 1 < redacted.Count)
+                {
+                    redacted[i + 1] = "***";
+                    i++;
+                }
+                continue;
+            }
+
+            if (current.StartsWith("--proxy-password-file=", StringComparison.Ordinal)
+                || current.StartsWith("--proxy-user=", StringComparison.Ordinal)
+                || current.StartsWith("--ca-file=", StringComparison.Ordinal))
+            {
+                var key = current.Split('=', 2)[0];
+                redacted[i] = $"{key}=***";
             }
         }
+
         return string.Join(' ', redacted.Take(take));
     }
 
