@@ -156,6 +156,8 @@ class Agent:
         self.timings: RunTimings | None = None  # Zeitaufschlüsselung des Runs (vom Orchestrator gesetzt)
         # Schrittlimit erreicht: Nutzer entscheiden lassen (None = Aufgabe endet wie bisher mit LimitReached).
         self.on_limit: Callable[[LimitRequest, CancelToken], LimitDecision | None] | None = None
+        # Nachschlageordner: Abschnitt für die Aufgabe („Reference documentation“), leer = keine
+        self.reference_text: Callable[[], str] | None = None
         self.bridge = bridge
         self.reporter = reporter
         self.clock = clock
@@ -178,6 +180,9 @@ class Agent:
         notes = self.user_notes()[assignment.notes_seen:]
         if notes:
             text += "\n\n## Notes from the user (latest last; they refine the goal)\n" + "\n".join(f"- {n}" for n in notes)
+        extra = self.reference_text() if self.reference_text is not None else ""
+        if extra and extra not in text:
+            text += "\n\n" + extra
         return text
 
     def run(self, assignment: Assignment, cancel: CancelToken) -> AgentResult:

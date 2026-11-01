@@ -39,6 +39,7 @@ from localai.worker.jobs import (
     verify_job,
     verify_payload,
 )
+from localai.worker.reference import ReferenceLibrary
 from localai.worker.repoindex import RepoIndexer
 from localai.worker.snapshot import SnapshotStore
 from localai.worker.toolchain_update import MAX_PAYLOAD_BYTES as TOOLCHAIN_PAYLOAD_BYTES
@@ -148,12 +149,14 @@ def pending_jobs(inbox: pathlib.Path, require_ready: bool) -> list[pathlib.Path]
 
 def run(inbox: pathlib.Path, sink, work: pathlib.Path, key: bytes, once: bool, poll: float,
         require_ready: bool = False, executor: Executor | None = None, update: UpdateTarget | None = None,
-        osdebug=None, inbound=None) -> int:
+        osdebug=None, inbound=None, unpack_chm: bool = False) -> int:
     """Verarbeitet Jobs; Rückgabe 75 = nach Gast-Update neu starten, sonst 0."""
     for d in (inbox, work):
         d.mkdir(parents=True, exist_ok=True)
     state = WorkerState.load(work / "state.json")
-    runner = ToolRunner(SnapshotStore(work), executor, RepoIndexer(work), osdebug)
+    # Windows-Hilfen (.chm) entpacken startet ein Programm (hh.exe bzw. 7z) – nur in der VM, nie auf dem Rechner.
+    runner = ToolRunner(SnapshotStore(work), executor, RepoIndexer(work), osdebug,
+                        ReferenceLibrary(work / "refcache", extractor=True if unpack_chm else None))
     print(f"[Worker] bereit, Eingang {inbox}", flush=True)
     while True:
         if inbound is not None:
@@ -265,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
                 folder = pathlib.Path(args.inbound_disk)
                 inbound = InboundDisks(args.work / "inbound.json", lambda: [str(p) for p in sorted(folder.iterdir())])
         return run(args.inbox, sink, args.work, key, args.once, args.poll_ms / 1000, args.require_ready, executor, update, osdebug,
-                   inbound)
+                   inbound, unpack_chm=args.transfer_disk is not None)
     finally:
         if osdebug is not None and not args.once:
             osdebug.stop_all()

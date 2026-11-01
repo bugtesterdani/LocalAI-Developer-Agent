@@ -73,6 +73,8 @@ TEXTS = {
     "AutoTool_File_ReadMany": "File.ReadMany – mehrere Dateien im Snapshot lesen (Sandbox)",
     "AutoTool_File_Search": "File.Search – im Snapshot suchen (Sandbox)",
     "AutoTool_Repo_Index": "Repo.Index – Symbolindex des Snapshots (Sandbox)",
+    "AutoTool_Reference_Search": "Reference.Search – in Nachschlageordnern suchen (Sandbox)",
+    "AutoTool_Reference_Read": "Reference.Read – eine Seite eines Nachschlageordners lesen (Sandbox)",
     "AutoTool_Patch_Apply": "Patch.Apply – Änderungen auf die Arbeitskopie in der Sandbox anwenden (nicht auf deinen Projektordner)",
     "AutoTool_Toolchain_Restore": "Toolchain.Restore – Pakete wiederherstellen in der Offline-VM (führt Code aus, nur in der VM)",
     "AutoTool_Toolchain_Build": "Toolchain.Build – bauen in der Offline-VM (führt Code aus, nur in der VM)",

@@ -404,6 +404,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "reference": {
+          "type": "boolean",
+          "description": "Referenzordner (Nachschlagewerk, z. B. Hilfedateien): nur List/Read, Zugriff der Agenten über Reference.Search/Reference.Read."
+        },
+        "title": {
+          "type": "string",
+          "description": "Anzeigename eines Referenzordners."
         }
       },
       "required": [
@@ -449,6 +457,13 @@
         "osDebug": {
           "$ref": "#/$defs/OsDebugConfig"
         },
+        "references": {
+          "type": "array",
+          "description": "Schreibgeschützte Nachschlageordner (Hilfedateien .chm, .html, .md, .txt). Werden als Grants ref-<referenceId> mit List/Read geführt.",
+          "items": {
+            "$ref": "#/$defs/ReferenceConfig"
+          }
+        },
         "autoApprove": {
           "type": "object",
           "description": "Tools, die der Broker in einem Run automatisch genehmigt – erst nachdem der Nutzer die Liste zu Beginn des Runs bestätigt hat (Run.AutoApprove). Standard: nichts.",
@@ -462,6 +477,31 @@
         "projectId",
         "name",
         "grants"
+      ]
+    },
+    "ReferenceConfig": {
+      "type": "object",
+      "description": "Projektdatei → references[]: ein Nachschlageordner.",
+      "properties": {
+        "referenceId": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "referenceId",
+        "root"
       ]
     },
     "SnapshotFile": {

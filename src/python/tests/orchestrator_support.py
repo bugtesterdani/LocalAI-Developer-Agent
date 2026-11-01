@@ -79,6 +79,7 @@ class FakeBroker:
     snapshot_message: str = ""  # Umfang laut Broker, z. B. „0 Dateien, 0 Bytes, 0 übersprungen“
     auto_approve: list[str] = field(default_factory=list)  # autoApprove der Projektdatei
     auto_active: set[str] = field(default_factory=set)  # nach bestätigtem Run.AutoApprove
+    references: dict[str, str] = field(default_factory=dict)  # Nachschlageordner: id → Titel
     ask_limits: bool = False  # Rückfrage beim Schrittlimit annehmen (sonst wie ein Broker ohne diese Methode)
     limit_questions: list = field(default_factory=list)
     limit_withdrawn: list[str] = field(default_factory=list)
@@ -89,7 +90,9 @@ class FakeBroker:
         return {"role": "Orchestrator"}
 
     def grants(self):
-        return [FolderGrant(grant_id="p", root="/projekt", rights=list(self.rights), recursive=True)]
+        return [FolderGrant(grant_id="p", root="/projekt", rights=list(self.rights), recursive=True),
+                *[FolderGrant(grant_id=f"ref-{rid}", root=f"/hilfe/{rid}", rights=[FolderRight.List, FolderRight.Read],
+                              recursive=True, reference=True, title=title) for rid, title in self.references.items()]]
 
     def toolchains_available(self):
         return {"enabled": bool(self.toolchains), "toolchains": self.toolchains, "osDebug": self.os_debug,
@@ -233,8 +236,21 @@ class FakeBroker:
             return special
         results = []
         if request.tool == "Workspace.Snapshot":
-            results.append(TargetResult(target_id="snapshot", status=ResultStatus.Succeeded, text="snap-1",
+            grant = request.arguments.get("grantId", "p")
+            results.append(TargetResult(target_id="snapshot", status=ResultStatus.Succeeded,
+                                        text="snap-1" if grant == "p" else f"refsnap-{grant}",
                                         message=self.snapshot_message or None))
+        if request.tool == "Reference.Search":
+            ref = request.arguments["grantId"].removeprefix("ref-")
+            results.append(TargetResult(target_id="refs", status=ResultStatus.Succeeded,
+                                        text=f'Reference "{ref}": 1 pages match {request.arguments["query"]!r}\n'
+                                             f"1. {ref}:api.chm/html/add.htm – add(a, b)\n   add returns None for empty input"))
+        if request.tool == "Reference.Read":
+            results.append(TargetResult(target_id="t1", status=ResultStatus.Succeeded,
+                                        text="# add(a, b)\nReturns the sum; raises TypeError for None."))
+            return ToolResult(invocation_id="inv", proposal_id=pid, status=ResultStatus.Succeeded,
+                              snapshot_id=request.snapshot_id, target_results=results, output_sha256="x", truncated=False,
+                              untrusted=True, exit_code=0)
         for t in request.targets:
             if request.tool == "File.List":
                 text = "\n".join(f"{p}  ({len(c)} Bytes)" for p, c in sorted(self.files.items()))

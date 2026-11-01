@@ -124,16 +124,90 @@ class ToolBridge:
         self._debug_sessions: dict[tuple[str, str], str] = {}
         # autoApprove: eingeschaltet laut Projektdatei (vom Broker) und für diesen Run bestätigt
         self._auto_approve: list[str] = []
+        self.references: list[FolderGrant] = []  # Nachschlageordner des Projekts
+        self.reference_snapshots: dict[str, str] = {}  # Grant → Snapshot (einmal je Prozess)
         self.auto_active: list[str] = []
         self.timings: RunTimings | None = None  # Zeitaufschlüsselung des laufenden Runs
 
     # ------------------------------------------------------------------ Grundlagen
     def find_grant(self) -> FolderGrant | None:
-        for grant in self.client.grants():
-            if {FolderRight.List, FolderRight.Read} <= set(grant.rights):
+        grants = self.client.grants()
+        # Nachschlageordner (references) sind eigene, schreibgeschützte Grants – nie der Projektordner.
+        self.references = [g for g in grants if g.reference]
+        for grant in grants:
+            if not grant.reference and {FolderRight.List, FolderRight.Read} <= set(grant.rights):
                 self.grant = grant
                 return grant
         return None
+
+    # ------------------------------------------------------------------ Nachschlageordner
+    @staticmethod
+    def reference_id(grant: FolderGrant) -> str:
+        return grant.grant_id.removeprefix("ref-")
+
+    def snapshot_references(self, agent: str, task_id: str, cancel: CancelToken) -> list[str]:
+        """Snapshot je Nachschlageordner (einmal je Orchestrator-Prozess; jeder braucht eine eigene Freigabe).
+        Liefert deutsche Hinweise zu Ordnern, die nicht verfügbar sind."""
+        notes = []
+        for grant in self.references:
+            if grant.grant_id in self.reference_snapshots:
+                continue
+            title = grant.title or self.reference_id(grant)
+            request = self._request(agent, task_id, "Workspace.Snapshot", f"Nachschlageordner „{title}“ in die Sandbox übernehmen "
+                                    "(nur lesen)", [], {"grantId": grant.grant_id, "root": grant.root}, "-")
+            outcome = self._submit_and_wait(agent, task_id, request, f"Nachschlageordner „{title}“ übernehmen", cancel)
+            if isinstance(outcome, str) or outcome.state != ProposalState.Succeeded or outcome.result is None:
+                notes.append(f"Nachschlageordner „{title}“ ist in diesem Run nicht verfügbar "
+                             f"({outcome if isinstance(outcome, str) else STATE_TEXT.get(outcome.state, outcome.state.value)}).")
+                continue
+            self.reference_snapshots[grant.grant_id] = outcome.result.target_results[0].text or ""
+        return notes
+
+    def available_references(self) -> list[FolderGrant]:
+        return [g for g in self.references if self.reference_snapshots.get(g.grant_id)]
+
+    def docs(self, agent: str, task_id: str, action: Action, cancel: CancelToken) -> ToolOutcome:
+        refs = self.available_references()
+        if not refs:
+            return ToolOutcome([], "docs: no reference documentation is available in this run; do not use it")
+        by_id = {self.reference_id(g): g for g in refs}
+        if action.page:
+            ref_id, _, page = action.page.partition(":")
+            if not page:
+                ref_id, page = (action.reference or (next(iter(by_id)) if len(by_id) == 1 else "")), action.page
+            grant = by_id.get(ref_id)
+            if grant is None:
+                return ToolOutcome([], f"docs page: unknown reference {ref_id!r}; use the page id exactly as the search "
+                                       f"listed it (<reference>:<page>), references: {', '.join(by_id)}")
+            request = self._request(agent, task_id, "Reference.Read", action.reason or f"Seite {page} nachlesen",
+                                    [ToolTarget(target_id="t1", path=page)],
+                                    {"grantId": grant.grant_id, "maxChars": 12_000, "part": action.part},
+                                    self.reference_snapshots[grant.grant_id])
+            outcome = self._submit_and_wait(agent, task_id, request, f"Nachschlagen: {page}"[:200], cancel)
+            describe = f"docs page {ref_id}:{page} part {action.part}"
+            if isinstance(outcome, str):
+                return ToolOutcome([], f"{describe}: {outcome}")
+            return self._evidence(request, outcome, describe)
+        targets = [by_id[action.reference]] if action.reference in by_id else refs
+        if action.reference and action.reference not in by_id:
+            return ToolOutcome([], f"docs: unknown reference {action.reference!r}; available: {', '.join(by_id)}")
+        evidence: list[Evidence] = []
+        summaries = []
+        result = ToolOutcome([], "")
+        for grant in targets:
+            request = self._request(agent, task_id, "Reference.Search", action.reason or f"In „{grant.title}“ nach "
+                                    f"'{action.query}' suchen", [],
+                                    {"grantId": grant.grant_id, "query": action.query, "maxResults": 10},
+                                    self.reference_snapshots[grant.grant_id])
+            outcome = self._submit_and_wait(agent, task_id, request, f"Nachschlagen „{action.query}“ in "
+                                            f"{grant.title or self.reference_id(grant)}"[:200], cancel)
+            describe = f"docs {action.query!r} in {self.reference_id(grant)}"
+            result = ToolOutcome([], f"{describe}: {outcome}") if isinstance(outcome, str) else self._evidence(request, outcome, describe)
+            evidence.extend(result.evidence)
+            summaries.append(result.summary)
+            if result.denied or result.expired:
+                break
+        return ToolOutcome(evidence, "; ".join(summaries), denied=result.denied, expired=result.expired)
 
     def _request(self, agent: str, task_id: str, tool: str, purpose: str, targets: list[ToolTarget],
                  arguments: dict, snapshot_id: str) -> ProposalRequest:
@@ -481,6 +555,8 @@ class ToolBridge:
             return self.fetch(agent, task_id, action.url, action.reason, cancel)
         if action.kind == "debug":
             return self.debug(agent, task_id, action, cancel)
+        if action.kind == "docs":
+            return self.docs(agent, task_id, action, cancel)
         if action.kind == "list":
             request = self._request(agent, task_id, "File.List", action.reason or f"Struktur von {action.path} ansehen",
                                     [ToolTarget(target_id="t1", path=action.path)],

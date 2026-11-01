@@ -2030,3 +2030,44 @@ def test_schrittlimit_unveraendert_fortsetzen_und_abbruch_zieht_frage_zurueck(ol
     wait_for(lambda: any(c.startswith("Run abgebrochen") for c in broker.chats("Orchestrator")), timeout=10)
     orch.stop()
     thread.join(5)
+
+
+def test_nachschlageordner_snapshot_anleitung_und_aktion_docs(ollama, tmp_path):
+    def responder(body):
+        system, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+        if "Planner agent" in system and "docs " not in user:
+            return ('```json\n{"action": "docs", "query": "add empty input"}\n```', "")
+        if "Planner agent" in system and "docs page" not in user:
+            return ('```json\n{"action": "docs", "page": "pyhilfe:api.chm/html/add.htm"}\n```', "")
+        return scripted_answer(body)
+
+    ollama.responder = responder
+    broker = FakeBroker(toolchains=[], references={"pyhilfe": "Python-Hilfe"})
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Bitte leere Eingaben in calc abfangen")
+    wait_for(lambda: finished(broker), timeout=60)
+    tools = [(p.tool, p.arguments.get("grantId")) for p in broker.proposals.values()]
+    # Projekt, dann der Nachschlageordner als eigener Snapshot (eigene Freigabe), dann erst die Arbeit.
+    assert tools[:2] == [("Workspace.Snapshot", "p"), ("Workspace.Snapshot", "ref-pyhilfe")]
+    search = next(p for p in broker.proposals.values() if p.tool == "Reference.Search")
+    assert search.snapshot_id == "refsnap-ref-pyhilfe" and search.arguments["query"] == "add empty input"
+    read = next(p for p in broker.proposals.values() if p.tool == "Reference.Read")
+    assert read.targets[0].path == "api.chm/html/add.htm" and read.arguments["grantId"] == "ref-pyhilfe"
+    planner = [r["messages"][-1]["content"] for r in ollama.requests if "Planner agent" in r["messages"][0]["content"]]
+    assert "## Reference documentation" in planner[0] and "- pyhilfe: Python-Hilfe" in planner[0]
+    assert "raises TypeError for None" in planner[2]  # gelesene Seite als Evidenz
+    coder = [r["messages"][-1]["content"] for r in ollama.requests if "Coder agent" in r["messages"][0]["content"]]
+    assert coder and "## Reference documentation" in coder[0]
+    assert not [p for p in broker.proposals.values() if p.tool.startswith("File.") and p.arguments.get("grantId") != "p"]
+    orch.stop()
+    thread.join(5)
+
+
+def test_ohne_nachschlageordner_keine_anleitung(ollama, tmp_path):
+    broker = FakeBroker(toolchains=[])
+    orch, thread = start(broker, ollama, tmp_path)
+    broker.send(OrchestratorCommandKind.Chat, "Bitte leere Eingaben in calc abfangen")
+    wait_for(lambda: finished(broker), timeout=60)
+    assert not any("Reference documentation" in r["messages"][-1]["content"] for r in ollama.requests)
+    orch.stop()
+    thread.join(5)

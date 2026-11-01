@@ -152,7 +152,9 @@ public sealed partial record FolderGrant(
     [property: JsonPropertyName("root")] string Root,
     [property: JsonPropertyName("rights")] IReadOnlyList<FolderRight> Rights,
     [property: JsonPropertyName("recursive")] bool Recursive,
-    [property: JsonPropertyName("exclude"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Exclude = null);
+    [property: JsonPropertyName("exclude"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Exclude = null,
+    [property: JsonPropertyName("reference"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Reference = null,
+    [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null);
 
 public sealed partial record ProjectConfig(
     [property: JsonPropertyName("schemaVersion")] long SchemaVersion,
@@ -163,7 +165,15 @@ public sealed partial record ProjectConfig(
     [property: JsonPropertyName("guestOs"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestOs? GuestOs = null,
     [property: JsonPropertyName("toolchainGuests"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, GuestOs>? ToolchainGuests = null,
     [property: JsonPropertyName("osDebug"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OsDebugConfig? OsDebug = null,
+    [property: JsonPropertyName("references"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ReferenceConfig>? References = null,
     [property: JsonPropertyName("autoApprove"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, bool>? AutoApprove = null);
+
+/// <summary>Projektdatei → references[]: ein Nachschlageordner.</summary>
+public sealed partial record ReferenceConfig(
+    [property: JsonPropertyName("referenceId")] string ReferenceId,
+    [property: JsonPropertyName("root")] string Root,
+    [property: JsonPropertyName("title"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null,
+    [property: JsonPropertyName("exclude"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Exclude = null);
 
 public sealed partial record SnapshotFile(
     [property: JsonPropertyName("path")] string Path,

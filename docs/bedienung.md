@@ -66,6 +66,14 @@ Dazu kommen Hinweise, wo es sich zu drehen lohnt: häufige Modellwechsel, verdä
 viele Zusammenfassungen, lange Prompts, viel Warten auf Freigaben. Jeder Run wird außerdem als eine Zeile in
 `%LOCALAPPDATA%\LocalAi\broker\zeiten.jsonl` gespeichert, zum Vergleichen verschiedener Modell-Einstellungen.
 
+### Nachschlageordner (Hilfedateien)
+
+Stehen in der Projektdatei `references` (siehe [Konfiguration](konfiguration.md#references-nachschlageordner)), kommt
+zu Beginn des ersten Runs nach dem Projekt-Snapshot je Nachschlageordner eine Karte „Nachschlageordner … übernehmen“.
+Danach schlagen die Agenten dort nach (Aktion `docs`): Suche über alle Seiten, dann die passende Seite lesen. Windows-
+Hilfen (`.chm`) werden dafür in der Sandbox entpackt – beim ersten Mal kann das je nach Größe einige Minuten dauern.
+Im Chat kannst du gezielt darauf hinweisen, z. B. „Schlag in der Win32-Hilfe nach, welche Flags CreateFile kennt.“
+
 ### Schrittlimit erreicht
 
 Braucht ein Agent alle Modellschritte einer Aufgabe (`maxStepsPerTask` bzw. `maxStepsPerRole`), endet die Aufgabe nicht
