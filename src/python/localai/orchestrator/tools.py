@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 import threading
 import time
 import uuid
@@ -166,6 +167,17 @@ class ToolBridge:
     def available_references(self) -> list[FolderGrant]:
         return [g for g in self.references if self.reference_snapshots.get(g.grant_id)]
 
+    def _contains_instruction_like_content(self, text: str) -> bool:
+        lowered = text.lower()
+        patterns = [
+            r"\bignore\b.{0,40}\b(instruction|policy|rule|previous|above)\b",
+            r"\b(system prompt|developer message|override)\b",
+            r"\b(call|invoke|run|execute|use)\b.{0,30}\b(tool|action|function)\b",
+            r"\b(exfiltrate|leak|secret|token|credential|password)\b",
+            r"\bdo not tell (the )?user\b",
+        ]
+        return any(re.search(p, lowered) for p in patterns)
+
     def docs(self, agent: str, task_id: str, action: Action, cancel: CancelToken) -> ToolOutcome:
         refs = self.available_references()
         if not refs:
@@ -187,6 +199,10 @@ class ToolBridge:
             describe = f"docs page {ref_id}:{page} part {action.part}"
             if isinstance(outcome, str):
                 return ToolOutcome([], f"{describe}: {outcome}")
+            if outcome.result is not None:
+                combined_text = "\n".join((tr.text or "") for tr in outcome.result.target_results)
+                if self._contains_instruction_like_content(combined_text):
+                    return ToolOutcome([], f"{describe}: blocked potential prompt-injection content in reference page")
             return self._evidence(request, outcome, describe)
         targets = [by_id[action.reference]] if action.reference in by_id else refs
         if action.reference and action.reference not in by_id:
