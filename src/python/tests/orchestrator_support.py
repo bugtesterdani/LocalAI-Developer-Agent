@@ -80,6 +80,7 @@ class FakeBroker:
     auto_approve: list[str] = field(default_factory=list)  # autoApprove der Projektdatei
     auto_active: set[str] = field(default_factory=set)  # nach bestätigtem Run.AutoApprove
     references: dict[str, str] = field(default_factory=dict)  # Nachschlageordner: id → Titel
+    reference_message: str | None = None  # Meldung des Workers zu Reference.Read (nächster Teil, Warnungen)
     ask_limits: bool = False  # Rückfrage beim Schrittlimit annehmen (sonst wie ein Broker ohne diese Methode)
     limit_questions: list = field(default_factory=list)
     limit_withdrawn: list[str] = field(default_factory=list)
@@ -247,7 +248,8 @@ class FakeBroker:
                                              f"1. {ref}:api.chm/html/add.htm – add(a, b)\n   add returns None for empty input"))
         if request.tool == "Reference.Read":
             results.append(TargetResult(target_id="t1", status=ResultStatus.Succeeded,
-                                        text="# add(a, b)\nReturns the sum; raises TypeError for None."))
+                                        text="# add(a, b)\nReturns the sum; raises TypeError for None.",
+                                        message=self.reference_message))
             return ToolResult(invocation_id="inv", proposal_id=pid, status=ResultStatus.Succeeded,
                               snapshot_id=request.snapshot_id, target_results=results, output_sha256="x", truncated=False,
                               untrusted=True, exit_code=0)
