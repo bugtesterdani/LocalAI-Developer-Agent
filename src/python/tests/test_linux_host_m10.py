@@ -176,3 +176,14 @@ def test_linux_bausteine_manifest(tmp_path):
     data = json.loads(path.read_text())
     assert data["debs"] == [] and data["wheels"] == ["wheels/pydantic-2-py3-none-any.whl"]
     assert data["sha256"]["wheels/pydantic-2-py3-none-any.whl"] == hashlib.sha256(b"w").hexdigest()
+
+
+def test_ohne_dateikopie_dienst_nur_mit_copy_vmfile_ein_fehler(tmp_path, monkeypatch):
+    # Debian 13 (hyperv-daemons 6.12) liefert kein hv_fcopy_uio_daemon: mit Eingangs-Laufwerk kein Fehler.
+    paths = provision.Paths(root=tmp_path / "root", systemd=tmp_path / "systemd")
+    paths.systemd.mkdir(parents=True)
+    monkeypatch.setattr(provision, "_find", lambda *c: "/usr/sbin/hv_kvp_daemon" if "kvp" in c[0] else None)
+    problems = provision.daemon_units(paths)
+    assert len(problems) == 1 and "hv_fcopy_uio_daemon fehlt" in problems[0] and '"inbound": "Disk"' in problems[0]
+    assert provision.daemon_units(paths, disk_inbound=True) == []
+    assert (paths.systemd / provision.KVP_UNIT).exists() and not (paths.systemd / provision.FCOPY_UNIT).exists()

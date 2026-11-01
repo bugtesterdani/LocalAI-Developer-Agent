@@ -90,7 +90,7 @@ Alle drei Abschnitte haben dieselben Felder; einige gelten nur für bestimmte G�
 | `lowIntegrityTools` | `true` | Werkzeugprozesse im Windows-Gast mit eingeschränktem Token und niedriger Integrität (SEC-21). **Nur zur Fehlersuche** abschalten |
 | `nestedVirtualization` | `false` | nur Linux: CPU-Virtualisierung an die VM weiterreichen, damit QEMU für OS-Debugging (M9) KVM nutzen kann |
 | `hostMount` | `true` | nur Hyper-V: virtuelle Festplatten beim Aufbau auf dem Host einbinden. `false` für Rechner, auf denen das per Richtlinie gesperrt ist – siehe [Rechner ohne Einbinden](betrieb.md#rechner-ohne-einbinden-virtueller-festplatten) |
-| `inbound` | `CopyVMFile` | nur Hyper-V: Weg der Jobs in die VM. `Disk` = Eingangs-Laufwerk statt Copy-VMFile, wenn die Gastdienstschnittstelle gesperrt ist |
+| `inbound` | `CopyVMFile` (Windows), `Disk` (Linux) | nur Hyper-V: Weg der Jobs in die VM. `Disk` = Eingangs-Laufwerk statt Copy-VMFile, wenn die Gastdienstschnittstelle gesperrt ist. Für den Linux-Gast ist `Disk` Pflicht: Debian 13 liefert kein `hv_fcopy_uio_daemon`, mit `CopyVMFile` meldet die Provisionierung „hv_fcopy_uio_daemon fehlt“ |
 | `imageLanguage` | `de-DE` | nur Windows mit `hostMount: false`: Sprache des Windows-Abbilds (lässt sich ohne Einbinden nicht auslesen) |
 | `binary` | `qemu-system-x86_64` | nur `sandbox.qemu`: QEMU-Programm |
 | `accel` | `Auto` | nur `sandbox.qemu`: `Auto` (KVM, wenn `/dev/kvm` nutzbar, sonst TCG), `Kvm`, `Tcg` |

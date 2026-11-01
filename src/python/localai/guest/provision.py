@@ -443,8 +443,9 @@ def _find(*candidates: str) -> str | None:
     return next((c for c in candidates if pathlib.Path(c).is_file()), None)
 
 
-def daemon_units(paths: Paths) -> list[str]:
-    """Eigene Einheiten für KVP und Dateikopie – unabhängig davon, wie das Debian-Paket seine Dienste nennt."""
+def daemon_units(paths: Paths, disk_inbound: bool = False) -> list[str]:
+    """Eigene Einheiten für KVP und Dateikopie – unabhängig davon, wie das Debian-Paket seine Dienste nennt.
+    Mit Eingangs-Laufwerk (``inbound: Disk``) braucht es keine Dateikopie: dann ist ein fehlender Dienst kein Fehler."""
     problems = []
     kvp = _find("/usr/sbin/hv_kvp_daemon", "/usr/libexec/hypervkvpd")
     fcopy_uio = _find("/usr/sbin/hv_fcopy_uio_daemon")
@@ -469,8 +470,10 @@ def daemon_units(paths: Paths) -> list[str]:
             "[Unit]", "Description=LocalAi: Hyper-V-Dateikopie (Copy-VMFile)", "ConditionPathExists=/dev/vmbus/hv_fcopy", "",
             "[Service]", f"ExecStart={fcopy_old} -n", "Restart=always", "RestartSec=2", "",
             "[Install]", "WantedBy=multi-user.target", ""]), encoding="utf-8")
-    else:
-        problems.append("hv_fcopy_uio_daemon fehlt (Paket hyperv-daemons) – Copy-VMFile kann keine Jobs in die VM bringen")
+    elif not disk_inbound:
+        problems.append("hv_fcopy_uio_daemon fehlt (Paket hyperv-daemons; Debian 13 liefert ihn nicht mit) – Copy-VMFile "
+                        "kann keine Jobs in die VM bringen. Abhilfe: in config/localai.json unter sandbox.hypervLinux "
+                        "\"inbound\": \"Disk\" setzen (Jobs über ein Eingangs-Laufwerk) und die VM neu aufbauen")
     return problems
 
 
@@ -503,13 +506,15 @@ def start_daemons(paths: Paths, config: dict[str, Any] | None = None) -> list[st
         unit = line.split()[0] if line.split() else ""
         if ("kvp" in unit or "fcopy" in unit) and unit not in (KVP_UNIT, FCOPY_UNIT):
             run(["systemctl", "disable", "--now", unit])
-    problems = daemon_units(paths)
+    disk_inbound = (config or {}).get("inbound") == "Disk"
+    problems = daemon_units(paths, disk_inbound)
     run(["systemctl", "daemon-reload"])
     for unit in (KVP_UNIT, FCOPY_UNIT):
         if (paths.systemd / unit).exists():
             run(["systemctl", "enable", "--now", unit])
     time.sleep(2)
-    if (paths.systemd / FCOPY_UNIT).exists() and run(["systemctl", "is-active", FCOPY_UNIT]).stdout.strip() != "active":
+    if (not disk_inbound and (paths.systemd / FCOPY_UNIT).exists()
+            and run(["systemctl", "is-active", FCOPY_UNIT]).stdout.strip() != "active"):
         status = run(["systemctl", "status", "--no-pager", "-n", "5", FCOPY_UNIT]).stdout.replace("\n", " ")[-400:]
         problems.append(f"Dienst für Copy-VMFile läuft nicht ({status})")
     return problems

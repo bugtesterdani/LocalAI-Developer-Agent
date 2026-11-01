@@ -343,6 +343,9 @@ public sealed record HostOptions
             MemoryMB = linux ? 4096 : 8192,
             OsDiskGB = linux ? 64 : 128,
             BuildTimeout = TimeSpan.FromMinutes(linux ? 30 : 90),
+            // Linux-Gast: Debian 13 (hyperv-daemons 6.12) liefert kein hv_fcopy_uio_daemon – Copy-VMFile geht dort nicht,
+            // Jobs kommen deshalb standardmäßig über ein Eingangs-Laufwerk.
+            Inbound = linux && !qemu ? "Disk" : "CopyVMFile",
         };
         var prerequisites = Str("prerequisites") is { } pre
             ? Path.GetFullPath(Path.Combine(repoRoot, pre))

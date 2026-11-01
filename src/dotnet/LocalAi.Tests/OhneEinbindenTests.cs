@@ -276,11 +276,12 @@ public sealed class OhneEinbindenTests : IDisposable
         Assert.Equal("en-US", options.HyperV.ImageLanguage);
         options.HyperV.Validate();
         Assert.False(options.HyperVLinux!.HostMount);
-        Assert.False(options.HyperVLinux.InboundDisk);
+        Assert.True(options.HyperVLinux.InboundDisk); // Linux-Gast: Standard Eingangs-Laufwerk (kein hv_fcopy_uio_daemon)
         var template = LocalAi.Broker.Host.HostOptions.Parse(["--config", Path.Combine(ContractTests.RepoRoot(), "config", "localai.json"),
             "--data", Path.Combine(_dir, "data2")]);
         Assert.True(template.HyperV!.HostMount);
         Assert.Equal("CopyVMFile", template.HyperV.Inbound);
+        Assert.Equal("Disk", template.HyperVLinux!.Inbound);
     }
 
     [Fact, Trait("Pruefung", "Ohne-Einbinden")]

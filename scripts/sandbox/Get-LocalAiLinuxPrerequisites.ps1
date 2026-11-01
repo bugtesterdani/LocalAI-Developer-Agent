@@ -123,6 +123,11 @@ $manifest = [ordered]@{
 $json = $manifest | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText((Join-Path $prereq 'prerequisites.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
 Write-Host ''
+$imageFile = Join-Path $Target 'debian-13-generic-amd64.raw'
+if (-not (Test-Path -LiteralPath $imageFile)) {
+    Write-Warning "Kein Debian-Abbild unter $imageFile (mit -SkipImage wird es nicht geladen). Ohne Abbild startet die Linux-VM nicht: das Skript ohne -SkipImage erneut ausführen oder imagePath auf ein vorhandenes Abbild setzen."
+}
 Write-Host "Fertig. In config\localai.json unter sandbox.hypervLinux eintragen:"
 Write-Host ("  ""imagePath"": ""{0}""" -f ((Join-Path $Target 'debian-13-generic-amd64.raw') -replace '\\', '\\'))
 Write-Host ("  ""prerequisites"": ""{0}""" -f ($prereq -replace '\\', '\\'))
+Write-Host '  "inbound": "Disk"   (Debian 13 hat kein hv_fcopy_uio_daemon - Jobs kommen über ein Eingangs-Laufwerk)'
