@@ -45,7 +45,7 @@
       "idleMinutes": 30,
       "stopAction": "ShutDown",
       "hostMount": true,
-      "inbound": "CopyVMFile"
+      "inbound": "Disk"
     }
   },
   "orchestrator": {

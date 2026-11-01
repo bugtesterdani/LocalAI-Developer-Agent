@@ -125,6 +125,9 @@ public sealed class M8Tests : IAsyncDisposable
         Assert.Equal(Path.Combine(repo, "linux", "linux-gast"), linux.LinuxPrerequisites);
         Assert.Equal(10, linux.IdleMinutes);
         Assert.Equal("Save", linux.StopVmAction);
+        // Debian 13 hat kein hv_fcopy_uio_daemon: Linux-Gast standardmäßig mit Eingangs-Laufwerk, Windows mit Copy-VMFile.
+        Assert.True(linux.InboundDisk);
+        Assert.Equal("CopyVMFile", options.HyperV.Inbound);
         linux.Validate();
         Assert.NotEqual(options.HyperV.VmDirectory, linux.VmDirectory);
 
