@@ -271,6 +271,11 @@ oder beendet die Aufgabe. Der bearbeitete Text geht genau so beim nächsten Schr
 alle weiteren Schritte. Kein Werkzeug, keine Freigabe – nur die Oberfläche darf antworten, nur der laufende
 Orchestrator fragen.
 
+**Nachschlageordner (Stand 01.11.2026):** Projektdatei `references` – schreibgeschützte Ordner mit Hilfedateien
+(`.chm`, HTML, Markdown, Text) als Grants `ref-<id>` (nur `List`/`Read`). Eigener Snapshot je Ordner, Aktion `docs`
+(`Reference.Search`, `Reference.Read`). CHM wird nur in der Sandbox entpackt (Windows-Gast `hh.exe`, Linux-Gast `7z`
+aus dem Paket `7zip`), HTML wird zu Text, Index je Snapshot im Speicher, CHM-Inhalte je Datei-Hash zwischengespeichert.
+
 ## Risiken
 
 | Risiko | Gegenmaßnahme |

@@ -47,7 +47,7 @@ class EditBlock:
 
 @dataclass
 class Action:
-    kind: str  # list | read | search | symbols | fetch | debug | finish
+    kind: str  # list | read | search | symbols | fetch | debug | docs | finish
     reasoning: str
     path: str = "."
     depth: int = 3
@@ -59,6 +59,10 @@ class Action:
     edits: list[EditBlock] = field(default_factory=list)  # SEARCH/REPLACE-Blöcke vor dem JSON
     diff_block: str = ""  # ```diff-Block außerhalb des JSON (Ersatz, wenn das Patchfeld fehlt)
     debug: dict[str, Any] = field(default_factory=dict)  # M9: Befehl und Parameter der Debug-Sitzung
+    # Nachschlageordner: Suche (query, optional reference) oder Seite lesen (page, part)
+    reference: str = ""
+    page: str = ""
+    part: int = 1
     # Weitere Aktionen derselben Antwort (der Reihe nach, jede mit eigener Freigabe); „finish“ zusammen mit anderen
     # Aktionen wird nicht ausgeführt (ignored_finish), das Modell schließt nach den Ergebnissen erneut ab.
     more: list[Action] = field(default_factory=list)
@@ -459,12 +463,26 @@ def _action(data: dict[str, Any], reasoning: str) -> Action:
         if unknown:
             raise ProtocolError(f"debug: unknown fields {', '.join(unknown)}.")
         return Action("debug", reasoning, reason=str(data.get("reason", "")), debug={"command": command, **params})
+    if kind == "docs":
+        reference = data.get("reference") or ""
+        if not isinstance(reference, str) or len(reference) > 40:
+            raise ProtocolError('docs: "reference" must be the id of a reference (or leave it out).')
+        page, query = data.get("page"), data.get("query")
+        if isinstance(page, str) and page.strip():
+            part = data.get("part", 1)
+            if not isinstance(part, int) or not 1 <= part <= 1000:
+                raise ProtocolError("docs: part must be an integer from 1 to 1000.")
+            return Action("docs", reasoning, page=page.strip(), part=part, reference=reference.strip(),
+                          reason=str(data.get("reason", "")))
+        if not isinstance(query, str) or not query.strip() or len(query) > 200:
+            raise ProtocolError('docs needs "query": "words to look up" (at most 200 characters) or "page": "<id>:<page>".')
+        return Action("docs", reasoning, query=query.strip(), reference=reference.strip(), reason=str(data.get("reason", "")))
     if kind == "finish":
         result = data.get("result")
         if not isinstance(result, dict):
             raise ProtocolError('finish needs "result": { ... } as described for your role.')
         return Action("finish", reasoning, result=result)
-    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols", "fetch", "debug" (if available) or "finish". '
+    raise ProtocolError('Unknown action. Use "list", "read", "search", "symbols", "fetch", "debug" / "docs" (if available) or "finish". '
                         'A final result must be wrapped: {"action": "finish", "result": { ... }}.')
 
 

@@ -19,6 +19,8 @@ Definiert in `src/dotnet/LocalAi.Broker/ProposalPolicy.cs` (Prüfung) und ausgef
 | `File.ReadMany` | mehrere Dateien lesen | 1–200, Sammel | `Read` | Sandbox |
 | `File.Search` | Volltextsuche | 1–50, Sammel | `Read` | Sandbox |
 | `Repo.Index` | Repo-Map bzw. Symbolsuche (`query`) | – | `List`, `Read` | Sandbox |
+| `Reference.Search` | Volltextsuche in einem Nachschlageordner (auch in Windows-Hilfen `.chm`) | – | `List`, `Read` | Sandbox |
+| `Reference.Read` | eine Seite eines Nachschlageordners lesen (lange Seiten in Teilen) | genau 1 (Seite) | `Read` | Sandbox |
 | `Patch.Apply` | Patch auf die Arbeitskopie anwenden → neuer Snapshot | 1–200, Sammel, je Datei | `Read` + je Datei `Create`/`Modify`/`Delete` | Sandbox |
 | `Toolchain.Restore` | Abhängigkeiten aus der Offline-Paketquelle | – | `Read`, `Execute` | nur Offline-VM |
 | `Toolchain.Build` | bauen | – | `Read`, `Execute` | nur Offline-VM |

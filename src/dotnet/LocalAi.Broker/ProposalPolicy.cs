@@ -109,6 +109,11 @@ public sealed class ProposalPolicy
             RequiresSnapshot: false, RequiresGrant: false);
         _tools[OsDebugTools.Stop] = new(OsDebugTools.Stop, "1", 0, 0, false, new HashSet<string> { "sessionId" }, [],
             RequiresSnapshot: false, RequiresGrant: false);
+        // Nachschlageordner (references): Volltextsuche und Seite lesen, auch in Windows-Hilfen (.chm) – nur in der Sandbox.
+        _tools["Reference.Search"] = new("Reference.Search", "1", 0, 0, false, new HashSet<string> { "grantId", "query", "maxResults" },
+            [FolderRight.List, FolderRight.Read]);
+        _tools["Reference.Read"] = new("Reference.Read", "1", 1, 1, false, new HashSet<string> { "grantId", "maxChars", "part" },
+            [FolderRight.Read]);
         // Bestätigung der automatischen Freigabe für einen Run: immer eine ausdrückliche Nutzerentscheidung.
         _tools[AutoApprove.Tool] = new(AutoApprove.Tool, "1", 0, 0, false, new HashSet<string> { "tools" }, [],
             RequiresSnapshot: false, RequiresGrant: false);
@@ -233,6 +238,10 @@ public sealed class ProposalPolicy
         {
             OsDebugTools.ValidateStart(request.Arguments, _context.OsDebug);
         }
+        else if (tool.Name.StartsWith("Reference.", StringComparison.Ordinal))
+        {
+            ValidateReference(tool.Name, request.Arguments, grant!);
+        }
         else if (tool.Name == AutoApprove.Tool)
         {
             AutoApprove.RequireTools(request.Arguments, _options.AutoApproveTools);
@@ -246,6 +255,37 @@ public sealed class ProposalPolicy
             OsDebugTools.ValidateCommand(tool.Name, request.Arguments);
         }
         return normalized;
+    }
+
+    private static void ValidateReference(string tool, JsonElement arguments, FolderGrant grant)
+    {
+        if (grant.Reference != true)
+        {
+            throw new BrokerException(BrokerErrorCodes.Forbidden, $"{tool} nur für Nachschlageordner (references), nicht für {grant.GrantId}");
+        }
+        if (tool == "Reference.Search")
+        {
+            var query = StringArgument(arguments, "query");
+            if (string.IsNullOrWhiteSpace(query) || query.Length > 200 || query.Any(char.IsControl))
+            {
+                throw Invalid("query: 1 bis 200 Zeichen ohne Steuerzeichen");
+            }
+            RequireIntRange(arguments, "maxResults", 1, 50);
+        }
+        else
+        {
+            RequireIntRange(arguments, "maxChars", 500, 60_000);
+            RequireIntRange(arguments, "part", 1, 1000);
+        }
+    }
+
+    private static void RequireIntRange(JsonElement arguments, string name, int min, int max)
+    {
+        if (arguments.TryGetProperty(name, out var value)
+            && (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var n) || n < min || n > max))
+        {
+            throw Invalid($"{name}: ganze Zahl von {min} bis {max}");
+        }
     }
 
     private static string? StringArgument(JsonElement arguments, string name) =>

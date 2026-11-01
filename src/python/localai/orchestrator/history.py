@@ -62,6 +62,9 @@ def describe_action(action: protocol.Action) -> str:
         return f"fetch {action.url}" + (f" ({action.reason})" if action.reason else "")
     if action.kind == "debug":
         return "debug " + str(action.debug.get("command", ""))
+    if action.kind == "docs":
+        return (f"docs page {action.page} part {action.part}" if action.page else f"docs {action.query!r}") + (
+            f" ({action.reason})" if action.reason else "")
     if action.kind == "finish":
         keys = sorted(action.result)
         return "finish (" + ", ".join(keys) + ")" if keys else "finish"

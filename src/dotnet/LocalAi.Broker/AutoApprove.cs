@@ -29,6 +29,8 @@ public static class AutoApprove
         ["File.ReadMany"] = "mehrere Dateien im Snapshot lesen (Sandbox)",
         ["File.Search"] = "im Snapshot suchen (Sandbox)",
         ["Repo.Index"] = "Symbolindex des Snapshots erstellen (Sandbox)",
+        ["Reference.Search"] = "in Nachschlageordnern suchen (Sandbox)",
+        ["Reference.Read"] = "eine Seite eines Nachschlageordners lesen (Sandbox)",
         ["Patch.Apply"] = "Änderungen auf die Arbeitskopie in der Sandbox anwenden (nicht auf den Projektordner)",
         ["Toolchain.Restore"] = "Pakete wiederherstellen in der Offline-VM",
         ["Toolchain.Build"] = "bauen in der Offline-VM",

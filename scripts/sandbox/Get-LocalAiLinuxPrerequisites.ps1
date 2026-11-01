@@ -8,7 +8,7 @@
       1. Debian 13 Cloud-Abbild (generic, amd64, Rohformat) samt Prüfung gegen SHA512SUMS
       2. Python für Linux (python-build-standalone, install_only_stripped) samt Prüfung gegen SHA256SUMS
       3. Wheels des Workers für Linux (pydantic und Abhängigkeiten, gleiche Versionen wie src/python/.venv)
-      4. Debian-Paket hyperv-daemons (KVP-Datenaustausch und Copy-VMFile im Gast) samt Abhängigkeiten
+      4. Debian-Pakete hyperv-daemons (KVP-Datenaustausch im Gast) und 7zip (Windows-Hilfen .chm entpacken) samt Abhängigkeiten
       5. mit -WithQemu (M9, Betriebssystem-Debugging): QEMU, OVMF (UEFI) und binutils (objdump) samt Abhängigkeiten
     Ergebnis:
       <Ziel>\debian-13-generic-amd64.raw          → sandbox.hypervLinux.imagePath
@@ -97,7 +97,8 @@ if ($LASTEXITCODE -ne 0) { throw "pip download fehlgeschlagen (Exitcode $LASTEXI
 # ------------------------------------------------------------------ 4/5 Debian-Pakete (mit Abhängigkeiten, Hashprüfung)
 $debDir = Join-Path $prereq 'debs'
 Get-ChildItem -LiteralPath $debDir -Filter '*.deb' | Remove-Item -Force
-$debPackages = @('hyperv-daemons')
+# 7zip: Windows-Hilfen (.chm) in Nachschlageordnern entpacken (nur in der VM)
+$debPackages = @('hyperv-daemons', '7zip')
 if ($WithQemu) { $debPackages += @('qemu-system-x86', 'ovmf', 'binutils') }
 Push-Location $repo
 try {

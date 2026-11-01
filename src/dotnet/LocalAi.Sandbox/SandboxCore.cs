@@ -117,6 +117,9 @@ public sealed class ProjectPolicyContext(ProjectConfig project, SnapshotRegistry
 
 public static class ProjectLoader
 {
+    /// <summary>Grant-Kennung eines Nachschlageordners: ref-&lt;referenceId&gt;.</summary>
+    public const string ReferencePrefix = "ref-";
+
     /// <summary>Lädt eine Projektdatei; relative Grant-Pfade beziehen sich auf <paramref name="baseDirectory"/>.</summary>
     public static ProjectConfig Load(string path, string baseDirectory)
     {
@@ -133,12 +136,36 @@ public static class ProjectLoader
             {
                 throw new InvalidDataException($"Grant {grant.GrantId}: Recht doppelt angegeben");
             }
+            if (grant.Reference is not null || grant.GrantId.StartsWith(ReferencePrefix, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException($"Grant {grant.GrantId}: Nachschlageordner bitte unter \"references\" angeben (nicht in grants)");
+            }
             var root = Path.GetFullPath(Path.Combine(baseDirectory, grant.Root));
             if (!Directory.Exists(root))
             {
                 throw new DirectoryNotFoundException($"Grant {grant.GrantId}: Ordner existiert nicht: {root}");
             }
             grants.Add(grant with { Root = root });
+        }
+        foreach (var reference in project.References ?? [])
+        {
+            // Nachschlageordner: immer nur auflisten und lesen, nie ändern oder ausführen.
+            if (!System.Text.RegularExpressions.Regex.IsMatch(reference.ReferenceId, "^[a-z0-9][a-z0-9-]{0,31}$"))
+            {
+                throw new InvalidDataException($"references: ungültige referenceId '{reference.ReferenceId}' (Kleinbuchstaben, Ziffern, -)");
+            }
+            var grantId = ReferencePrefix + reference.ReferenceId;
+            if (!ids.Add(grantId))
+            {
+                throw new InvalidDataException($"references: referenceId doppelt: {reference.ReferenceId}");
+            }
+            var root = Path.GetFullPath(Path.Combine(baseDirectory, reference.Root));
+            if (!Directory.Exists(root))
+            {
+                throw new DirectoryNotFoundException($"Nachschlageordner {reference.ReferenceId}: Ordner existiert nicht: {root}");
+            }
+            grants.Add(new FolderGrant(grantId, root, [FolderRight.List, FolderRight.Read], Recursive: true, reference.Exclude,
+                Reference: true, Title: string.IsNullOrWhiteSpace(reference.Title) ? reference.ReferenceId : reference.Title.Trim()));
         }
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in project.Toolchains ?? [])
@@ -266,7 +293,7 @@ public static class ResultValidator
         }
         var allowed = job.Proposal.Targets.Select(t => t.TargetId).ToHashSet(StringComparer.Ordinal);
         // Feste Ergebnisziele: Snapshot-ID (Import/Patch), Log und Testbericht (Toolchain.*), Repo-Map (Repo.Index).
-        allowed.UnionWith(["*", "snapshot", "log", "tests", "map", "changes", "debug", "screenshot"]);
+        allowed.UnionWith(["*", "snapshot", "log", "tests", "map", "changes", "debug", "screenshot", "refs"]);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         long chars = 0;
         foreach (var target in result.TargetResults)
@@ -315,6 +342,11 @@ public sealed class SandboxToolAdapter(
         if (proposal.Tool == "Workspace.Snapshot")
         {
             return SnapshotTimeout;
+        }
+        if (proposal.Tool.StartsWith("Reference.", StringComparison.Ordinal))
+        {
+            // Erster Zugriff entpackt Hilfedateien (.chm) und baut den Suchindex – bei großen Hilfen dauert das.
+            return TimeSpan.FromMinutes(20);
         }
         if (proposal.Tool == "OsDebug.Start")
         {

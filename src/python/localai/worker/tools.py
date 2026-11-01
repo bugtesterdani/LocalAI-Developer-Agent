@@ -14,7 +14,13 @@ from localai.pathrules import ROOT, PathRuleError, is_within, normalize_relative
 from localai.worker import hdevelop, patching
 from localai.worker.execution import ACTIONS, ExecError, Executor
 from localai.worker.osdebug import OsDebugError
-from localai.worker.repoindex import DEFAULT_MAX_CHARS, MAX_CHARS, RepoIndexer, build_map
+from localai.worker.reference import ReferenceLibrary, ReferenceLookupError
+from localai.worker.repoindex import (
+    DEFAULT_MAX_CHARS,
+    MAX_CHARS,
+    RepoIndexer,
+    build_map,
+)
 from localai.worker.snapshot import SnapshotError, SnapshotIndex, SnapshotStore
 
 MAX_SINGLE_READ = 256 * 1024
@@ -57,8 +63,10 @@ Handler = Callable[[SandboxJob, SnapshotIndex], tuple[list[TargetResult], bool]]
 
 class ToolRunner:
     def __init__(self, store: SnapshotStore, executor: Executor | None = None, indexer: RepoIndexer | None = None,
-                 osdebug: Any = None) -> None:
+                 osdebug: Any = None, references: ReferenceLibrary | None = None) -> None:
         self.store = store
+        # Nachschlageordner: CHM-Inhalte werden neben den Snapshots zwischengespeichert (nur in der Sandbox).
+        self.references = references or ReferenceLibrary(store.base.parent / "refcache")
         self.executor = executor
         self.indexer = indexer
         self.osdebug = osdebug  # OsDebugManager (M9) oder None
@@ -73,6 +81,8 @@ class ToolRunner:
             "Workspace.Diff": self._diff,
             **{name: self._toolchain for name in ACTIONS},
             "OsDebug.Start": self._osdebug,
+            "Reference.Search": self._reference_search,
+            "Reference.Read": self._reference_read,
         }
 
     def run(self, job: SandboxJob, payload: Any) -> ToolResult:
@@ -94,7 +104,7 @@ class ToolRunner:
                 results, truncated = handler(job, index)
             status = (ResultStatus.Succeeded if all(r.status == ResultStatus.Succeeded for r in results)
                       else ResultStatus.Failed)
-        except (ToolError, SnapshotError, ExecError, patching.PatchError, OsDebugError) as err:
+        except (ToolError, SnapshotError, ExecError, patching.PatchError, OsDebugError, ReferenceLookupError) as err:
             results, truncated, status = [TargetResult(target_id="*", status=ResultStatus.Failed, message=str(err))], False, ResultStatus.Failed
         except Exception as err:  # noqa: BLE001 – unerwarteter Fehler: melden statt ohne Antwort abzustürzen
             message = f"Interner Fehler im Worker ({type(err).__name__}): {err}"[:2000]
@@ -120,6 +130,27 @@ class ToolRunner:
         message = f"{len(index.files)} Dateien, {total} Bytes, {skipped} übersprungen"
         return [TargetResult(target_id="snapshot", status=ResultStatus.Succeeded, text=index.snapshot_id,
                              content_sha256=index.snapshot_id, message=message)], False
+
+    # ------------------------------------------------------------------ Nachschlageordner
+    def _reference_search(self, job: SandboxJob, index: SnapshotIndex) -> tuple[list[TargetResult], bool]:
+        args = job.proposal.arguments
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError("query fehlt")
+        ref = index.grant_id.removeprefix("ref-")
+        text = self.references.search(index, query, _int_arg(args, "maxResults", 10, 1, 50), ref, ref + ":")
+        return [TargetResult(target_id="refs", status=ResultStatus.Succeeded, text=text, content_sha256=_sha(text))], False
+
+    def _reference_read(self, job: SandboxJob, index: SnapshotIndex) -> tuple[list[TargetResult], bool]:
+        args = job.proposal.arguments
+        target = job.proposal.targets[0]
+        text, next_part, warnings = self.references.read(
+            index, _target_path(target.path), _int_arg(args, "maxChars", 12_000, 500, 60_000), _int_arg(args, "part", 1, 1, 1000),
+            index.grant_id.removeprefix("ref-") + ":")
+        # Weiterer Teil und Warnungen als Meldung des Workers – der Orchestrator gibt sie dem Agenten getrennt vom Seitentext.
+        notes = ([f"nächster Teil: {next_part}"] if next_part else []) + [f"Warnung: {w}" for w in warnings]
+        return [TargetResult(target_id=target.target_id, status=ResultStatus.Succeeded, text=text, content_sha256=_sha(text),
+                             message="; ".join(notes)[:2000] or None)], False
 
     # ------------------------------------------------------------------ Lesen
     def _read(self, job: SandboxJob, index: SnapshotIndex) -> tuple[list[TargetResult], bool]:

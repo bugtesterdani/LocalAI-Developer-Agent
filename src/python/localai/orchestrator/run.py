@@ -521,6 +521,7 @@ class Orchestrator:
                                  prep.summary.profile if prep.summary else None)
             agents[role].timings = state.timings
             agents[role].on_limit = functools.partial(self._ask_limit, state)
+            agents[role].reference_text = self._reference_text
         return agents
 
     def _ask_limit(self, state: GoalState, request: LimitRequest, cancel: CancelToken) -> LimitDecision | None:
@@ -683,8 +684,28 @@ class Orchestrator:
                               "Projektdatei prüfen (\"root\", \"recursive\": true, \"exclude\") und neu starten.")
                 bridge.snapshot_id = bridge.base_snapshot_id = None
                 return None
+        if bridge.references:
+            try:
+                notes = bridge.snapshot_references("Planner", "T0", planner_cancel)
+            except Cancelled:
+                state.controls.run.raise_if_cancelled()
+                notes = []
+            if notes:
+                reporter.chat("Orchestrator", "\n".join(notes))
         self._confirm_auto_approve(state, bridge)
         return agents
+
+    def _reference_text(self) -> str:
+        """Anleitung für die Aktion docs (nur mit verfügbaren Nachschlageordnern)."""
+        refs = self.bridge.available_references() if self.bridge is not None else []
+        if not refs:
+            return ""
+        listed = "\n".join(f"- {ToolBridge.reference_id(g)}: {g.title or ToolBridge.reference_id(g)}" for g in refs)
+        return ("## Reference documentation (read-only, look things up instead of guessing)\n"
+                f"{listed}\n"
+                '{"action": "docs", "query": "CreateFile flags"} – full-text search in all references (add "reference": "<id>" '
+                "for one); use API names, error codes, keywords.\n"
+                '{"action": "docs", "page": "<id>:<page from the search>"} – read a page; long pages come in parts ("part": 2).')
 
     def _confirm_auto_approve(self, state: GoalState, bridge: ToolBridge) -> None:
         """autoApprove der Projektdatei: zu Beginn jedes Runs ausdrücklich ansagen und bestätigen lassen (sonst einzeln)."""

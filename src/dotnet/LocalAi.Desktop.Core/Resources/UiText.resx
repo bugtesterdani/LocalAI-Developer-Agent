@@ -198,6 +198,12 @@
   <data name="AutoTool_Repo_Index" xml:space="preserve">
     <value>Repo.Index – Symbolindex des Snapshots (Sandbox)</value>
   </data>
+  <data name="AutoTool_Reference_Search" xml:space="preserve">
+    <value>Reference.Search – in Nachschlageordnern suchen (Sandbox)</value>
+  </data>
+  <data name="AutoTool_Reference_Read" xml:space="preserve">
+    <value>Reference.Read – eine Seite eines Nachschlageordners lesen (Sandbox)</value>
+  </data>
   <data name="AutoTool_Patch_Apply" xml:space="preserve">
     <value>Patch.Apply – Änderungen auf die Arbeitskopie in der Sandbox anwenden (nicht auf deinen Projektordner)</value>
   </data>

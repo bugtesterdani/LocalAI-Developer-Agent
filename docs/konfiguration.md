@@ -168,6 +168,7 @@ andere ist unerreichbar (R09).
 | `guestOs` | nein | Heimat-VM des Projekts (`Windows`/`Linux`); sonst `sandbox.defaultGuestOs` |
 | `toolchainGuests` | nein | Gastsystem je Toolchain; darf dem Manifest nur zustimmen, ein Widerspruch verhindert den Start |
 | `osDebug` | nein | eigenes Betriebssystem in QEMU booten und debuggen (M9), siehe unten |
+| `references` | nein | schreibgeschützte Nachschlageordner (Windows-Hilfen `.chm`, HTML, Markdown, Text), siehe unten |
 | `autoApprove` | nein | Tools, die in einem Run automatisch genehmigt werden – erst nach Bestätigung zu Beginn jedes Runs, siehe unten |
 
 ### `grants[]`
@@ -198,6 +199,34 @@ außerdem Verknüpfungen, Junctions und Dateien mit mehreren Hardlinks. Welche R
 
 Beispiel: `config/m9-danios-project.json`. Ablauf: [Prüfanleitung M9](pruefung-M9.md).
 
+### `references` (Nachschlageordner)
+
+Hilfedateien und Handbücher, in denen die Agenten nachschlagen – getrennt vom Projekt und **nie änderbar**.
+
+```json
+"references": [
+  { "referenceId": "win32", "root": "D:\\Doku\\Win32", "title": "Win32-API-Hilfe" },
+  { "referenceId": "halcon", "root": "C:\\Program Files\\MVTec\\HALCON-24.11\\doc", "exclude": ["pdf"] }
+]
+```
+
+| Feld | Bedeutung |
+|---|---|
+| `referenceId` | Kennung (Kleinbuchstaben, Ziffern, `-`), wird zum Grant `ref-<referenceId>` |
+| `root` | Ordner auf dem Host (absolut oder relativ zur Repository-Wurzel); Unterordner eingeschlossen |
+| `title` | Anzeigename für Agenten und Freigabekarten (Standard: `referenceId`) |
+| `exclude` | Datei- oder Ordnernamen, die nicht übernommen werden |
+
+- **Formate:** `.chm` (Windows-Hilfe), `.htm`/`.html`, `.md`, `.txt`, `.rst`. Andere Dateien werden übergangen.
+- **CHM** wird nur in der Sandbox entpackt, nie auf dem Rechner: im Windows-Gast mit `hh.exe` (gehört zu Windows),
+  im Linux-Gast mit `7z` (Paket `7zip` aus `Get-LocalAiLinuxPrerequisites.ps1`; ältere Linux-Bausteine: Skript erneut
+  ausführen und die VM neu aufbauen). Der erste Zugriff entpackt und baut den Suchindex, danach geht es schnell.
+- **Ablauf:** Zu Beginn des ersten Runs wird jeder Nachschlageordner als eigener Snapshot übernommen (eigene
+  Freigabekarte „Nachschlageordner … übernehmen“, nie automatisch). Danach können die Agenten mit der Aktion `docs`
+  suchen (`Reference.Search`) und Seiten lesen (`Reference.Read`). Beides lässt sich mit `autoApprove` automatisch
+  freigeben.
+- Ein Nachschlageordner hat nur die Rechte `List` und `Read`; Patches, Builds und Übernahme sind dort gesperrt.
+
 ### `autoApprove`
 
 Erspart Klicks für Aktionen, die nur in der Sandbox wirken. Standard: nichts automatisch.
@@ -225,7 +254,7 @@ Erspart Klicks für Aktionen, die nur in der Sandbox wirken. Standard: nichts au
 
 | Möglich | Wirkung |
 |---|---|
-| `File.List`, `File.Read`, `File.ReadMany`, `File.Search`, `Repo.Index` | lesen nur den Snapshot in der Sandbox |
+| `File.List`, `File.Read`, `File.ReadMany`, `File.Search`, `Repo.Index`, `Reference.Search`, `Reference.Read` | lesen nur den Snapshot (Projekt bzw. Nachschlageordner) in der Sandbox |
 | `Patch.Apply` | ändert nur die Arbeitskopie in der Sandbox (Übernahme in den Projektordner bleibt eine eigene Freigabe) |
 | `Toolchain.Restore`, `Toolchain.Build`, `Toolchain.Test`, `Toolchain.Run`, `Toolchain.Lint` | führen Code aus – nur in der Offline-VM |
 

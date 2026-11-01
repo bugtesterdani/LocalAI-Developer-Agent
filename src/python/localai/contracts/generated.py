@@ -169,6 +169,8 @@ class FolderGrant(Contract):
     rights: list[FolderRight] = Field(alias="rights")
     recursive: StrictBool = Field(alias="recursive")
     exclude: list[str] | None = Field(default=None, alias="exclude")
+    reference: StrictBool | None = Field(default=None, alias="reference")
+    title: str | None = Field(default=None, alias="title")
 
 
 class ProjectConfig(Contract):
@@ -180,7 +182,17 @@ class ProjectConfig(Contract):
     guest_os: GuestOs | None = Field(default=None, alias="guestOs")
     toolchain_guests: dict[str, GuestOs] | None = Field(default=None, alias="toolchainGuests")
     os_debug: OsDebugConfig | None = Field(default=None, alias="osDebug")
+    references: list[ReferenceConfig] | None = Field(default=None, alias="references")
     auto_approve: dict[str, StrictBool] | None = Field(default=None, alias="autoApprove")
+
+
+class ReferenceConfig(Contract):
+    """Projektdatei → references[]: ein Nachschlageordner."""
+
+    reference_id: str = Field(alias="referenceId")
+    root: str = Field(alias="root")
+    title: str | None = Field(default=None, alias="title")
+    exclude: list[str] | None = Field(default=None, alias="exclude")
 
 
 class SnapshotFile(Contract):
