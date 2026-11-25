@@ -25,7 +25,7 @@ from localai.orchestrator.gateway import (
     RoutingGateway,
     StreamCallbacks,
 )
-from localai.orchestrator.models import CalibrationStore, ConfigError, ModelsConfig
+from localai.orchestrator.models import CalibrationStore, ConfigError, Measurement, ModelsConfig
 from localai.orchestrator.run import Orchestrator
 
 ALIAS = "edge0_35b"
@@ -325,3 +325,80 @@ def test_kalibrierung_ueber_edge0(edge0, tmp_path, capsys):
     assert all(r.get("reasoning_effort") == "none" for r in edge0.requests), "think-Profil: ohne Denkphase messen"
     report = next(tmp_path.glob("kalibrierung-*.md")).read_text(encoding="utf-8")
     assert "Modellserver: Edge0 0.1.0-fake" in report
+
+
+def _measurement(model, hw, ctx=8192):
+    return Measurement(model=model, digest="", context_tokens=ctx, hardware=hw, runs=10, failures=0, oom=False,
+                       vram_total=None, vram_peak=None, vram_reserve=None, ram_peak_used=None, offload_fraction=None,
+                       prompt_tokens=7000, prompt_tps=500, output_tps=20, first_token_seconds=2, chars_per_token=3.4,
+                       stable=True, reason="stabil", measured_at="x", accepted_without_vram=True)
+
+
+def test_gemischter_betrieb_prueft_hardware_je_modellserver(edge0, ollama, tmp_path):
+    # Ollama lokal, Edge0 auf einem anderen Rechner: jede Messung gilt nur für den Rechner ihres Servers.
+    local = hardware.Hardware(4, 64 * 2**30, 32 * 2**30, [hardware.Gpu("GPU", 16 * 2**30, 0)], "test")
+
+    def orchestrator(edge0_url):
+        config = ModelsConfig.parse({
+            "ollama": {"url": "http://127.0.0.1:11434"}, "edge0": {"url": edge0_url, "allowLan": True},
+            "profiles": [
+                {"name": "standard", "model": "qwen2.5-coder:14b", "contextTokens": 8192, "maxOutputTokens": 2048},
+                {"name": "edge0", "model": ALIAS, "contextTokens": 8192, "maxOutputTokens": 2048, "backend": "edge0"}],
+            "roles": {"Coder": ["edge0", "standard"]}})
+        gw = RoutingGateway({"ollama": OllamaGateway(ollama.url), "edge0": Edge0Gateway(edge0.url)},
+                            {"qwen2.5-coder:14b": "ollama", ALIAS: "edge0"}, "ollama")
+        return Orchestrator(FakeBroker(), FakeBroker(), "r", config, tmp_path, gateway=gw, detect=lambda: local,
+                            reporter=ActivityReporter("r", lambda _r: None))
+
+    edge0_hw = hardware.detect("http://192.168.178.50:8000").fingerprint()
+    store = CalibrationStore(tmp_path / "calibration.json")
+    store.put(_measurement("qwen2.5-coder:14b", local.fingerprint()))
+    store.put(_measurement(ALIAS, edge0_hw))
+    store.save()
+    prep = orchestrator("http://192.168.178.50:8000").prepare()
+    assert prep.choices["Coder"].profile.name == "edge0" and not prep.problems
+    # edge0.url zeigt auf einen anderen Rechner: die alte Edge0-Messung gilt nicht mehr, Ollama bleibt gültig.
+    prep = orchestrator("http://192.168.178.51:8000").prepare()
+    coder = prep.choices["Coder"]
+    assert coder.profile.name == "standard" and "Hardware hat sich" in coder.problems[0]
+    # Messung mit dem Fingerabdruck des Ollama-Rechners (früheres Verhalten) berechtigt Edge0 nicht.
+    store.put(_measurement(ALIAS, local.fingerprint()))
+    store.save()
+    assert orchestrator("http://192.168.178.50:8000").prepare().choices["Coder"].profile.name == "standard"
+
+
+def test_kalibrierung_speichert_hardware_je_modellserver(edge0, ollama, tmp_path, monkeypatch):
+    seen = []
+
+    def detect(url=None):
+        seen.append(url)
+        return hardware.Hardware(1, None, None, [hardware.Gpu(f"GPU {url}", 2**30, 0)], "test")
+
+    monkeypatch.setattr(calibrate.hardware, "detect", detect)
+    models = tmp_path / "models.json"
+    models.write_text(json.dumps({"profiles": [
+        {"name": "standard", "model": "qwen2.5-coder:14b", "contextTokens": 4096, "maxOutputTokens": 1024},
+        {"name": "edge0", "model": ALIAS, "contextTokens": 4096, "maxOutputTokens": 1024, "backend": "edge0"}],
+        "calibration": {"runs": 10, "outputTokens": 16}}), encoding="utf-8")
+    calibrate.main(["--models", str(models), "--daten", str(tmp_path), "--ollama", ollama.url, "--edge0", edge0.url,
+                    "--ohne-vram-messung", "--laeufe", "10"])
+    measurements = CalibrationStore(tmp_path / "calibration.json").measurements
+    assert measurements["qwen2.5-coder:14b@4096"].hardware == detect(ollama.url).fingerprint()
+    assert measurements[f"{ALIAS}@4096"].hardware == detect(edge0.url).fingerprint()
+    assert measurements["qwen2.5-coder:14b@4096"].hardware != measurements[f"{ALIAS}@4096"].hardware
+    report = next(tmp_path.glob("kalibrierung-*.md")).read_text(encoding="utf-8")
+    assert "Hardware Edge0:" in report
+
+
+@pytest.mark.parametrize("think, effort, sent", [
+    (False, None, "none"),   # ausdrückliches think=false wie im Betrieb
+    (True, None, "none"),    # Denkprofil: ohne Denkphase messen
+    (None, None, None),
+    (None, "low", "low"),
+    (False, "low", "low"),   # ausdrücklich gesetztes reasoningEffort gilt auch beim Messen
+])
+def test_kalibrierung_misst_denkphase_wie_im_betrieb(edge0, think, effort, sent):
+    target = calibrate.Target("edge0", ALIAS, 4096, think, False, "edge0", effort)
+    calibrate.measure(gateway(edge0), target, 1, 16, 2.0, hardware.Hardware(1, None, None, []), "", True,
+                      sampler_factory=calibrate.NoSampler, log=lambda *_: None)
+    assert edge0.requests[-1].get("reasoning_effort") == sent

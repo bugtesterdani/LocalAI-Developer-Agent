@@ -385,7 +385,8 @@ uv run --project src/python python -m localai.orchestrator.calibrate --profile s
 Die Kalibrierung misst auch Zeichen je Token. Werte außerhalb 1–8 (Messung) bzw. 1,5–6 (Betrieb) gelten als unplausibel; dann rechnet der Orchestrator mit 3 und meldet „unplausibel … Profil neu kalibrieren“ im Verlauf des Agenten.
 
 Modellserver auf einem anderen Rechner: zusätzlich `--ohne-vram-messung`. Adressen lassen sich für einen Lauf mit
-`--ollama <url>` bzw. `--edge0 <url>` überschreiben. Ergebnis: `calibration.json` und ein Bericht
+`--ollama <url>` bzw. `--edge0 <url>` überschreiben. Bei gemischtem Betrieb (Ollama und Edge0) gilt der
+Hardware-Fingerabdruck je Modellserver: wechselt einer davon auf einen anderen Rechner, sind nur dessen Messungen ungültig. Ergebnis: `calibration.json` und ein Bericht
 `kalibrierung-*.md` im Datenordner. Details: [Prüfanleitung M3, Abschnitt 3](pruefung-M3.md).
 
 ### Empfohlene Ollama-Umgebung

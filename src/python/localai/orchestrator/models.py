@@ -460,8 +460,16 @@ class ProfileChoice:
         return f"{self.profile.label()} ({cal})"
 
 
-def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str], hardware_fingerprint: str,
-            role: str, names: list[str] | tuple[str, ...]) -> ProfileChoice:
+def _fingerprint_for(hardware_fingerprint: str | dict[str, str], backend: str) -> str:
+    """Ein Fingerabdruck für alle Profile oder einer je Modellserver (``{"ollama": …, "edge0": …}``): Laufen Ollama und
+    Edge0 auf verschiedenen Rechnern, gilt eine Messung nur für den Rechner des Servers, der das Profil bedient."""
+    if isinstance(hardware_fingerprint, str):
+        return hardware_fingerprint
+    return hardware_fingerprint.get(backend, "")
+
+
+def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
+            hardware_fingerprint: str | dict[str, str], role: str, names: list[str] | tuple[str, ...]) -> ProfileChoice:
     """Erstes Profil aus ``names``, das installiert und (falls verlangt) stabil kalibriert ist."""
     problems: list[str] = []
     for name in names:
@@ -482,7 +490,7 @@ def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, 
             stale = []
             if m.digest and installed[profile.model] and m.digest != installed[profile.model]:
                 stale.append("Modell wurde seit der Kalibrierung geändert")
-            if m.hardware != hardware_fingerprint:
+            if m.hardware != _fingerprint_for(hardware_fingerprint, profile.backend):
                 stale.append("Hardware hat sich seit der Kalibrierung geändert")
             if not m.stable:
                 stale.append(f"nicht stabil ({m.reason})")
@@ -498,16 +506,17 @@ def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, 
 
 
 def choose_profiles(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
-                    hardware_fingerprint: str) -> dict[str, ProfileChoice]:
+                    hardware_fingerprint: str | dict[str, str]) -> dict[str, ProfileChoice]:
     """Wählt je Rolle das erste Profil der Vorzugsliste, das installiert und (falls verlangt) stabil kalibriert ist.
 
     ``installed``: Modellname → Digest aus ``/api/tags`` (Edge0: Alias aus ``/v1/models``, ohne Digest).
+    ``hardware_fingerprint``: einer für alle Profile oder einer je Modellserver (siehe ``_fingerprint_for``).
     """
     return {role: _usable(config, store, installed, hardware_fingerprint, role, config.roles[role]) for role in ROLES}
 
 
 def choose_summary_profile(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
-                           hardware_fingerprint: str) -> ProfileChoice | None:
+                           hardware_fingerprint: str | dict[str, str]) -> ProfileChoice | None:
     """Eigenes Modell zum Zusammenfassen der Agentennotizen; None = keins eingetragen (Modell der Rolle)."""
     if config.history.mode != "summary" or not config.history.summary_profiles:
         return None

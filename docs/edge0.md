@@ -307,7 +307,9 @@ uv run --project src/python python -m localai.orchestrator.calibrate --profile e
 
 Edge0 liefert keine eigenen Zeitmessungen; die Kalibrierung rechnet „Eingabe“ als Zeit bis zur ersten Ausgabe und
 „Ausgabe“ als den Rest. Ein Modell-Digest wie bei Ollama gibt es nicht – nach einem Modellwechsel unter demselben Alias
-neu kalibrieren.
+neu kalibrieren. Jede Messung trägt den Hardware-Fingerabdruck des Rechners, auf dem ihr Modellserver läuft: Zeigt
+`edge0.url` später auf einen anderen Rechner, gelten die Edge0-Messungen nicht mehr (die Ollama-Messungen bleiben).
+Ein Profil mit `think: false` wird wie im Betrieb ohne Denkphase gemessen (`reasoning_effort: "none"`).
 
 ### 5.4 Was bei Edge0 anders ist
 

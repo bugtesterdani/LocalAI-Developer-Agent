@@ -28,10 +28,10 @@ from localai.orchestrator.gateway import (
     ModelGateway,
     OutOfMemory,
     StreamCallbacks,
-    is_loopback_url,
     version_text,
 )
 from localai.orchestrator.models import (
+    BACKEND_LABELS,
     CalibrationStore,
     ConfigError,
     Measurement,
@@ -104,7 +104,9 @@ def measure(gateway: ModelGateway, target: Target, runs: int, output_tokens: int
     for run in range(1, runs + 1):
         text = filler(int(fill_tokens * cpt), uuid.uuid4().hex)
         request = ChatRequest(model=target.model, num_ctx=target.context_tokens, num_predict=output_tokens,
-                              temperature=0.0, think=False if target.think else None,
+                              # Denkprofile ohne Denkphase messen; ein ausdrückliches think=false bleibt wie im Betrieb
+                              # (Edge0: reasoning_effort "none", sonst die Einstellung des Profils).
+                              temperature=0.0, think=False if target.think is not None else None,
                               reasoning_effort=None if target.think else target.reasoning_effort, messages=[
                                   {"role": "system", "content": "You summarise code."},
                                   {"role": "user", "content": text + "\n\nSummarise the code above in one sentence."}])
@@ -193,12 +195,16 @@ def measure(gateway: ModelGateway, target: Target, runs: int, output_tokens: int
         accepted_without_vram=reserve is None and accept_unknown_vram, errors=errors[:20])
 
 
-def report(path: pathlib.Path, hw: hardware.Hardware, version: str, measurements: list[tuple[Target, Measurement]]) -> None:
+def report(path: pathlib.Path, hw: hardware.Hardware, version: str, measurements: list[tuple[Target, Measurement]],
+           others: dict[str, hardware.Hardware] | None = None) -> None:
     def gib(v: int | None) -> str:
         return f"{v / GIB:.1f}" if v is not None else "–"
 
     lines = [f"# Kalibrierung {dt.datetime.now():%d.%m.%Y %H:%M}", "", f"- Hardware: {hw.describe()}",
-             f"- Fingerabdruck: `{hw.fingerprint()}`", f"- Modellserver: {version}", "",
+             f"- Fingerabdruck: `{hw.fingerprint()}`"]
+    for label, other in (others or {}).items():
+        lines.append(f"- Hardware {label}: {other.describe()} (Fingerabdruck `{other.fingerprint()}`)")
+    lines += [f"- Modellserver: {version}", "",
              "| Profil | Modell | Kontext | Läufe | Fehler | VRAM-Spitze GiB | VRAM frei GiB | RAM-Spitze GiB | CPU-Offload "
              "| Prompt Token/s | Ausgabe Token/s | erste Ausgabe s | Ergebnis |",
              "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
@@ -241,12 +247,22 @@ def main(argv: list[str] | None = None) -> int:
     except GatewayError as err:
         print(f"FEHLER: {err}", file=sys.stderr)
         return 3
-    hw = hardware.detect(gateway.url)
-    # Modellserver auf einem anderen Rechner: hiesige GPU/RAM-Werte wären falsch, also nicht messen.
     urls = {"ollama": args.ollama or config.ollama_url, "edge0": args.edge0 or config.edge0.url}
+    detected: dict[str, hardware.Hardware] = {}
+
+    def hw_for(backend: str) -> hardware.Hardware:
+        """Hardware des Rechners, auf dem dieser Modellserver läuft: jede Messung bekommt den Fingerabdruck ihres
+        Servers (gemischter Betrieb mit Ollama und Edge0 auf verschiedenen Rechnern)."""
+        url = urls[backend]
+        if url not in detected:
+            detected[url] = hardware.detect(url)
+        return detected[url]
+
+    hw = hw_for(config.primary_backend)
 
     def sampler_for(target: Target):
-        return hardware.PeakSampler if hw.remote_host is None and is_loopback_url(urls[target.backend]) else NoSampler
+        # Modellserver auf einem anderen Rechner: hiesige GPU/RAM-Werte wären falsch, also nicht messen.
+        return hardware.PeakSampler if hw_for(target.backend).remote_host is None else NoSampler
 
     version = version_text(gateway, version)
     print(f"Hardware: {hw.describe()}\n{version}, {len(installed)} Modelle verfügbar\nDaten: {data_dir}")
@@ -272,13 +288,18 @@ def main(argv: list[str] | None = None) -> int:
     if not targets:
         print("Nichts zu kalibrieren.")
         return 1
+    others = {BACKEND_LABELS[b]: hw_for(b) for b in dict.fromkeys(t.backend for t in targets)
+              if b != config.primary_backend}
+    for label, other in others.items():
+        print(f"Hardware {label}: {other.describe()}")
     store = CalibrationStore(data_dir / "calibration.json")
     runs = args.laeufe or config.calibration.runs
     done: list[tuple[Target, Measurement]] = []
     try:
         for t in targets:
             print(f"\n{t.profile_name}: {t.model} mit {t.context_tokens} Token Kontext, {runs} Läufe")
-            m = measure(gateway, t, runs, config.calibration.output_tokens, config.calibration.min_vram_reserve_gib, hw,
+            m = measure(gateway, t, runs, config.calibration.output_tokens, config.calibration.min_vram_reserve_gib,
+                        hw_for(t.backend),
                         installed[t.model], args.ohne_vram_messung, sampler_factory=sampler_for(t),
                         max_offload=config.calibration.max_cpu_offload)
             existing = store.get_key(m.key)
@@ -294,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if done:
             path = data_dir / f"kalibrierung-{dt.datetime.now():%Y%m%d-%H%M}.md"
-            report(path, hw, version, done)
+            report(path, hw, version, done, others)
             print(f"\nBericht: {path}\nKalibrierung: {store.path}")
     return 0 if all(m.stable for _, m in done) else 1
 
