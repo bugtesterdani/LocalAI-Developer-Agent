@@ -3,7 +3,7 @@
 Einstieg in die Dokumentation. Stand: Meilenstein M10 (Version 0.10.0).
 
 Der Local AI Developer Agent ist ein lokaler Entwicklungsagent mit fünf Rollen (Planner, Coder, Tester, Debugger,
-Reviewer). Die Modelle laufen über Ollama auf deinem Rechner oder im LAN. **Jeder** Werkzeugaufruf braucht deine
+Reviewer). Die Modelle laufen über Ollama oder Edge0 auf deinem Rechner oder im LAN. **Jeder** Werkzeugaufruf braucht deine
 ausdrückliche Freigabe, ausgeführt wird nur in einer Offline-VM ohne Netzwerkkarte.
 
 ## Wo anfangen?
@@ -16,6 +16,7 @@ ausdrückliche Freigabe, ausgeführt wird nur in einer Offline-VM ohne Netzwerkk
 | es auf einem Linux-Host einrichten | [Prüfanleitung M10, Abschnitt 0](pruefung-M10.md#0-einrichtung) |
 | damit arbeiten (Chat, Freigaben, Übernahme, Not-Aus) | [Bedienung](bedienung.md) |
 | eine Einstellung nachschlagen | [Konfiguration](konfiguration.md) |
+| Edge0 statt (oder neben) Ollama nutzen – Installation ohne Internetzugang | [Edge0](edge0.md) |
 | wissen, welche Werkzeuge die Agenten haben und was sie dürfen | [Werkzeuge und Rechte](werkzeuge.md) |
 | Toolchains (Compiler, Testframeworks) für die VM anlegen | [Toolchains](../toolchains/README.md) |
 | Protokolle, Sicherung, Störungen | [Betrieb](betrieb.md) |
@@ -48,6 +49,7 @@ ausdrückliche Freigabe, ausgeführt wird nur in einer Offline-VM ohne Netzwerkk
 
 - [Installation aus den Paketen](installation.md) – MSI, MSIX, Debian-Paket, eigene Konfiguration, Pakete bauen
 - [Inbetriebnahme auf einem neuen Rechner (Windows)](inbetriebnahme-neuer-rechner.md)
+- [Edge0 als Modellserver](edge0.md) – bauen, Modell holen, Firewall-Sperre, offline starten, in LocalAI eintragen
 - [Toolchains für die Sandbox-VM](../toolchains/README.md)
 
 ### Prüfanleitungen je Meilenstein

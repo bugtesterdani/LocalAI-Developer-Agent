@@ -3,7 +3,8 @@
 Fertige Pakete stehen bei jedem Release auf der GitHub-Seite des Projekts unter **Releases**. Sie enthalten alles,
 was die Anwendung zur Laufzeit braucht: Oberfläche und Broker (.NET, eigenständig), Python mit den nötigen Paketen,
 Skripte, Toolchain-Vorlagen und Beispielprojekte. .NET SDK und uv sind **nicht** nötig. Ollama installierst du
-separat (siehe [Konfiguration](konfiguration.md#empfohlene-ollama-umgebung)).
+separat (siehe [Konfiguration](konfiguration.md#empfohlene-ollama-umgebung)), ebenso Edge0, falls du es statt oder neben
+Ollama nutzt (siehe [Edge0](edge0.md)).
 
 | Datei | für | Hinweis |
 |---|---|---|

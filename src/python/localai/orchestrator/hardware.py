@@ -45,7 +45,7 @@ class Hardware:
     def fingerprint(self) -> str:
         """Ändert sich, wenn GPU oder RAM-Ausstattung wechseln → Profile neu kalibrieren (AC14)."""
         if self.remote_host:
-            # Ollama läuft auf einem anderen Rechner: dessen Hardware ist von hier nicht messbar.
+            # Der Modellserver läuft auf einem anderen Rechner: dessen Hardware ist von hier nicht messbar.
             return hashlib.sha256(f"remote={self.remote_host}".encode()).hexdigest()[:16]
         ram_gib = round((self.ram_total_bytes or 0) / GIB)
         parts = [f"cpu={self.cpu_count}", f"ram={ram_gib}"] + [f"gpu={g.name}/{g.total_bytes // MIB}" for g in self.gpus]
@@ -53,7 +53,7 @@ class Hardware:
 
     def describe(self) -> str:
         if self.remote_host:
-            return f"Ollama auf {self.remote_host} (anderer Rechner – GPU/RAM dort nicht messbar)"
+            return f"Modellserver auf {self.remote_host} (anderer Rechner – GPU/RAM dort nicht messbar)"
         ram = f"{self.ram_total_bytes / GIB:.1f} GiB RAM" if self.ram_total_bytes else "RAM unbekannt"
         if self.gpus:
             gpu = ", ".join(f"{g.name} ({g.total_bytes / GIB:.1f} GiB, belegt {g.used_bytes / GIB:.1f} GiB)" for g in self.gpus)
@@ -124,15 +124,16 @@ def query_gpus(timeout: float = 5.0) -> list[Gpu] | None:
     return gpus
 
 
-def detect(ollama_url: str | None = None) -> Hardware:
-    """Hardware des Rechners, auf dem Ollama läuft. Bei entferntem Ollama wird hier nichts gemessen."""
+def detect(server_url: str | None = None) -> Hardware:
+    """Hardware des Rechners, auf dem der Modellserver (Ollama/Edge0) läuft. Bei entferntem Server wird hier nichts
+    gemessen."""
     from localai.orchestrator.gateway import is_loopback_url
 
-    if ollama_url and not is_loopback_url(ollama_url):
+    if server_url and not is_loopback_url(server_url):
         import urllib.parse
 
         return Hardware(cpu_count=0, ram_total_bytes=None, ram_available_bytes=None, gpus=[], gpu_source="entfernt",
-                        remote_host=urllib.parse.urlsplit(ollama_url).netloc)
+                        remote_host=urllib.parse.urlsplit(server_url).netloc)
     total, available = _memory()
     gpus = query_gpus()
     return Hardware(cpu_count=os.cpu_count() or 1, ram_total_bytes=total, ram_available_bytes=available,

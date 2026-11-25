@@ -279,6 +279,25 @@ Werte, die von `models.json` abweichen.
 | `stallWarningSeconds` | `45` | ohne neue Tokens: „hängt?“ beim Agenten |
 | `stallAbortSeconds` | `900` | ohne neue Tokens: Anfrage abbrechen |
 
+### `backend` und `edge0`
+
+Welcher Modellserver ein Profil bedient: `ollama` (Standard) oder `edge0` (`edge0-infer serve`, Einrichtung ohne
+Internetzugang siehe [Edge0](edge0.md)). `backend` auf oberster Ebene ist der Standard für alle Profile; ein Profil kann
+mit eigenem `backend` abweichen (gemischter Betrieb, z. B. nur der Reviewer über Edge0).
+
+| Feld | Standard | Bedeutung |
+|---|---|---|
+| `backend` | `ollama` | Standard-Modellserver der Profile: `ollama` oder `edge0` |
+| `edge0.url` | `http://127.0.0.1:8000` | Adresse von `edge0-infer serve`. Nur Loopback, außer mit `allowLan` (dann nur private LAN-IP als Zahl) |
+| `edge0.allowLan` | `false` | Edge0 auf einem anderen Rechner im LAN zulassen |
+| `edge0.apiKeyFile` | – | absoluter Pfad zur Token-Datei (gleicher Inhalt wie `--api-key-file` des Servers); außerhalb von Loopback Pflicht. Alternativ Umgebungsvariable `LOCALAI_EDGE0_API_KEY`. Das Token selbst steht nie in der Konfiguration |
+| `edge0.stallWarningSeconds` | `45` | ohne neue Tokens: „hängt?“ beim Agenten |
+| `edge0.stallAbortSeconds` | `900` | ohne neue Tokens: Anfrage abbrechen |
+| `edge0.busyWaitSeconds` | `600` | so lange auf einen belegten Server warten (Edge0 rechnet nur eine Anfrage gleichzeitig, HTTP 429) |
+
+Vorlage: `config/models.edge0.example.json`. Bei Edge0 ist die Kontextlänge beim Serverstart fest (`--context`);
+`contextTokens` der Edge0-Profile darf nicht größer sein.
+
 ### `profiles[]` und `roles`
 
 Ein Profil ist ein Modell mit Kontextgröße. Der Orchestrator nimmt je Rolle das erste Profil aus `roles`, das für
@@ -287,12 +306,14 @@ diese Hardware und diesen Modell-Digest **kalibriert** ist (`requireCalibration:
 | Feld | Bedeutung |
 |---|---|
 | `name` | Profilname (`standard`, `leicht`, `planung`, `erweitert`, `gross`, `offload`) |
-| `model` | Ollama-Tag mit fester Version – `latest` ist unzulässig |
+| `model` | Ollama: Tag mit fester Version – `latest` ist unzulässig. Edge0: Alias des Servers (`edge0_35b`, `edge0_145b`, `edge0_120b` oder `--alias`) |
+| `backend` | Modellserver dieses Profils (`ollama`/`edge0`); ohne Angabe gilt `backend` der obersten Ebene. Je Modell nur ein Modellserver |
 | `contextTokens`, `maxOutputTokens` | Kontextgröße und Ausgabegrenze je Anfrage (höchstens ein Viertel des Kontexts). Eine neue Datei entsteht in einer einzigen Antwort – für große Dateien (z. B. Prüfprogramme `*.tproj.json`) beim Coder großzügig wählen, etwa `16384`; „Antwort an der Ausgabegrenze abgeschnitten“ im Verlauf zeigt, dass es nicht reicht |
-| `think` | Thinking anfordern (z. B. `qwen3`) |
+| `think` | Thinking anfordern (z. B. `qwen3`). Bei Edge0 wird `think: false` zu `reasoning_effort: "none"` |
+| `reasoningEffort` | nur Edge0: `reasoning_effort` je Anfrage, z. B. `"none"` oder `"low"` |
 | `offload` | CPU-Offload erlaubt (Qualität vor Geschwindigkeit) |
 | `temperature` | Standard `0.2` |
-| `options` | weitere Ollama-Optionen, z. B. `repeat_penalty` |
+| `options` | weitere Ollama-Optionen, z. B. `repeat_penalty`. Edge0 erhält davon nur `repeat_penalty` (als `repetition_penalty`), `top_k`, `top_p`, `seed` |
 | `outputUpToContext` | Standard `false`: Ausgabe höchstens `maxOutputTokens`. `true`: Ausgabe darf den ganzen Rest des Kontexts nutzen (Kontext minus Eingabe minus ~6 % Reserve); `maxOutputTokens` ist dann nur der Teil, der beim Zusammenstellen des Prompts mindestens frei bleibt. **Die Denkphase zählt bei Ollama zur Ausgabe** – Denkmodelle mit großem Kontext (z. B. qwen3.6 mit 256K) brauchen das, sonst endet die Antwort mitten im Denken. Achtung: lange Antworten dauern entsprechend (bei ~57 Token/s rund 10 Minuten je 32K Token) |
 
 ### `limits`
@@ -363,7 +384,8 @@ uv run --project src/python python -m localai.orchestrator.calibrate --profile s
 
 Die Kalibrierung misst auch Zeichen je Token. Werte außerhalb 1–8 (Messung) bzw. 1,5–6 (Betrieb) gelten als unplausibel; dann rechnet der Orchestrator mit 3 und meldet „unplausibel … Profil neu kalibrieren“ im Verlauf des Agenten.
 
-Ollama auf einem anderen Rechner: zusätzlich `--ohne-vram-messung`. Ergebnis: `calibration.json` und ein Bericht
+Modellserver auf einem anderen Rechner: zusätzlich `--ohne-vram-messung`. Adressen lassen sich für einen Lauf mit
+`--ollama <url>` bzw. `--edge0 <url>` überschreiben. Ergebnis: `calibration.json` und ein Bericht
 `kalibrierung-*.md` im Datenordner. Details: [Prüfanleitung M3, Abschnitt 3](pruefung-M3.md).
 
 ### Empfohlene Ollama-Umgebung
