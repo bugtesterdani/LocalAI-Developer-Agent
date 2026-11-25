@@ -29,7 +29,7 @@ from localai.orchestrator.gateway import (
     CancelToken,
     ChatRequest,
     GatewayError,
-    OllamaGateway,
+    ModelGateway,
     OutOfMemory,
     RepetitionLoop,
     StreamCallbacks,
@@ -69,7 +69,7 @@ def _merge_reads(actions: list[protocol.Action]) -> list[protocol.Action]:
 
 
 class AgentFailed(Exception):
-    """Aufgabe endgültig gescheitert (Fehler des Modells/Ollama)."""
+    """Aufgabe endgültig gescheitert (Fehler des Modells/Modellservers)."""
 
 
 @dataclass
@@ -136,7 +136,7 @@ class AgentResult:
 
 
 class Agent:
-    def __init__(self, role: str, profile: ModelProfile, measurement: Measurement | None, gateway: OllamaGateway,
+    def __init__(self, role: str, profile: ModelProfile, measurement: Measurement | None, gateway: ModelGateway,
                  gpu: FairGate, bridge: ToolBridge, reporter: ActivityReporter, clock: RunClock, limits: Limits,
                  user_notes: Callable[[], list[str]], history: HistorySettings | None = None,
                  summary_profile: ModelProfile | None = None) -> None:
@@ -247,7 +247,8 @@ class Agent:
                 model=self.profile.model,
                 messages=[{"role": "system", "content": parts.system}, {"role": "user", "content": parts.user}],
                 num_ctx=self.profile.context_tokens, num_predict=limit, temperature=self.profile.temperature,
-                think=self.profile.think, extra_options=dict(self.profile.options))
+                think=self.profile.think, extra_options=dict(self.profile.options),
+                reasoning_effort=self.profile.reasoning_effort)
             label = f"Schritt {step}/{max_steps} · ~{parts.prompt_tokens} Token Eingabe"
             if limit != self.budget.output:
                 label += f" · bis zu {limit} Token Ausgabe"
@@ -275,7 +276,7 @@ class Agent:
                 gateway_errors += 1
                 self.reporter.event(role, ActivityKind.Error, f"Modellfehler: {err}", task_id=task_id)
                 if gateway_errors >= 2:
-                    raise AgentFailed(f"Ollama-Fehler: {err}") from err
+                    raise AgentFailed(f"Fehler des Modellservers: {err}") from err
                 history.orchestrator(step, f"model request failed ({err}); answer again.")
                 continue
             gateway_errors = 0
@@ -452,7 +453,9 @@ class Agent:
             request = ChatRequest(
                 model=profile.model, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                 num_ctx=profile.context_tokens, num_predict=num_predict, temperature=0.1, think=think,
-                extra_options=dict(profile.options))
+                extra_options=dict(profile.options),
+                # think=false: Edge0 bekommt dann reasoning_effort "none"; sonst die Einstellung des Profils.
+                reasoning_effort=None if think is False else profile.reasoning_effort)
             queued = time.monotonic()
             with self.gpu.slot(role, profile.key, assignment.priority, cancel,
                                on_wait=lambda: self.reporter.state(role, AgentState.Queued, "wartet auf GPU-Slot", task_id)):

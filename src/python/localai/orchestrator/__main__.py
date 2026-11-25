@@ -2,7 +2,7 @@
 LOCALAI_RUN_ID, LOCALAI_INBOX_AFTER und LOCALAI_DATA gestartet.
 
 Optionen: ``--models <models.json>`` (Standard: config/models.json, überlagert von config/models.local.json),
-``--ollama <url>`` überschreibt die Ollama-Adresse (nur Loopback).
+``--ollama <url>`` bzw. ``--edge0 <url>`` überschreiben die Adresse des Modellservers (Loopback oder freigegebenes LAN).
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="localai.orchestrator")
     parser.add_argument("--models")
     parser.add_argument("--ollama")
+    parser.add_argument("--edge0")
     args = parser.parse_args(argv)
     pipe, token, run_id = (os.environ.get(k) for k in ("LOCALAI_PIPE", "LOCALAI_TOKEN", "LOCALAI_RUN_ID"))
     if not pipe or not token or not run_id:
@@ -36,8 +37,10 @@ def main(argv: list[str] | None = None) -> int:
         return 4
     if args.ollama:
         config = dataclasses.replace(config, ollama_url=args.ollama)
+    if args.edge0:
+        config = dataclasses.replace(config, edge0=dataclasses.replace(config.edge0, url=args.edge0))
     print(f"Orchestrator: PID {os.getpid()}, Python {sys.version.split()[0]}, Run {run_id}, Modelle aus {config.source}, "
-          f"Ollama {config.ollama_url}",
+          f"Modellserver {config.describe_backends()}",
           flush=True)
     client = BrokerClient(pipe, token)
     inbox = BrokerClient(pipe, token, timeout=60)

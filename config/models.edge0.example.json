@@ -1,0 +1,22 @@
+{
+  "_hinweis": "Vorlage für Edge0 statt Ollama (docs/edge0.md): als config/models.local.json speichern oder die Abschnitte in die vorhandene models.local.json übernehmen. model = Alias des Servers (edge0_35b, edge0_145b, edge0_120b oder --alias). contextTokens höchstens so groß wie --context beim Start von edge0-infer serve. Gemischt mit Ollama: \"backend\" weglassen und nur beim Edge0-Profil \"backend\": \"edge0\" setzen.",
+  "backend": "edge0",
+  "edge0": {
+    "url": "http://127.0.0.1:8000",
+    "_hinweis": "Edge0 auf einem anderen Rechner: url = dessen LAN-IP, allowLan true, apiKeyFile = absoluter Pfad zur Token-Datei (gleiches Token wie --api-key-file des Servers) oder Umgebungsvariable LOCALAI_EDGE0_API_KEY.",
+    "allowLan": false,
+    "stallWarningSeconds": 60,
+    "stallAbortSeconds": 1200,
+    "busyWaitSeconds": 600
+  },
+  "profiles": [
+    { "name": "edge0", "model": "edge0_35b", "contextTokens": 32768, "maxOutputTokens": 8192, "outputUpToContext": true }
+  ],
+  "roles": {
+    "Planner": ["edge0"],
+    "Coder": ["edge0"],
+    "Tester": ["edge0"],
+    "Debugger": ["edge0"],
+    "Reviewer": ["edge0"]
+  }
+}

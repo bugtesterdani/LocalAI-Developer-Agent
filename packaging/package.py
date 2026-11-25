@@ -17,7 +17,7 @@ Aufbau des Installationsordners (gleich unter Windows und Linux, entspricht dem 
     contracts/        JSON Schema (Versionsmanifest)
     runtime/python/   Python mit den Laufzeitpaketen; localai.pth zeigt auf src/python
     samples/          Beispielprojekte
-    scripts/          Hyper-V-, Gast-, Toolchain- und Linux-Skripte
+    scripts/          Hyper-V-, Gast-, Toolchain-, Edge0- und Linux-Skripte
     src/python/localai
     toolchains/       Vorlagen für Toolchain-Ordner
     tools/prereq/     Offline-Bausteine für den Linux-Gast laden
@@ -40,8 +40,8 @@ import zlib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Ordner bzw. Dateien des Repositorys, die zur Laufzeit gebraucht werden
-STAGE_TREES = ["config", "contracts/schemas", "samples", "scripts/sandbox", "scripts/toolchains", "src/python/localai",
-               "toolchains", "tools/prereq"]
+STAGE_TREES = ["config", "contracts/schemas", "samples", "scripts/edge0", "scripts/sandbox", "scripts/toolchains",
+               "src/python/localai", "toolchains", "tools/prereq"]
 LEGAL_FILES = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
 
 LINUX_SCRIPTS = ["scripts/linux/install-host.sh", "scripts/linux/get-prerequisites.sh"]

@@ -5,7 +5,7 @@ VRAM-/RAM-Spitzen, CPU-Offload, Prompt-/Ausgabegeschwindigkeit und Zeit bis zur 
 Ein Profil gilt als stabil, wenn alle Läufe ohne Fehler/OOM durchlaufen und mindestens ``minVramReserveGiB``
 VRAM frei bleiben. Ergebnis: ``<Daten>/calibration.json`` und ein deutscher Bericht ``kalibrierung-*.md``.
 
-Aufruf (auf dem Rechner mit Ollama):
+Aufruf (auf dem Rechner mit Ollama bzw. Edge0; Edge0 siehe docs/edge0.md):
   uv run --project src/python python -m localai.orchestrator.calibrate
   uv run --project src/python python -m localai.orchestrator.calibrate --profile standard --laeufe 10
   uv run --project src/python python -m localai.orchestrator.calibrate --kontexte 4096,8192,16384,32768 --laeufe 2
@@ -22,8 +22,16 @@ import sys
 import uuid
 
 from localai.orchestrator import hardware
-from localai.orchestrator.gateway import ChatRequest, GatewayError, OllamaGateway, OutOfMemory, StreamCallbacks
+from localai.orchestrator.gateway import (
+    ChatRequest,
+    GatewayError,
+    ModelGateway,
+    OutOfMemory,
+    StreamCallbacks,
+    version_text,
+)
 from localai.orchestrator.models import (
+    BACKEND_LABELS,
     CalibrationStore,
     ConfigError,
     Measurement,
@@ -57,7 +65,7 @@ def filler(target_chars: int, nonce: str) -> str:
 
 
 class NoSampler:
-    """Keine Messung (Ollama auf einem anderen Rechner)."""
+    """Keine Messung (Modellserver auf einem anderen Rechner)."""
 
     vram_peak = vram_total = ram_peak_used = None
 
@@ -75,9 +83,11 @@ class Target:
     context_tokens: int
     think: bool | None
     offload: bool
+    backend: str = "ollama"
+    reasoning_effort: str | None = None
 
 
-def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: int, min_reserve_gib: float,
+def measure(gateway: ModelGateway, target: Target, runs: int, output_tokens: int, min_reserve_gib: float,
             hw: hardware.Hardware, digest: str, accept_unknown_vram: bool, sampler_factory=hardware.PeakSampler,
             log=print, max_offload: float = 0.05) -> Measurement:
     cpt = 3.0
@@ -94,7 +104,10 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
     for run in range(1, runs + 1):
         text = filler(int(fill_tokens * cpt), uuid.uuid4().hex)
         request = ChatRequest(model=target.model, num_ctx=target.context_tokens, num_predict=output_tokens,
-                              temperature=0.0, think=False if target.think else None, messages=[
+                              # Denkprofile ohne Denkphase messen; ein ausdrückliches think=false bleibt wie im Betrieb
+                              # (Edge0: reasoning_effort "none", sonst die Einstellung des Profils).
+                              temperature=0.0, think=False if target.think is not None else None,
+                              reasoning_effort=None if target.think else target.reasoning_effort, messages=[
                                   {"role": "system", "content": "You summarise code."},
                                   {"role": "user", "content": text + "\n\nSummarise the code above in one sentence."}])
         try:
@@ -157,7 +170,8 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
         reasons.append(f"nur {runs} Läufe (Freigabe erfordert 10)")
     if reserve is None:
         if not accept_unknown_vram:
-            where = "Ollama läuft auf einem anderen Rechner" if hw.remote_host else "nvidia-smi fehlt"
+            remote = hw.remote_host or sampler_factory is NoSampler
+            where = "der Modellserver läuft auf einem anderen Rechner" if remote else "nvidia-smi fehlt"
             reasons.append(f"VRAM nicht messbar ({where}) – mit --ohne-vram-messung bewusst akzeptieren")
     elif reserve < min_reserve_gib * GIB:
         reasons.append(f"VRAM-Reserve {reserve / GIB:.1f} GiB < {min_reserve_gib:g} GiB")
@@ -181,12 +195,16 @@ def measure(gateway: OllamaGateway, target: Target, runs: int, output_tokens: in
         accepted_without_vram=reserve is None and accept_unknown_vram, errors=errors[:20])
 
 
-def report(path: pathlib.Path, hw: hardware.Hardware, version: str, measurements: list[tuple[Target, Measurement]]) -> None:
+def report(path: pathlib.Path, hw: hardware.Hardware, version: str, measurements: list[tuple[Target, Measurement]],
+           others: dict[str, hardware.Hardware] | None = None) -> None:
     def gib(v: int | None) -> str:
         return f"{v / GIB:.1f}" if v is not None else "–"
 
     lines = [f"# Kalibrierung {dt.datetime.now():%d.%m.%Y %H:%M}", "", f"- Hardware: {hw.describe()}",
-             f"- Fingerabdruck: `{hw.fingerprint()}`", f"- Ollama: {version}", "",
+             f"- Fingerabdruck: `{hw.fingerprint()}`"]
+    for label, other in (others or {}).items():
+        lines.append(f"- Hardware {label}: {other.describe()} (Fingerabdruck `{other.fingerprint()}`)")
+    lines += [f"- Modellserver: {version}", "",
              "| Profil | Modell | Kontext | Läufe | Fehler | VRAM-Spitze GiB | VRAM frei GiB | RAM-Spitze GiB | CPU-Offload "
              "| Prompt Token/s | Ausgabe Token/s | erste Ausgabe s | Ergebnis |",
              "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
@@ -196,7 +214,7 @@ def report(path: pathlib.Path, hw: hardware.Hardware, version: str, measurements
                      f"| {gib(m.vram_reserve)} | {gib(m.ram_peak_used)} | {off} | {m.prompt_tps} | {m.output_tps} "
                      f"| {m.first_token_seconds} | {'freigegeben' if m.stable else 'gesperrt: ' + m.reason} |")
     lines += ["", "VRAM-/RAM-Werte sind systemweite Spitzen während der Läufe (inkl. anderer Programme).",
-              "Ollama-Einstellungen siehe docs/pruefung-M3.md."]
+              "Ollama-Einstellungen siehe docs/pruefung-M3.md, Edge0 siehe docs/edge0.md."]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -209,7 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ohne-vram-messung", action="store_true",
                         help="Profile auch ohne messbaren VRAM freigeben (z. B. ohne NVIDIA-GPU)")
     parser.add_argument("--daten", help="Datenordner (Standard wie der Broker: %%LOCALAPPDATA%%\\LocalAi\\broker)")
-    parser.add_argument("--ollama", help="Ollama-Adresse (nur Loopback)")
+    parser.add_argument("--ollama", help="Ollama-Adresse (überschreibt ollama.url)")
+    parser.add_argument("--edge0", help="Edge0-Adresse (überschreibt edge0.url)")
     args = parser.parse_args(argv)
     try:
         config = ModelsConfig.load_default(args.models)
@@ -217,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FEHLER: {err}", file=sys.stderr)
         return 2
     try:
-        gateway = config.gateway(args.ollama, stall_warning=1e9, stall_abort=1800)
+        gateway = config.gateway(args.ollama, args.edge0, stall_warning=1e9, stall_abort=1800)
     except GatewayError as err:
         print(f"FEHLER: {err}", file=sys.stderr)
         return 2
@@ -228,10 +247,25 @@ def main(argv: list[str] | None = None) -> int:
     except GatewayError as err:
         print(f"FEHLER: {err}", file=sys.stderr)
         return 3
-    hw = hardware.detect(gateway.url)
-    # Ollama auf einem anderen Rechner: hiesige GPU/RAM-Werte wären falsch, also nicht messen.
-    sampler = hardware.PeakSampler if hw.remote_host is None else NoSampler
-    print(f"Hardware: {hw.describe()}\nOllama {version}, {len(installed)} Modelle installiert\nDaten: {data_dir}")
+    urls = {"ollama": args.ollama or config.ollama_url, "edge0": args.edge0 or config.edge0.url}
+    detected: dict[str, hardware.Hardware] = {}
+
+    def hw_for(backend: str) -> hardware.Hardware:
+        """Hardware des Rechners, auf dem dieser Modellserver läuft: jede Messung bekommt den Fingerabdruck ihres
+        Servers (gemischter Betrieb mit Ollama und Edge0 auf verschiedenen Rechnern)."""
+        url = urls[backend]
+        if url not in detected:
+            detected[url] = hardware.detect(url)
+        return detected[url]
+
+    hw = hw_for(config.primary_backend)
+
+    def sampler_for(target: Target):
+        # Modellserver auf einem anderen Rechner: hiesige GPU/RAM-Werte wären falsch, also nicht messen.
+        return hardware.PeakSampler if hw_for(target.backend).remote_host is None else NoSampler
+
+    version = version_text(gateway, version)
+    print(f"Hardware: {hw.describe()}\n{version}, {len(installed)} Modelle verfügbar\nDaten: {data_dir}")
     selected: list[ModelProfile] = [p for p in config.profiles.values() if not args.profile or p.name in args.profile]
     if args.profile and len(selected) != len(set(args.profile)):
         print(f"FEHLER: unbekanntes Profil in {args.profile}; vorhanden: {', '.join(config.profiles)}", file=sys.stderr)
@@ -239,26 +273,34 @@ def main(argv: list[str] | None = None) -> int:
     targets: list[Target] = []
     for p in selected:
         if p.model not in installed:
-            print(f"übersprungen: {p.label()} – Modell nicht installiert (ollama pull {p.model})")
+            hint = (f"Edge0 bietet es nicht an – edge0-infer serve mit --alias {p.model}?" if p.backend == "edge0"
+                    else f"Modell nicht installiert (ollama pull {p.model})")
+            print(f"übersprungen: {p.label()} – {hint}")
             continue
-        targets.append(Target(p.name, p.model, p.context_tokens, p.think, p.offload))
+        targets.append(Target(p.name, p.model, p.context_tokens, p.think, p.offload, p.backend, p.reasoning_effort))
     if args.kontexte:
         for model in dict.fromkeys(t.model for t in list(targets)):
             base = next(t for t in targets if t.model == model)
             for ctx in (int(c) for c in args.kontexte.split(",") if c.strip()):
                 if not any(t.model == model and t.context_tokens == ctx for t in targets):
-                    targets.append(Target(f"messreihe-{ctx // 1024}K", model, ctx, base.think, base.offload))
+                    targets.append(Target(f"messreihe-{ctx // 1024}K", model, ctx, base.think, base.offload,
+                                          base.backend, base.reasoning_effort))
     if not targets:
         print("Nichts zu kalibrieren.")
         return 1
+    others = {BACKEND_LABELS[b]: hw_for(b) for b in dict.fromkeys(t.backend for t in targets)
+              if b != config.primary_backend}
+    for label, other in others.items():
+        print(f"Hardware {label}: {other.describe()}")
     store = CalibrationStore(data_dir / "calibration.json")
     runs = args.laeufe or config.calibration.runs
     done: list[tuple[Target, Measurement]] = []
     try:
         for t in targets:
             print(f"\n{t.profile_name}: {t.model} mit {t.context_tokens} Token Kontext, {runs} Läufe")
-            m = measure(gateway, t, runs, config.calibration.output_tokens, config.calibration.min_vram_reserve_gib, hw,
-                        installed[t.model], args.ohne_vram_messung, sampler_factory=sampler,
+            m = measure(gateway, t, runs, config.calibration.output_tokens, config.calibration.min_vram_reserve_gib,
+                        hw_for(t.backend),
+                        installed[t.model], args.ohne_vram_messung, sampler_factory=sampler_for(t),
                         max_offload=config.calibration.max_cpu_offload)
             existing = store.get_key(m.key)
             if t.profile_name.startswith("messreihe-") and existing is not None and existing.stable and existing.runs >= m.runs:
@@ -273,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if done:
             path = data_dir / f"kalibrierung-{dt.datetime.now():%Y%m%d-%H%M}.md"
-            report(path, hw, version, done)
+            report(path, hw, version, done, others)
             print(f"\nBericht: {path}\nKalibrierung: {store.path}")
     return 0 if all(m.stable for _, m in done) else 1
 

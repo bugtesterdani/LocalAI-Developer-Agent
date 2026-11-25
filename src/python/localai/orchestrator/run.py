@@ -53,10 +53,13 @@ from localai.orchestrator.gateway import (
     Cancelled,
     CancelToken,
     GatewayError,
-    OllamaGateway,
+    ModelGateway,
+    is_loopback_url,
+    version_text,
 )
 from localai.orchestrator.journal import RunJournal
 from localai.orchestrator.models import (
+    BACKEND_LABELS,
     ROLES,
     CalibrationStore,
     ConfigError,
@@ -319,15 +322,16 @@ class GoalState:
 
 class Orchestrator:
     def __init__(self, client, inbox_client, run_id: str, config: ModelsConfig, data_dir: pathlib.Path,
-                 gateway: OllamaGateway | None = None, detect=hardware.detect, inbox_after: int = 0,
-                 echo: bool = False, reporter: ActivityReporter | None = None) -> None:
+                 gateway: ModelGateway | None = None, detect=hardware.detect, inbox_after: int = 0,
+                 echo: bool = False, reporter: ActivityReporter | None = None, detect_backend=hardware.detect) -> None:
         self.client = client
         self.inbox_client = inbox_client
         self.run_id = run_id
         self.config = config
         self.data_dir = data_dir
         self.gateway = gateway or config.gateway()
-        self.detect = detect if detect is not hardware.detect else (lambda: hardware.detect(config.ollama_url))
+        self.detect = detect if detect is not hardware.detect else (lambda: hardware.detect(config.primary_url))
+        self.detect_backend = detect_backend  # Adresse → Hardware, für weitere Modellserver (gemischter Betrieb)
         self.inbox_after = inbox_after
         self.reporter = reporter or ActivityReporter(run_id, client.report_activity, echo=echo)
         self.goals: queue.Queue[str | None] = queue.Queue()
@@ -411,18 +415,44 @@ class Orchestrator:
             version = self.gateway.version()
             installed = {m["name"]: m.get("digest", "") for m in self.gateway.list_models()}
         except GatewayError as err:
-            return Preparation({}, [f"Ollama ist nicht erreichbar ({err}). Läuft der Dienst auf {self.config.ollama_url}?"])
+            return Preparation({}, [self._unreachable_text(err)])
         hw = self.detect()
         try:
             store = CalibrationStore(self.data_dir / "calibration.json")
         except ConfigError as err:
             return Preparation({}, [str(err)], hw, version)
-        choices = choose_profiles(self.config, store, installed, hw.fingerprint())
+        fingerprints = self._fingerprints(hw)
+        choices = choose_profiles(self.config, store, installed, fingerprints)
         for role, choice in choices.items():
             if choice.profile is None:
                 problems.append(f"{role}: kein nutzbares Profil – " + "; ".join(choice.problems))
-        summary = choose_summary_profile(self.config, store, installed, hw.fingerprint())
+        summary = choose_summary_profile(self.config, store, installed, fingerprints)
+        down = getattr(self.gateway, "unreachable", {}) or {}
+        if problems and down:
+            # Mehrere Modellserver, einer davon nicht erreichbar: das erklärt fehlende Modelle besser als „nicht installiert“.
+            problems += [f"{BACKEND_LABELS.get(name, name)} ist nicht erreichbar: {err}" for name, err in down.items()]
         return Preparation(choices, problems, hw, version, summary)
+
+    def _fingerprints(self, primary: hardware.Hardware) -> dict[str, str]:
+        """Hardware-Fingerabdruck je Modellserver. Eine Messung gilt nur für den Rechner, auf dem sie entstanden ist –
+        zeigt z. B. edge0.url auf einen anderen Rechner, sind die Edge0-Messungen ungültig, auch wenn Ollama bleibt."""
+        primary_url = self.config.primary_url
+        result: dict[str, str] = {}
+        for backend in self.config.backends_in_use():
+            url = self.config.backend_url(backend)
+            if backend == self.config.primary_backend or (is_loopback_url(url) and is_loopback_url(primary_url)):
+                result[backend] = primary.fingerprint()  # derselbe Rechner
+            else:
+                result[backend] = self.detect_backend(url).fingerprint()
+        return result
+
+    def _unreachable_text(self, err: GatewayError) -> str:
+        used = self.config.backends_in_use()
+        if len(used) == 1:
+            hint = " (edge0-infer serve, siehe docs/edge0.md)" if used[0] == "edge0" else ""
+            return (f"{BACKEND_LABELS[used[0]]} ist nicht erreichbar ({err}). Läuft der Dienst auf "
+                    f"{self.config.backend_url(used[0])}?{hint}")
+        return f"Kein Modellserver erreichbar ({err}). Laufen die Dienste ({self.config.describe_backends()})?"
 
     # ------------------------------------------------------------------ Hauptschleife
     def serve(self) -> None:
@@ -638,7 +668,8 @@ class Orchestrator:
         prep = self.prepare()
         state.timings.prepare_seconds += time.monotonic() - preparing
         if prep.hardware is not None:
-            reporter.event("Orchestrator", ActivityKind.Metric, f"Hardware: {prep.hardware.describe()} · Ollama {prep.ollama_version}")
+            reporter.event("Orchestrator", ActivityKind.Metric,
+                           f"Hardware: {prep.hardware.describe()} · {version_text(self.gateway, prep.ollama_version)}")
         if prep.problems:
             reporter.chat("Orchestrator", "Der Run kann nicht starten:\n- " + "\n- ".join(prep.problems)
                           + "\n\nKalibrierung: `uv run --project src/python python -m localai.orchestrator.calibrate` "

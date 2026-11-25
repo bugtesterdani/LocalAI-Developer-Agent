@@ -1,7 +1,8 @@
 """Modellprofile, Grenzen und Kalibrierungsstand (Spezifikation §5, §9).
 
-Konfiguration: ``config/models.json``. Modellnamen sind austauschbar; ``latest`` oder fehlende Tags sind
-unzulässig. Ein Profil wird nur verwendet, wenn die Kalibrierung es für dieses Modell (Digest), diesen
+Konfiguration: ``config/models.json``. Modellnamen sind austauschbar; bei Ollama sind ``latest`` oder fehlende
+Tags unzulässig, bei Edge0 ist der Modellname der Alias des Servers (z. B. ``edge0_35b``). Welcher Modellserver ein
+Profil bedient, sagt ``backend`` (oberste Ebene als Standard, je Profil überschreibbar): ``ollama`` oder ``edge0``. Ein Profil wird nur verwendet, wenn die Kalibrierung es für dieses Modell (Digest), diesen
 Kontext und diese Hardware als stabil ausweist – außer ``requireCalibration`` ist ausdrücklich ``false``.
 """
 
@@ -10,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,6 +19,9 @@ from typing import Any
 from localai.orchestrator.history import HistorySettings
 
 ROLES = ("Planner", "Coder", "Tester", "Debugger", "Reviewer")
+BACKENDS = ("ollama", "edge0")
+BACKEND_LABELS = {"ollama": "Ollama", "edge0": "Edge0"}
+_EDGE0_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 
 
 class ConfigError(Exception):
@@ -60,6 +65,19 @@ def validate_model_tag(model: str) -> None:
         raise ConfigError(f"Modell {model!r}: Tag 'latest' ist unzulässig (Spezifikation §9)")
 
 
+def validate_edge0_alias(model: str) -> None:
+    """Edge0 bedient ein Modell unter seinem Alias (``edge0-infer serve --alias``, Standard z. B. ``edge0_35b``)."""
+    if not _EDGE0_ALIAS.match(model):
+        raise ConfigError(f"Edge0-Modell {model!r}: erwartet wird der Alias des Servers, z. B. edge0_35b")
+
+
+def _backend(value: object, where: str) -> str:
+    name = str(value).strip().lower()
+    if name not in BACKENDS:
+        raise ConfigError(f"{where}: unbekannter Modellserver {value!r} (erlaubt: {', '.join(BACKENDS)})")
+    return name
+
+
 @dataclass(frozen=True)
 class ModelProfile:
     name: str
@@ -73,13 +91,16 @@ class ModelProfile:
     # Ausgabe (Denkphase + Antwort) darf den ganzen Rest des Kontexts nutzen; maxOutputTokens ist dann nur der Anteil,
     # der beim Zusammenstellen des Prompts mindestens frei bleibt.
     output_up_to_context: bool = False
+    backend: str = "ollama"  # Modellserver: "ollama" oder "edge0"
+    reasoning_effort: str | None = None  # nur Edge0: reasoning_effort je Anfrage (z. B. "none", "low")
 
     @property
     def key(self) -> str:
         return f"{self.model}@{self.context_tokens}"
 
     def label(self) -> str:
-        return f"{self.name} · {self.model} · {self.context_tokens // 1024}K"
+        server = "" if self.backend == "ollama" else f" · {BACKEND_LABELS[self.backend]}"
+        return f"{self.name} · {self.model} · {self.context_tokens // 1024}K{server}"
 
 
 @dataclass(frozen=True)
@@ -127,6 +148,18 @@ def _steps_per_role(raw: object) -> dict[str, int]:
     return result
 
 
+@dataclass(frozen=True)
+class Edge0Settings:
+    """Abschnitt ``edge0``: Adresse von ``edge0-infer serve`` und Verhalten des Gateways."""
+
+    url: str = "http://127.0.0.1:8000"
+    allow_lan: bool = False
+    api_key_file: str = ""  # absoluter Pfad; Inhalt = Token des Servers (--api-key-file), nötig außerhalb von Loopback
+    stall_warning_seconds: float = 45.0
+    stall_abort_seconds: float = 900.0
+    busy_wait_seconds: float = 600.0  # so lange auf einen belegten Server warten (HTTP 429)
+
+
 @dataclass
 class ModelsConfig:
     ollama_url: str
@@ -140,14 +173,53 @@ class ModelsConfig:
     source: str = ""
     allow_lan: bool = False
     history: HistorySettings = field(default_factory=HistorySettings)
+    backend: str = "ollama"  # Standard-Modellserver für Profile ohne eigenes "backend"
+    edge0: Edge0Settings = field(default_factory=Edge0Settings)
 
-    def gateway(self, url: str | None = None, **overrides):
-        """Gateway mit den Einstellungen dieser Konfiguration (eine Stelle für Adresse und LAN-Freigabe)."""
-        from localai.orchestrator.gateway import OllamaGateway
+    def backends_in_use(self) -> list[str]:
+        """Modellserver der Profile, der Standard (``backend``) zuerst."""
+        used = {p.backend for p in self.profiles.values()}
+        return [b for b in dict.fromkeys((self.backend, *BACKENDS)) if b in used]
 
-        kwargs = {"stall_warning": self.stall_warning_seconds, "stall_abort": self.stall_abort_seconds,
-                  "allow_lan": self.allow_lan, **overrides}
-        return OllamaGateway(url or self.ollama_url, **kwargs)
+    @property
+    def primary_backend(self) -> str:
+        used = self.backends_in_use()
+        return used[0] if used else self.backend
+
+    def backend_url(self, backend: str) -> str:
+        return self.edge0.url if backend == "edge0" else self.ollama_url
+
+    @property
+    def primary_url(self) -> str:
+        """Adresse des Standard-Modellservers (Hardware-Fingerabdruck, Meldungen)."""
+        return self.backend_url(self.primary_backend)
+
+    def describe_backends(self) -> str:
+        return ", ".join(f"{BACKEND_LABELS[b]} {self.backend_url(b)}" for b in self.backends_in_use())
+
+    def gateway(self, url: str | None = None, edge0_url: str | None = None, **overrides):
+        """Gateway mit den Einstellungen dieser Konfiguration (eine Stelle für Adressen und LAN-Freigabe).
+
+        Nutzen alle Profile denselben Modellserver, ist es dessen Gateway; sonst verteilt ein RoutingGateway die
+        Anfragen nach Modell. ``url`` überschreibt die Ollama-Adresse, ``edge0_url`` die Edge0-Adresse."""
+        from localai.orchestrator.gateway import Edge0Gateway, OllamaGateway, RoutingGateway
+
+        gateways = {}
+        for backend in self.backends_in_use():
+            if backend == "ollama":
+                kwargs = {"stall_warning": self.stall_warning_seconds, "stall_abort": self.stall_abort_seconds,
+                          "allow_lan": self.allow_lan, **overrides}
+                gateways[backend] = OllamaGateway(url or self.ollama_url, **kwargs)
+            else:
+                e = self.edge0
+                kwargs = {"stall_warning": e.stall_warning_seconds, "stall_abort": e.stall_abort_seconds,
+                          "allow_lan": e.allow_lan, "api_key_file": e.api_key_file, "busy_wait": e.busy_wait_seconds,
+                          **overrides}
+                gateways[backend] = Edge0Gateway(edge0_url or e.url, **kwargs)
+        if len(gateways) == 1:
+            return next(iter(gateways.values()))
+        routes = {p.model: p.backend for p in self.profiles.values()}
+        return RoutingGateway(gateways, routes, self.primary_backend)
 
     @staticmethod
     def load(path: pathlib.Path) -> ModelsConfig:
@@ -184,19 +256,36 @@ class ModelsConfig:
     @staticmethod
     def parse(raw: dict[str, Any], source: str = "") -> ModelsConfig:
         ollama = raw.get("ollama", {})
+        default_backend = _backend(raw.get("backend", "ollama"), "backend")
         profiles: dict[str, ModelProfile] = {}
+        served_by: dict[str, str] = {}
         for p in raw.get("profiles", []):
+            backend = _backend(p.get("backend", default_backend), f"Profil {p.get('name')}: backend")
+            effort = p.get("reasoningEffort")
+            if effort is not None:
+                if backend != "edge0":
+                    raise ConfigError(f"Profil {p.get('name')}: reasoningEffort gilt nur für Edge0-Profile "
+                                      "(bei Ollama steuert \"think\" die Denkphase)")
+                if not isinstance(effort, str) or not effort.strip():
+                    raise ConfigError(f"Profil {p.get('name')}: reasoningEffort muss ein Text sein, z. B. \"none\"")
             profile = ModelProfile(
                 name=str(p["name"]), model=str(p["model"]), context_tokens=int(p["contextTokens"]),
                 max_output_tokens=int(p["maxOutputTokens"]), think=p.get("think"),
                 offload=bool(p.get("offload", False)), temperature=float(p.get("temperature", 0.2)),
                 output_up_to_context=bool(p.get("outputUpToContext", False)),
-                options=tuple(sorted((str(k), float(v)) for k, v in (p.get("options") or {}).items())))
-            validate_model_tag(profile.model)
+                options=tuple(sorted((str(k), float(v)) for k, v in (p.get("options") or {}).items())),
+                backend=backend, reasoning_effort=effort.strip() if isinstance(effort, str) else None)
+            if backend == "edge0":
+                validate_edge0_alias(profile.model)
+            else:
+                validate_model_tag(profile.model)
             if profile.context_tokens < 2048 or profile.max_output_tokens >= profile.context_tokens:
                 raise ConfigError(f"Profil {profile.name}: Kontext/Ausgabe unplausibel")
             if profile.name in profiles:
                 raise ConfigError(f"Profil {profile.name} doppelt")
+            if served_by.setdefault(profile.model, backend) != backend:
+                raise ConfigError(f"Modell {profile.model} steht in Profilen mit verschiedenen Modellservern – je Modell "
+                                  "nur ein backend")
             profiles[profile.name] = profile
         if not profiles:
             raise ConfigError("Keine Modellprofile konfiguriert")
@@ -232,13 +321,38 @@ class ModelsConfig:
             validate_loopback(url, bool(ollama.get("allowLan", False)))
         except GatewayError as err:
             raise ConfigError(f"ollama.url: {err}") from err
+        edge0 = _edge0(raw.get("edge0") or {})
         return ModelsConfig(
             ollama_url=url,
             stall_warning_seconds=float(ollama.get("stallWarningSeconds", 45)),
             stall_abort_seconds=float(ollama.get("stallAbortSeconds", 900)),
             profiles=profiles, roles=roles, limits=limits, calibration=calibration,
             require_calibration=bool(raw.get("requireCalibration", True)), source=source,
-            allow_lan=bool(ollama.get("allowLan", False)), history=history)
+            allow_lan=bool(ollama.get("allowLan", False)), history=history, backend=default_backend, edge0=edge0)
+
+
+def _edge0(raw: object) -> Edge0Settings:
+    if not isinstance(raw, dict):
+        raise ConfigError("edge0 muss ein Objekt sein, z. B. {\"url\": \"http://127.0.0.1:8000\"}")
+    from localai.orchestrator.gateway import GatewayError, validate_loopback
+
+    defaults = Edge0Settings()
+    url = str(raw.get("url", defaults.url))
+    allow_lan = bool(raw.get("allowLan", False))
+    try:
+        validate_loopback(url, allow_lan, "Edge0", "edge0")
+    except GatewayError as err:
+        raise ConfigError(f"edge0.url: {err}") from err
+    key_file = raw.get("apiKeyFile") or ""
+    if not isinstance(key_file, str):
+        raise ConfigError("edge0.apiKeyFile muss ein Pfad sein")
+    if key_file and not (pathlib.PureWindowsPath(key_file).is_absolute() or pathlib.PurePosixPath(key_file).is_absolute()):
+        raise ConfigError(f"edge0.apiKeyFile muss ein absoluter Pfad sein, nicht {key_file!r}")
+    return Edge0Settings(
+        url=url, allow_lan=allow_lan, api_key_file=key_file,
+        stall_warning_seconds=float(raw.get("stallWarningSeconds", defaults.stall_warning_seconds)),
+        stall_abort_seconds=float(raw.get("stallAbortSeconds", defaults.stall_abort_seconds)),
+        busy_wait_seconds=float(raw.get("busyWaitSeconds", defaults.busy_wait_seconds)))
 
 
 def _history(raw: object, profiles: dict[str, ModelProfile]) -> HistorySettings:
@@ -346,14 +460,26 @@ class ProfileChoice:
         return f"{self.profile.label()} ({cal})"
 
 
-def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str], hardware_fingerprint: str,
-            role: str, names: list[str] | tuple[str, ...]) -> ProfileChoice:
+def _fingerprint_for(hardware_fingerprint: str | dict[str, str], backend: str) -> str:
+    """Ein Fingerabdruck für alle Profile oder einer je Modellserver (``{"ollama": …, "edge0": …}``): Laufen Ollama und
+    Edge0 auf verschiedenen Rechnern, gilt eine Messung nur für den Rechner des Servers, der das Profil bedient."""
+    if isinstance(hardware_fingerprint, str):
+        return hardware_fingerprint
+    return hardware_fingerprint.get(backend, "")
+
+
+def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
+            hardware_fingerprint: str | dict[str, str], role: str, names: list[str] | tuple[str, ...]) -> ProfileChoice:
     """Erstes Profil aus ``names``, das installiert und (falls verlangt) stabil kalibriert ist."""
     problems: list[str] = []
     for name in names:
         profile = config.profiles[name]
         if profile.model not in installed:
-            problems.append(f"{profile.label()}: Modell nicht installiert (ollama pull {profile.model})")
+            if profile.backend == "edge0":
+                problems.append(f"{profile.label()}: Edge0 bietet das Modell nicht an (läuft edge0-infer serve mit "
+                                f"--alias {profile.model}?)")
+            else:
+                problems.append(f"{profile.label()}: Modell nicht installiert (ollama pull {profile.model})")
             continue
         m = store.get(profile)
         if m is None:
@@ -364,7 +490,7 @@ def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, 
             stale = []
             if m.digest and installed[profile.model] and m.digest != installed[profile.model]:
                 stale.append("Modell wurde seit der Kalibrierung geändert")
-            if m.hardware != hardware_fingerprint:
+            if m.hardware != _fingerprint_for(hardware_fingerprint, profile.backend):
                 stale.append("Hardware hat sich seit der Kalibrierung geändert")
             if not m.stable:
                 stale.append(f"nicht stabil ({m.reason})")
@@ -380,16 +506,17 @@ def _usable(config: ModelsConfig, store: CalibrationStore, installed: dict[str, 
 
 
 def choose_profiles(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
-                    hardware_fingerprint: str) -> dict[str, ProfileChoice]:
+                    hardware_fingerprint: str | dict[str, str]) -> dict[str, ProfileChoice]:
     """Wählt je Rolle das erste Profil der Vorzugsliste, das installiert und (falls verlangt) stabil kalibriert ist.
 
-    ``installed``: Modellname → Digest aus ``/api/tags``.
+    ``installed``: Modellname → Digest aus ``/api/tags`` (Edge0: Alias aus ``/v1/models``, ohne Digest).
+    ``hardware_fingerprint``: einer für alle Profile oder einer je Modellserver (siehe ``_fingerprint_for``).
     """
     return {role: _usable(config, store, installed, hardware_fingerprint, role, config.roles[role]) for role in ROLES}
 
 
 def choose_summary_profile(config: ModelsConfig, store: CalibrationStore, installed: dict[str, str],
-                           hardware_fingerprint: str) -> ProfileChoice | None:
+                           hardware_fingerprint: str | dict[str, str]) -> ProfileChoice | None:
     """Eigenes Modell zum Zusammenfassen der Agentennotizen; None = keins eingetragen (Modell der Rolle)."""
     if config.history.mode != "summary" or not config.history.summary_profiles:
         return None

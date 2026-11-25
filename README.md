@@ -1,6 +1,7 @@
 # Local AI Developer Agent
 
-Lokaler Entwicklungsagent mit fünf Rollen (Planner, Coder, Tester, Debugger, Reviewer) auf Basis von Ollama.
+Lokaler Entwicklungsagent mit fünf Rollen (Planner, Coder, Tester, Debugger, Reviewer) auf Basis von Ollama
+(wahlweise Edge0, siehe [docs/edge0.md](docs/edge0.md)).
 Jeder Tool-Aufruf braucht eine ausdrückliche Freigabe; ausgeführt wird nur in einer Offline-VM – unter Windows mit
 Hyper-V, auf einem Linux-Host mit QEMU.
 
@@ -45,7 +46,7 @@ Einzelheiten je Meilenstein: [Umsetzungsplan](docs/Umsetzungsplan.md) und die Pr
 ## Schnellstart
 
 Voraussetzungen: .NET 10 SDK, [uv](https://docs.astral.sh/uv/) (installiert bei Bedarf auch Python), Git; für Modelle
-Ollama. Unter Linux zusätzlich `scripts/linux/install-host.sh` (QEMU, dosfstools, mtools, bubblewrap).
+Ollama oder [Edge0](docs/edge0.md). Unter Linux zusätzlich `scripts/linux/install-host.sh` (QEMU, dosfstools, mtools, bubblewrap).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\test.ps1    # Windows: alles bauen und testen

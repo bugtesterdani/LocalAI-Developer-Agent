@@ -34,6 +34,7 @@ PAGES = {
     "docs/glossar.md": "Glossar",
     "docs/installation.md": "Installation",
     "docs/inbetriebnahme-neuer-rechner.md": "Inbetriebnahme-Windows",
+    "docs/edge0.md": "Edge0",
     "toolchains/README.md": "Toolchains",
     "docs/Local-AI-Developer-Agent-Projektspezifikation.md": "Projektspezifikation",
     "docs/Umsetzungsplan.md": "Umsetzungsplan",
@@ -59,6 +60,7 @@ SIDEBAR = """\
 **Einrichtung**
 - [Installation (Pakete)](Installation)
 - [Inbetriebnahme (Windows)](Inbetriebnahme-Windows)
+- [Edge0 als Modellserver](Edge0)
 - [Linux-Host (M10)](Pruefung-M10#0-einrichtung)
 - [Toolchains](Toolchains)
 
